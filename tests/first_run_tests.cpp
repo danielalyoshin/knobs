@@ -428,7 +428,7 @@ TEST(ProblemsWithObsComeFirst) {
   snapshot.state = State::kObsUnsupported;
   snapshot.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
   view = ObsUser(snapshot).View(snapshot);
-  CHECK(view.page == Page::kObsUnsupported && Contains(view.content, "supports OBS 34.0.0."));
+  CHECK(view.page == Page::kObsUnsupported && Contains(view.content, "supports OBS 34.0.0, from <a "));
 
   snapshot.state = State::kNeedsSetup;
   snapshot.setup = SetupNeed::kObsSettings;
@@ -519,7 +519,10 @@ TEST(AnUnsupportedObsOffersAnotherFolder) {
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Choose folder…"}));
   CHECK(view.default_button == kButtonTryAgain);
   CHECK(Contains(view.content, "If a supported OBS is installed somewhere else, choose that folder."));
-  CHECK(view.content.ends_with(std::format("Or wait for a {} update that supports OBS 34.0.0.", kDisplayName)));
+  CHECK(view.content.ends_with(std::format("Or wait for a {0} update that supports OBS 34.0.0, from <a "
+                                           "href=\"https://github.com/danielalyoshin/knobs/releases/latest\">{0}'s "
+                                           "latest release</a>.",
+                                           kDisplayName)));
   CHECK(first_run.Click(kButtonChooseObs, 0, false, snapshot).kind == Kind::kChooseObs);
   CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
 

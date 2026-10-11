@@ -322,10 +322,12 @@ PageView ObsUnsupported(const core::Snapshot& snapshot) {
   view.icon = PageIcon::kWarning;
   view.instruction = "This version of OBS isn't supported";
   const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
-  // Only an OBS newer than knobs supports can be waited for.
+  // Only an OBS newer than knobs supports can be waited for. Without an
+  // update check, the link is how people find the update.
   const std::string wait = runtime::IsNewerThanSupportedObs(snapshot.obs.version)
-                               ? std::format(" Or wait for a {} update that supports OBS {}.", kDisplayName,
-                                             snapshot.obs.version.ToString())
+                               ? std::format(" Or wait for a {0} update that supports OBS {1}, from <a href=\"{2}\">{0}'s "
+                                             "latest release</a>.",
+                                             kDisplayName, snapshot.obs.version.ToString(), kLatestReleaseUrl)
                                : "";
   view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again")};
   if (snapshot.settings.obs_dir) {

@@ -23,6 +23,10 @@ inline constexpr std::wstring_view kDisplayNameW = L"" KNOBS_DISPLAY_NAME;
 // The setup guide: the README's Setup section, which the first run links to.
 inline constexpr std::string_view kSetupGuideUrl = "https://github.com/danielalyoshin/knobs#setup";
 
+// The latest release, where an update comes from, which the first run links
+// to when OBS is newer than this version supports.
+inline constexpr std::string_view kLatestReleaseUrl = "https://github.com/danielalyoshin/knobs/releases/latest";
+
 }  // namespace knobs
 
 #endif  // RC_INVOKED
