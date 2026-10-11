@@ -32,14 +32,23 @@ class ObsRuntime {
   // Hosts should also call SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)
   // once at startup, so plain LoadLibrary calls skip PATH and the working
   // directory too.
-  static Result<std::unique_ptr<ObsRuntime>> Load(const std::filesystem::path& runtime_root);
+  //
+  // `install_version` is the version of the install the copy was made from
+  // (ObsInstall::version), which decides where its modules are.
+  static Result<std::unique_ptr<ObsRuntime>> Load(const std::filesystem::path& runtime_root,
+                                                  const ObsVersion& install_version);
 
   ~ObsRuntime();
   ObsRuntime(const ObsRuntime&) = delete;
   ObsRuntime& operator=(const ObsRuntime&) = delete;
 
   const ObsApi& api() const { return api_; }
+  // libobs's API version (obs_get_version).
   const ObsVersion& version() const { return version_; }
+  // From obs.dll's version resource, as the copy was laid out by
+  // (HasCoreModules). It can differ from version() in a build whose
+  // obs-config.h lags its tag.
+  const ObsVersion& install_version() const { return install_version_; }
   const std::filesystem::path& root() const { return root_; }
 
  private:
@@ -47,6 +56,7 @@ class ObsRuntime {
 
   ObsApi api_;
   ObsVersion version_;
+  ObsVersion install_version_;
   std::filesystem::path root_;
   void* module_ = nullptr;          // HMODULE
   void* dll_directory_ = nullptr;   // DLL_DIRECTORY_COOKIE

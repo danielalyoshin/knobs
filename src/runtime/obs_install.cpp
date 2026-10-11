@@ -127,11 +127,20 @@ Result<ObsInstall> FindObsInstall() { return FindObsInstall(ObsInstallCandidates
 
 Result<ObsInstall> FindObsInstall(const std::vector<fs::path>& candidates) {
   std::string failures;
+  // An unsupported OBS passes InspectObsInstall without its files checked,
+  // so it may be no more than a leftover obs.dll. A supported one found later
+  // wins over it.
+  std::optional<ObsInstall> unsupported;
   for (const fs::path& candidate : candidates) {
     auto install = InspectObsInstall(candidate);
-    if (install) return install;
+    if (install && IsSupportedObsVersion(install->version)) return install;
+    if (install) {
+      if (!unsupported) unsupported = *install;
+      continue;
+    }
     failures += "\n  " + install.error();
   }
+  if (unsupported) return *unsupported;
   return Error{std::format(
       "OBS Studio wasn't found. {} needs OBS Studio installed. If it's somewhere unusual "
       "(Steam, portable), choose its folder manually.{}",

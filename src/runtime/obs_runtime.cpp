@@ -34,11 +34,13 @@ class WorkingDirectoryGuard {
 
 }  // namespace
 
-Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path& runtime_root) {
+Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path& runtime_root,
+                                                     const ObsVersion& install_version) {
   const std::filesystem::path bin = BinDir(runtime_root);
   const std::filesystem::path dll = ObsDll(runtime_root);
   std::unique_ptr<ObsRuntime> runtime(new ObsRuntime());
   runtime->root_ = runtime_root;
+  runtime->install_version_ = install_version;
 
   runtime->dll_directory_ = AddDllDirectory(bin.c_str());
   if (!runtime->dll_directory_) {

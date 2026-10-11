@@ -30,8 +30,9 @@ Result<ObsInstall> InspectObsInstall(const std::filesystem::path& folder);
 // validated. Empty means OBS doesn't appear to be installed at all.
 std::vector<std::filesystem::path> ObsInstallCandidates();
 
-// The first candidate that passes InspectObsInstall(). Steam and portable
-// installs need PickObsInstallFolder().
+// The first candidate that passes InspectObsInstall() with a supported
+// version, else the first that passes with an unsupported one. Steam and
+// portable installs need PickObsInstallFolder().
 Result<ObsInstall> FindObsInstall();
 // The same, over candidates already listed by ObsInstallCandidates().
 Result<ObsInstall> FindObsInstall(const std::vector<std::filesystem::path>& candidates);

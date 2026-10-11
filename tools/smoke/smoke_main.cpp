@@ -419,7 +419,7 @@ int Run(const Options& options) {
   (*log)->set_verbose(options.verbose);
 
   // Load obs.dll from the copy.
-  auto runtime = ObsRuntime::Load(copy->root);
+  auto runtime = ObsRuntime::Load(copy->root, install->version);
   copy_lock.reset();
   if (!runtime) {
     Check(false, "load obs.dll", runtime.error());
@@ -429,6 +429,12 @@ int Run(const Options& options) {
   Check(true, "load obs.dll",
         std::format("libobs {}, {} functions resolved, supported ({})", api.obs_get_version_string(),
                     ObsApiSize(), DescribeSupportedObsVersions()));
+  // OBS 33 warns in the log on every call to the monitoring function 32.2
+  // needs, so its own should be there (live_chain.cpp, SetMonitoring).
+  const bool monitoring_enabled = api.obs_source_set_monitoring_enabled != nullptr;
+  Check(monitoring_enabled || (*runtime)->version() < ObsVersion{33, 0, 0}, "monitoring",
+        monitoring_enabled ? "on and off with obs_source_set_monitoring_enabled (OBS 33)"
+                           : "Monitor Only, with obs_source_set_monitoring_type (OBS 32.2)");
 
   {
     LogAttachment attachment(api, **log);

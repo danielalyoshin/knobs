@@ -170,6 +170,22 @@ TEST(InspectRejectsIncompleteInstall) {
   CHECK(!install.ok() && install.error().find("obs.dll") != std::string::npos);
 }
 
+TEST(FindFallsBackToAnUnsupportedInstall) {
+  // Windows' own version.dll as obs.dll: a version no OBS has, so not one
+  // knobs supports, and with none of the rest of an install.
+  TempDir dir(L"find");
+  const fs::path unsupported = dir.path / L"leftover";
+  wchar_t system[MAX_PATH];
+  GetSystemDirectoryW(system, MAX_PATH);
+  fs::create_directories(unsupported / L"bin" / L"64bit");
+  fs::copy_file(fs::path(system) / L"version.dll", unsupported / L"bin" / L"64bit" / L"obs.dll");
+
+  // With nothing supported, it's the one found, so knobs can say it isn't
+  // supported; a folder that isn't an install doesn't stop the search.
+  auto found = FindObsInstall({dir.path / L"empty", unsupported});
+  CHECK(found.ok() && found->root == unsupported && !IsSupportedObsVersion(found->version));
+}
+
 // --- Runtime copy --------------------------------------------------------------
 
 // A fake install whose "DLLs" are copies of this test binary: real PE files
@@ -637,7 +653,7 @@ TEST(FailedLoadRestoresWorkingDirectory) {
   // none of the libobs functions.
   const fs::path root = MakeFakeInstall(dir.path / L"runtime");
   const fs::path before = fs::current_path();
-  auto runtime = ObsRuntime::Load(root);
+  auto runtime = ObsRuntime::Load(root, {32, 2, 2});
   CHECK(!runtime.ok());
   CHECK(!runtime.ok() && runtime.error().find("missing") != std::string::npos);
   CHECK(fs::current_path() == before);
