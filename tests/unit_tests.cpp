@@ -170,20 +170,77 @@ TEST(InspectRejectsIncompleteInstall) {
   CHECK(!install.ok() && install.error().find("obs.dll") != std::string::npos);
 }
 
-TEST(FindFallsBackToAnUnsupportedInstall) {
-  // Windows' own version.dll as obs.dll: a version no OBS has, so not one
-  // knobs supports, and with none of the rest of an install.
-  TempDir dir(L"find");
-  const fs::path unsupported = dir.path / L"leftover";
+// A leftover obs.dll and nothing else: Windows' own version.dll, a version no
+// OBS has, so not one knobs supports.
+fs::path MakeLeftoverObs(const fs::path& root) {
   wchar_t system[MAX_PATH];
   GetSystemDirectoryW(system, MAX_PATH);
-  fs::create_directories(unsupported / L"bin" / L"64bit");
-  fs::copy_file(fs::path(system) / L"version.dll", unsupported / L"bin" / L"64bit" / L"obs.dll");
+  fs::create_directories(root / L"bin" / L"64bit");
+  fs::copy_file(fs::path(system) / L"version.dll", root / L"bin" / L"64bit" / L"obs.dll");
+  return root;
+}
 
-  // With nothing supported, it's the one found, so knobs can say it isn't
-  // supported; a folder that isn't an install doesn't stop the search.
-  auto found = FindObsInstall({dir.path / L"empty", unsupported});
-  CHECK(found.ok() && found->root == unsupported && !IsSupportedObsVersion(found->version));
+enum class Layout { kObsPlugins, kCore };
+
+// An install with everything InspectObsInstall checks for, laid out one way
+// or the other. Its obs.dll is fake-obs-<major>.dll, next to this binary,
+// which has nothing but a version; the rest are empty.
+fs::path MakeInspectableInstall(const fs::path& root, int major, Layout layout) {
+  const fs::path bin = root / L"bin" / L"64bit";
+  fs::create_directories(bin);
+  fs::copy_file(SelfPath().parent_path() / std::format(L"fake-obs-{}.dll", major), bin / L"obs.dll");
+  WriteFile(bin / L"libobs-d3d11.dll", "");
+  fs::create_directories(root / L"data" / L"libobs");
+  for (const std::wstring module : {L"win-wasapi", L"obs-filters"}) {
+    if (layout == Layout::kCore) {
+      WriteFile(root / L"core" / module / (module + L".dll"), "");
+      fs::create_directories(root / L"core" / module / L"data");
+    } else {
+      WriteFile(root / L"obs-plugins" / L"64bit" / (module + L".dll"), "");
+      fs::create_directories(root / L"data" / L"obs-plugins" / module);
+    }
+  }
+  return root;
+}
+
+TEST(InspectLooksForModulesWhereTheVersionKeepsThem) {
+  TempDir dir(L"inspect-layout");
+  auto obs32 = InspectObsInstall(MakeInspectableInstall(dir.path / L"32", 32, Layout::kObsPlugins));
+  CHECK(obs32.ok() && obs32->version == (ObsVersion{32, 2, 2}));
+  auto obs33 = InspectObsInstall(MakeInspectableInstall(dir.path / L"33", 33, Layout::kCore));
+  CHECK(obs33.ok() && obs33->version == (ObsVersion{33, 0, 0}));
+
+  // Each laid out as the other is incomplete.
+  auto obs32_core = InspectObsInstall(MakeInspectableInstall(dir.path / L"32-core", 32, Layout::kCore));
+  CHECK(!obs32_core.ok() &&
+        obs32_core.error().find(R"(obs-plugins\64bit\win-wasapi.dll is missing)") != std::string::npos);
+  auto obs33_plugins = InspectObsInstall(MakeInspectableInstall(dir.path / L"33-plugins", 33, Layout::kObsPlugins));
+  CHECK(!obs33_plugins.ok() &&
+        obs33_plugins.error().find(R"(core\win-wasapi\win-wasapi.dll is missing)") != std::string::npos);
+
+  // So is OBS 33 without a module's data.
+  fs::remove_all(dir.path / L"33" / L"core" / L"obs-filters" / L"data");
+  obs33 = InspectObsInstall(dir.path / L"33");
+  CHECK(!obs33.ok() && obs33.error().find(R"(core\obs-filters\data is missing)") != std::string::npos);
+}
+
+TEST(FindPrefersASupportedInstall) {
+  // A leftover obs.dll found first doesn't hide a supported OBS found later.
+  TempDir dir(L"find-supported");
+  const fs::path leftover = MakeLeftoverObs(dir.path / L"leftover");
+  const fs::path supported = MakeInspectableInstall(dir.path / L"obs", 33, Layout::kCore);
+  auto found = FindObsInstall({leftover, supported});
+  CHECK(found.ok() && found->root == supported && found->version == (ObsVersion{33, 0, 0}));
+}
+
+TEST(FindFallsBackToAnUnsupportedInstall) {
+  // With nothing supported, the unsupported one is found, so knobs can say
+  // it isn't supported; a folder that isn't an install doesn't stop the
+  // search.
+  TempDir dir(L"find-unsupported");
+  const fs::path leftover = MakeLeftoverObs(dir.path / L"leftover");
+  auto found = FindObsInstall({dir.path / L"empty", leftover});
+  CHECK(found.ok() && found->root == leftover && !IsSupportedObsVersion(found->version));
 }
 
 // --- Runtime copy --------------------------------------------------------------

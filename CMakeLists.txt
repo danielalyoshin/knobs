@@ -134,6 +134,20 @@ add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_
 target_link_libraries(knobs-tests PRIVATE knobs_tray_fake delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
+# Stand-ins for obs.dll, next to the test binary: fake-obs-<major>.dll has
+# nothing but a version, one for each layout of an OBS install.
+foreach(version IN ITEMS 32.2.2 33.0.0)
+  string(REPLACE "." ";" parts "${version}")
+  list(GET parts 0 major)
+  list(GET parts 1 minor)
+  list(GET parts 2 patch)
+  add_library(fake-obs-${major} SHARED tests/fake_obs.rc)
+  target_compile_definitions(fake-obs-${major} PRIVATE FAKE_OBS_MAJOR=${major} FAKE_OBS_MINOR=${minor}
+                                                       FAKE_OBS_PATCH=${patch})
+  set_target_properties(fake-obs-${major} PROPERTIES LINKER_LANGUAGE CXX)
+  target_link_options(fake-obs-${major} PRIVATE /NOENTRY)
+  add_dependencies(knobs-tests fake-obs-${major})
+endforeach()
 
 enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
