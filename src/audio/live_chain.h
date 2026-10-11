@@ -61,8 +61,12 @@ struct ChainInfo {
 ChainInfo DescribeChain(const runtime::ObsApi& api, obs_source_t* source);
 
 // knobs's whole audio path: a loaded source monitored to libobs's monitoring
-// device, and active. libobs does all the processing. MONITOR_ONLY keeps the
-// audio out of libobs's output mix, so the audio thread never touches it.
+// device, and active. libobs does all the processing. The monitor takes the
+// audio from the source's capture callback, before libobs's audio thread.
+// On OBS 32.2, Monitor Only keeps the audio out of the source's output
+// buffers, so the audio thread never touches it. OBS 33 has no Monitor Only:
+// the audio thread takes and discards the audio each tick, and since the
+// source is on no output channel, nothing mixes it (docs/design.md, OBS 33.0).
 // The monitor only plays while the source is active (it checks activate_refs
 // in wasapi-output.c); nothing else needs activation, which without video
 // never runs the source's activate callback.

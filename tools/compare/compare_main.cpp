@@ -62,7 +62,8 @@ records to a 32-bit float WAV. Then lines the two up and measures the
 difference.
 
 OBS runs from a private copy of its install in portable mode, so your OBS
-settings aren't touched. The copy is about 125 MB, made once per OBS version.
+settings aren't touched. The copy is made once per OBS version: about 130 MB
+for OBS 32, and 480 MB for OBS 33, which needs its browser source to start.
 OBS starts minimized to the tray, records for the length of the input and
 closes. No audio device is opened, and nothing plays.
 

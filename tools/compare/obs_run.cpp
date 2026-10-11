@@ -40,7 +40,11 @@ constexpr char kSourceUuid[] = "6b6e6f62-7300-4000-8000-000000000001";
 // Next to bin\ (obs-main.cpp). The copy gets its own.
 constexpr std::array<std::wstring_view, 4> kPortableMarkers = {L"portable_mode", L"obs_portable_mode",
                                                                L"portable_mode.txt", L"obs_portable_mode.txt"};
-// The browser source and its Chromium files in obs-plugins\64bit.
+// The browser source and its Chromium files in obs-plugins\64bit. OBS 33
+// keeps them in core\obs-browser, and the copy keeps that, as it keeps
+// core\obs-websocket: OBS 33 won't start unless every core module loads, and
+// libobs stops loading them at the first one missing (PluginManager.cpp,
+// obs-core-modules-loader-win.c).
 constexpr std::array<std::wstring_view, 10> kBrowserFiles = {
     L"libcef.dll",  L"chrome_elf.dll",     L"libegl.dll",          L"libglesv2.dll",
     L"icudtl.dat",  L"snapshot_blob.bin",  L"v8_context_snapshot.bin", L"vk_swiftshader.dll",

@@ -18,7 +18,7 @@ cmake --build --preset debug  # or: release
 ctest --preset debug          # unit tests, then smoke, harness, import and core tests (these skip if OBS isn't installed)
 ```
 
-To run the smoke, harness, import and core tests against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`; configuring again without it (`-DKNOBS_TEST_OBS_DIR=`) goes back to the installed OBS. CI tests the newest tested OBS installed and the oldest supported one unzipped (`build.yml`).
+To run the smoke, harness, import and core tests against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`. CMake keeps it for later configures, so go back to the installed OBS with `-DKNOBS_TEST_OBS_DIR=` (empty). CI tests the newest tested OBS installed and the oldest supported one unzipped (`build.yml`).
 
 The build puts the tray app, `knobs.exe`, in `build\x64\<config>\`. It runs the real core: unless OBS is open or something needs setting up, it opens the mic. Use `knobs-tray` to look at the tray and the first run instead.
 

@@ -199,7 +199,7 @@ cmake --build --preset release   # or: debug
 ctest --preset release           # tests that need OBS skip if it isn't installed
 ```
 
-The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\`). No test opens an audio device. To run the tests that need OBS against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`.
+The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\`). No test opens an audio device. To run the tests that need OBS against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`, and with `-DKNOBS_TEST_OBS_DIR=` to go back to the installed one.
 
 ### Packaging
 
