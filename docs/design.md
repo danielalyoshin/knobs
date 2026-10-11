@@ -1,6 +1,6 @@
 # knobs design
 
-How knobs is designed and why. The [README](../README.md) has the short version. OBS's behavior is checked against the obs-studio source at the tag of the tested version, OBS 32.2.2, which the measurements below also use.
+How knobs is designed and why. The [README](../README.md) has the short version. OBS's behavior is checked against the obs-studio source at the tags of the tested versions, OBS 32.2.2 and 33.0.0-rc1. The measurements below use 32.2.2 unless they say otherwise.
 
 ## Overview
 
@@ -36,7 +36,7 @@ flowchart TB
       direction TB
       source["Mic source<br>wasapi_input_capture<br>Mono, balance, volume"]
       filters["The mic's filters, in OBS's order"]
-      monitor["Audio monitoring<br>Monitor Only"]
+      monitor["Audio monitoring"]
       source --> filters --> monitor
     end
   end
@@ -67,7 +67,9 @@ The dev tools in `tools/` run each layer on its own, from `knobs-smoke` (the run
 
 knobs ships no libobs. It finds OBS through the installer's registry key (`HKLM\SOFTWARE\OBS Studio`), then `C:\Program Files\obs-studio`, and the user picks the folder of a Steam or portable OBS. The version comes from `obs.dll`'s version resource, so nothing in the install is loaded.
 
-knobs loads OBS from a copy in `%LocalAppData%\knobs\runtime\<obs-version>\`, never from the install, so a running knobs never blocks an OBS update. The copy mirrors the install's layout, so libobs's relative data lookups still work. What's copied comes from the PE import tables: the import closure of `obs.dll`, `libobs-d3d11.dll` and the two modules, limited to DLLs the install ships, plus their data folders. For 32.2.2 that's 200 files and 53.6 MB, mostly FFmpeg, which `obs.dll` imports.
+knobs loads OBS from a copy in `%LocalAppData%\knobs\runtime\<obs-version>\`, never from the install, so a running knobs never blocks an OBS update. The copy mirrors the install's layout, so libobs's relative data lookups still work. What's copied comes from the PE import tables: the import closure of `obs.dll`, `libobs-d3d11.dll` and the two modules, limited to DLLs the install ships, plus their data folders. For 32.2.2 that's 200 files and 53.6 MB, and for 33.0.0-rc1 201 files and 53.6 MB, mostly FFmpeg, which `obs.dll` imports.
+
+Where the modules are depends on the version. OBS 33 gives each module a folder of its own, `core\<module>`, with its data in `core\<module>\data`. Earlier versions keep them together in `obs-plugins\64bit`, with their data in `data\obs-plugins\<module>`. So knobs reads `obs.dll`'s version first, then looks for the rest where that version keeps it (`HasCoreModules`). An OBS it doesn't support is reported as unsupported, not as an incomplete install, since its files may be somewhere knobs doesn't know.
 
 A copy is built in a staging folder and finished by a manifest written last, so an interrupted copy is never used. The manifest records each file's size and timestamp, and a copy is reused only while the install still matches, since OBS drops beta and RC suffixes from its version resource. A mutex (`RuntimeCopyLock`), held until `obs.dll` has loaded, serializes making, loading and pruning copies across processes. A copy being replaced is first renamed aside, which fails while libobs works in it, so a copy in use is never half replaced. Once libobs runs, knobs.exe prunes copies of other versions and leftovers in the background.
 
@@ -75,7 +77,7 @@ A new OBS version needs a new process, because libobs never unloads module DLLs 
 
 ### Loading libobs
 
-knobs resolves the libobs functions it uses with `GetProcAddress` into a function table (`KNOBS_OBS_API` in `src/runtime/obs_api.h`), typed from the vendored headers in `third_party/libobs`. With no import library, a missing export fails with a clear message instead of at process load. `obs.dll`'s dependencies resolve from the copy and the system, never from PATH or the install. libobs finds its data relative to the working directory (`find_libobs_data_file`, `obs-windows.c`), so that's the copy's `bin\64bit` for as long as libobs runs.
+knobs resolves the libobs functions it uses with `GetProcAddress` into a function table (`KNOBS_OBS_API` in `src/runtime/obs_api.h`), typed from the vendored headers in `third_party/libobs`. With no import library, a missing export fails with a clear message instead of at process load. An export only some supported versions have, such as 33.0's `obs_source_set_monitoring_enabled`, is optional instead (`KNOBS_OBS_API_OPTIONAL`): it's null where libobs lacks it, and knobs falls back. `obs.dll`'s dependencies resolve from the copy and the system, never from PATH or the install. libobs finds its data relative to the working directory (`find_libobs_data_file`, `obs-windows.c`), so that's the copy's `bin\64bit` for as long as libobs runs.
 
 knobs checks the OBS version before copying and again after loading, and refuses an unsupported one (Compatibility). It opens only two modules, by absolute path:
 
@@ -84,7 +86,7 @@ knobs checks the OBS version before copying and again after loading, and refuses
 | `win-wasapi` | `wasapi_input_capture`, the mic source |
 | `obs-filters` | the audio filters, from noise suppression to the limiter |
 
-It doesn't load `obs-vst`, or `nv-filters`, where OBS 32 keeps NVIDIA's noise removal. Since knobs never calls `obs_load_all_modules()`, OBS's safe-mode and disabled-module lists don't apply.
+It doesn't load `obs-vst`, or `nv-filters`, where OBS 32 keeps NVIDIA's noise removal. Since knobs never calls `obs_load_all_modules()`, or 33.0's `obs_load_core_modules()`, OBS's safe-mode and disabled-module lists don't apply.
 
 ### The libobs session
 
@@ -94,7 +96,7 @@ It doesn't load `obs-vst`, or `nv-filters`, where OBS 32 keeps NVIDIA's noise re
 4. No `obs_reset_video()` (Audio without video).
 5. `obs_open_module()` and `obs_init_module()` for the two modules, then `obs_post_load_modules()`.
 6. `obs_load_private_source()` with the mic's saved source (Loading the mic).
-7. `obs_source_set_monitoring_type()` to Monitor Only, and `obs_source_inc_active()`, since the monitor plays only while the source is active.
+7. Monitoring on, with `obs_source_set_monitoring_enabled()` on OBS 33 and `obs_source_set_monitoring_type()` to Monitor Only on 32.2, and `obs_source_inc_active()`, since the monitor plays only while the source is active.
 8. `obs_set_audio_monitoring_device()` with the cable.
 9. At shutdown, release the sources and drain libobs's destroy queue as `obs_wait_for_destroy_queue` does, then `obs_shutdown()`, which waits for that queue only when there's a video thread. Otherwise a source could be destroyed after its module has unloaded.
 
@@ -102,7 +104,7 @@ A start that fails before any module loads can be tried again in the same proces
 
 ## Importing the mic
 
-The importer reads OBS's settings as OBS 32.2.2's frontend does, and writes nothing. `knobs-import` runs it and reports each step.
+The importer reads OBS's settings as OBS's frontend does, which is the same in 32.2.2 and 33.0, and writes nothing. `knobs-import` runs it and reports each step.
 
 ### OBS's settings
 
@@ -225,7 +227,7 @@ Windows keeps a user's programs running when another user signs in, and the cabl
 The first run is one `TaskDialogIndirect` window that changes pages with `TDM_NAVIGATE_PAGE`. It stays light in dark mode, which is fine for a window seen once. It offers two doors, "I set up my mic in OBS" and "I'm new to OBS", each noting what knobs found, and the one that fits is the default.
 
 - The first door asks only what it needs: anything that blocks the rest, such as OBS not found, then which mic, when there are several, which cable, when OBS doesn't monitor to a connected one, and the warnings that change what to expect. With no cable installed, it links to VB-Cable and moves on when one appears.
-- The second door lists five steps in OBS, in OBS 32.2.2's own words, and suggests no filters or settings, since OBS is the editor. When OBS closes with filters on the mic, the first run carries on with the first door.
+- The second door lists five steps in OBS, in OBS's own words, which are the same in 32.2.2 and 33.0, and suggests no filters or settings, since OBS is the editor. When OBS closes with filters on the mic, the first run carries on with the first door.
 - The last page shows the chain, which device other apps should use and where the tray icon is, with Start with Windows checked.
 
 A choice takes effect when the core's next snapshot carries it, and the page waits for that. knobs reopens an unfinished first run where it stopped, but not when Windows starts it at sign-in.
@@ -250,17 +252,17 @@ A `portable_mode.txt` file beside `knobs.exe`, as with OBS, makes knobs keep all
 
 ## Compatibility
 
-knobs supports OBS 32.2.0 up to, but not including, 33.0.0 (`src/runtime/obs_version.h`). The floor is the minor version of the vendored headers, since patch releases don't change the libobs API. The ceiling is the next major, where libobs makes breaking changes. Only 32.2.2 is tested. When the tested version changes, the headers are re-vendored at that tag and the range is revisited.
+knobs supports OBS 32.2.0 up to, but not including, 34.0.0 (`src/runtime/obs_version.h`). The vendored headers are 33.0's. Every export knobs requires has the same declaration back to 32.2.0, and the one 33.0 adds is optional, so the floor stays at 32.2. Patch releases don't change the libobs API. The ceiling is the next major, where libobs makes breaking changes. 32.2.2 and 33.0.0-rc1 are tested, and CI runs every test against both: the tests that need OBS take another OBS folder through `KNOBS_TEST_OBS_DIR`. When the tested versions change, the headers are re-vendored at the newest one's tag and the range is revisited.
 
 ### OBS 33.0
 
-Checked against 33.0.0-beta6:
+Checked against 33.0.0-rc1. Neither `win-wasapi` nor the audio filters changed from 32.2.2, and knobs's output is bit-identical to OBS 33's (Same output as OBS).
 
-- **Monitoring becomes on or off.** `obs_source_set_monitoring_enabled` replaces `obs_source_set_monitoring_type`, which is deprecated and logs a warning on each call. Monitor Only is gone, so a monitored source also goes into the output mix. The cable gets the same audio, since the monitor takes it before the mix, but the mic is mixed for nothing.
-- **Sources saved by 33.0 store a `monitoring_enabled` bool**, which the loader reads instead of `monitoring_type`. knobs already overrides both when loading (`LoadSourceJson`) and reads both on import.
+- **The modules moved** to folders of their own, `core\<module>`, with no `obs-plugins` folder. knobs looks for them where the version keeps them (Finding and copying OBS).
+- **Monitoring is on or off.** `obs_source_set_monitoring_enabled` replaces `obs_source_set_monitoring_type`, which is deprecated and logs a warning on each call, so knobs uses the new export where it's there. Monitor Only is gone, and with it the shortcut that kept a monitored source out of libobs's output buffers (`source_output_audio_data`, `obs-source.c`). So libobs's audio thread processes the mic each tick, though nothing mixes it, since it's on no output channel. The monitor takes the audio before that, so the cable gets the same audio. Pushing audio through the chain and the monitor for 30 s cost 0.7–0.9% of a core on either version (`knobs-live --measure-output`, Release).
+- **Sources saved by 33.0 store a `monitoring_enabled` bool**, which the loader reads instead of `monitoring_type`. knobs overrides both when loading (`LoadSourceJson`) and reads both on import.
 - **Mute and push-to-talk still don't reach the monitor.** 33.0's new monitoring hotkeys don't apply, since knobs's private source registers none.
-
-Supporting 33.0 means re-vendoring the headers, raising the ceiling, and resolving `obs_source_set_monitoring_enabled` as an optional export.
+- **Advanced Audio Properties has an Enable check box for monitoring** in place of the list with Monitor Only. The settings the first run's steps name keep their names.
 
 ## Evidence
 
@@ -268,7 +270,7 @@ Supporting 33.0 means re-vendoring the headers, raising the ceiling, and resolvi
 
 `knobs-compare` runs the same input through the imported chain in knobs, offline, and in OBS itself: a private portable copy of the install, scripted to play the input as a Media Source carrying the mic's filters and record it to a 32-bit float WAV, with no audio device and without touching the user's OBS settings. knobs plays the input in OBS's packet size for a WAV, 4096 frames; other sizes change the output only at rounding level, about 120 dB below the signal. knobs's side also gets what OBS's recording mix does and the monitor doesn't: −0.0 becomes 0.0, NaN becomes 0, and samples are clamped to ±1.
 
-knobs's output is bit-identical to OBS's on test signals and synthetic speech, for a real mic's chain (3-band EQ, expander, compressor and limiter, with Mono on), for every `obs-filters` audio filter in one chain, for a chain that clips, and for a 20.9 s recording of real voice. `knobs-harness` shows that knobs is deterministic too: its output is bit-identical across runs, processes, and Debug and Release builds.
+knobs's output is bit-identical to OBS's on test signals and synthetic speech, for a real mic's chain (3-band EQ, expander, compressor and limiter, with Mono on), for every `obs-filters` audio filter in one chain, for a chain that clips, and for a 20.9 s recording of real voice. With OBS 33.0.0-rc1, it's bit-identical for the real mic's chain on the test signal. `knobs-harness` shows that knobs is deterministic too: its output is bit-identical across runs, processes, and Debug and Release builds.
 
 ### Mic-to-cable latency
 

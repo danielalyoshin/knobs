@@ -2,7 +2,7 @@
 
 Windows tray app that runs the user's OBS mic filter chain through their installed libobs and sends the result to a virtual audio cable, with no OBS process. The design and its rationale, with the evidence behind it, are in [docs/design.md](docs/design.md). Read it before non-trivial work, and update it when the design changes. It describes what's true now, in the present tense, with no dates, milestones or decision history: git history has how it got there.
 
-Status: knobs works end to end against OBS 32.2.2. Its output is bit-identical to OBS's, on test signals and real voice, its mic-to-cable latency matches OBS's, and knobs.exe met its success criteria (PRODUCT.md) on real hardware (docs/design.md, Evidence). The core restarts libobs's monitor in silence so the delay to the cable can't creep up (docs/design.md, Keeping the delay down). knobs 0.1.1 is released, as an installer and a portable zip, signed with Azure Artifact Signing (`release.yml`). Open work is tracked in GitHub issues: OBS 33.0 support (#1), telling users about new versions (#2), VST filters (#3) and NVIDIA noise removal (#4). An hours-long latency test on real hardware is optional.
+Status: knobs works end to end against OBS 32.2.2. Its output is bit-identical to OBS's, on test signals and real voice, its mic-to-cable latency matches OBS's, and knobs.exe met its success criteria (PRODUCT.md) on real hardware (docs/design.md, Evidence). `main` also supports OBS 33.0, tested against 33.0.0-rc1, where its output is bit-identical to OBS 33's too (docs/design.md, OBS 33.0). The core restarts libobs's monitor in silence so the delay to the cable can't creep up (docs/design.md, Keeping the delay down). knobs 0.1.1 is released, as an installer and a portable zip, signed with Azure Artifact Signing (`release.yml`); it supports only OBS 32.2, so the README's user-facing OBS versions change with the release that ships 33.0 support. Open work is tracked in GitHub issues: OBS 33.0 support (#1, open until that release), telling users about new versions (#2), VST filters (#3), NVIDIA noise removal (#4), installing VB-Cable from the installer (#5) and a setup window of knobs's own (#6). An hours-long latency test on real hardware is optional.
 
 ## Stack
 - C++20, CMake, MSVC (VS 2022 or newer; the preset uses the newest installed Visual Studio), x64 only, static CRT.
@@ -17,6 +17,8 @@ cmake --preset x64            # configure
 cmake --build --preset debug  # or: release
 ctest --preset debug          # unit tests, then smoke, harness, import and core tests (these skip if OBS isn't installed)
 ```
+
+To run the smoke, harness, import and core tests against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`; configuring again without it (`-DKNOBS_TEST_OBS_DIR=`) goes back to the installed OBS. CI tests the newest tested OBS installed and the oldest supported one unzipped (`build.yml`).
 
 The build puts the tray app, `knobs.exe`, in `build\x64\<config>\`. It runs the real core: unless OBS is open or something needs setting up, it opens the mic. Use `knobs-tray` to look at the tray and the first run instead.
 
@@ -59,7 +61,7 @@ Don't open the mic without the user's go-ahead.
 - **Never ship libobs.** A from-source build is only for local debugging.
 - Import uses `obs_load_source()`, in its private form `obs_load_private_source()`. Manual replay is the fallback, not the default.
 - Check OBS behavior (config keys, scene JSON, libobs semantics) against the obs-studio source at the tag matching the installed version. Don't rely on memory.
-- When the tested OBS version changes, re-vendor the headers for that tag and revisit the supported range in `src/runtime/obs_version.h`.
+- When the tested OBS versions change, re-vendor the headers at the newest one's tag, revisit the supported range in `src/runtime/obs_version.h`, and update the versions in `build.yml`. An export older supported versions lack goes in `KNOBS_OBS_API_OPTIONAL`, with a fallback.
 
 ## Conventions
 - Every source file starts with `// SPDX-License-Identifier: GPL-2.0-or-later` (`;` or `#` comments in scripts).

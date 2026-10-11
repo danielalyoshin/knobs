@@ -199,13 +199,13 @@ cmake --build --preset release   # or: debug
 ctest --preset release           # tests that need OBS skip if it isn't installed
 ```
 
-The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\`). No test opens an audio device.
+The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\`). No test opens an audio device. To run the tests that need OBS against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`.
 
 ### Packaging
 
 `packaging\package.ps1` packages the Release build as the installer and the portable zip, with their checksums, in `build\package\`. The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php).
 
-[CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)), signed with [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) (`packaging\sign.ps1`).
+[CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 33.0.0-rc1 and again against an unzipped 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)), signed with [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) (`packaging\sign.ps1`).
 
 ### Dev tools
 
