@@ -3,14 +3,20 @@
 # Runs knobs-import against tests/fixtures/obs-config, a made-up OBS settings
 # folder, and checks what it reports. Needs OBS installed; prints SKIP when
 # it isn't, which the test's SKIP_REGULAR_EXPRESSION turns into a skip. WORK
-# is a folder it may replace, for an edited copy of the fixture.
+# is a folder it may replace, for an edited copy of the fixture. OBS_DIR, if
+# set, is the OBS to use instead of the installed one.
 #
 #   cmake -DTOOL=<knobs-import.exe> -DCONFIG=<tests/fixtures/obs-config> -DWORK=<folder>
-#         -P import_fixture.cmake
+#         [-DOBS_DIR=<folder>] -P import_fixture.cmake
+
+set(obs_dir)
+if(OBS_DIR)
+  set(obs_dir --obs-dir "${OBS_DIR}")
+endif()
 
 function(run_import out_var code_var)
   execute_process(
-    COMMAND "${TOOL}" --obs-config "${CONFIG}" ${ARGN}
+    COMMAND "${TOOL}" --obs-config "${CONFIG}" ${obs_dir} ${ARGN}
     OUTPUT_VARIABLE output
     ERROR_VARIABLE output
     RESULT_VARIABLE code)

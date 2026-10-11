@@ -4,13 +4,20 @@
 # folder, and checks the states it reports. A dry run that doesn't watch for
 # OBS: no audio device is opened, and OBS running alongside doesn't change the
 # outcome. Needs OBS installed; prints SKIP when it isn't, which the test's
-# SKIP_REGULAR_EXPRESSION turns into a skip.
+# SKIP_REGULAR_EXPRESSION turns into a skip. OBS_DIR, if set, is the OBS to
+# use instead of the installed one.
 #
-#   cmake -DTOOL=<knobs-core.exe> -DCONFIG=<tests/fixtures/obs-config> -P core_fixture.cmake
+#   cmake -DTOOL=<knobs-core.exe> -DCONFIG=<tests/fixtures/obs-config> [-DOBS_DIR=<folder>]
+#         -P core_fixture.cmake
+
+set(obs_dir)
+if(OBS_DIR)
+  set(obs_dir --obs-dir "${OBS_DIR}")
+endif()
 
 function(run_core out_var code_var)
   execute_process(
-    COMMAND "${TOOL}" --obs-config "${CONFIG}" --ignore-obs --seconds 2 ${ARGN}
+    COMMAND "${TOOL}" --obs-config "${CONFIG}" --ignore-obs --seconds 2 ${obs_dir} ${ARGN}
     OUTPUT_VARIABLE output
     ERROR_VARIABLE output
     RESULT_VARIABLE code)

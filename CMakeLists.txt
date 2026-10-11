@@ -139,18 +139,26 @@ enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
 # The tests below need OBS installed and skip when it isn't. None of them
 # opens the mic or any other audio device, and the import and core tests
-# read a made-up OBS settings folder, not the user's.
-add_test(NAME smoke COMMAND knobs-smoke)
-add_test(NAME harness COMMAND knobs-harness --runs 3)
+# read a made-up OBS settings folder, not the user's. KNOBS_TEST_OBS_DIR
+# points them at another OBS folder instead, such as an unzipped release.
+set(KNOBS_TEST_OBS_DIR "" CACHE PATH "OBS folder for the tests that need OBS. Empty: the installed OBS.")
+set(test_obs_dir)
+if(KNOBS_TEST_OBS_DIR)
+  set(test_obs_dir --obs-dir "${KNOBS_TEST_OBS_DIR}")
+endif()
+add_test(NAME smoke COMMAND knobs-smoke ${test_obs_dir})
+add_test(NAME harness COMMAND knobs-harness --runs 3 ${test_obs_dir})
 set_tests_properties(smoke harness PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME import
   COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-import>
           -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
           -DWORK=${CMAKE_CURRENT_BINARY_DIR}/import-fixture
+          "-DOBS_DIR=${KNOBS_TEST_OBS_DIR}"
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/import_fixture.cmake)
 set_tests_properties(import PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
 add_test(NAME core
   COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-core>
           -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
+          "-DOBS_DIR=${KNOBS_TEST_OBS_DIR}"
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/core_fixture.cmake)
 set_tests_properties(core PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
