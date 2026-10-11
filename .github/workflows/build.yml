@@ -27,6 +27,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Find the app's name
+        # KNOBS_DISPLAY_NAME (src/app_info.h): the tray app's file name, and
+        # its folders' names.
+        id: app
+        run: |
+          $name = [regex]::Match((Get-Content -Raw src/app_info.h), '#define KNOBS_DISPLAY_NAME "([^"]+)"').Groups[1].Value
+          if (-not $name) { throw "There's no KNOBS_DISPLAY_NAME in src/app_info.h." }
+          "name=$name" >> $env:GITHUB_OUTPUT
+
       - name: Configure
         run: cmake --preset x64
 
@@ -55,6 +64,8 @@ jobs:
       - name: Test against the oldest supported OBS
         # The tests that need OBS again, pointed at an unzipped OBS
         # (KNOBS_TEST_OBS_DIR). Configuring again changes only the tests.
+        env:
+          APP_NAME: ${{ steps.app.outputs.name }}
         run: |
           $zip = "$env:RUNNER_TEMP\obs-oldest.zip"
           $dir = "$env:RUNNER_TEMP\obs-$env:OBS_OLDEST_VERSION"
@@ -69,8 +80,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($log -match 'Skipped') { throw 'A test skipped although OBS is there.' }
           # The tests copy the OBS they load into a folder named for its version.
-          $name = [regex]::Match((Get-Content -Raw src/app_info.h), '#define KNOBS_DISPLAY_NAME "([^"]+)"').Groups[1].Value
-          if (-not (Test-Path "$env:LOCALAPPDATA\$name\runtime\$env:OBS_OLDEST_VERSION\bin\64bit\obs.dll")) {
+          if (-not (Test-Path "$env:LOCALAPPDATA\$env:APP_NAME\runtime\$env:OBS_OLDEST_VERSION\bin\64bit\obs.dll")) {
             throw "The tests didn't load OBS $env:OBS_OLDEST_VERSION."
           }
 
@@ -86,16 +96,10 @@ jobs:
           path: build/package/
           if-no-files-found: error
 
-      - name: Find the tray app
-        id: app
-        run: |
-          $name = [regex]::Match((Get-Content -Raw src/app_info.h), '#define KNOBS_DISPLAY_NAME "([^"]+)"').Groups[1].Value
-          "exe=build/x64/Release/$name.exe" >> $env:GITHUB_OUTPUT
-
       # The tested exe, for Release to sign and package.
       - uses: actions/upload-artifact@v7
         with:
           name: exe
-          path: ${{ steps.app.outputs.exe }}
+          path: build/x64/Release/${{ steps.app.outputs.name }}.exe
           retention-days: 7
           if-no-files-found: error
