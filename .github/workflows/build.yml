@@ -11,9 +11,13 @@ permissions:
   contents: read
 
 env:
-  # The OBS the tests load libobs from: the tested version (src/runtime/obs_version.h).
-  OBS_VERSION: 32.2.2
-  OBS_INSTALLER_SHA256: c3a0b880adbe64dc4bcb68f93016916ab5b55ae43fd227115287bf80257d92dc
+  # The OBS versions the tests load libobs from (src/runtime/obs_version.h):
+  # the newest tested one, installed as users have it, and the oldest
+  # supported one, unzipped.
+  OBS_VERSION: 33.0.0-rc1
+  OBS_INSTALLER_SHA256: 89cda9af39aaa0c6bbdae4d5db3bbfed127c82a6ef57b79acc6a745a872fa85c
+  OBS_OLDEST_VERSION: 32.2.2
+  OBS_OLDEST_ZIP_SHA256: 4d6e40e3ab155f56b30de517380566a206d74b63cdf5ad49aa596924768f97e1
   INNO_SETUP_VERSION: 6.7.1
 
 jobs:
@@ -47,6 +51,28 @@ jobs:
           ctest --preset release 2>&1 | Tee-Object -Variable log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($log -match 'Skipped') { throw 'A test skipped although OBS is installed.' }
+
+      - name: Test against the oldest supported OBS
+        # The tests that need OBS again, pointed at an unzipped OBS
+        # (KNOBS_TEST_OBS_DIR). Configuring again changes only the tests.
+        run: |
+          $zip = "$env:RUNNER_TEMP\obs-oldest.zip"
+          $dir = "$env:RUNNER_TEMP\obs-$env:OBS_OLDEST_VERSION"
+          $url = "https://github.com/obsproject/obs-studio/releases/download/$env:OBS_OLDEST_VERSION/OBS-Studio-$env:OBS_OLDEST_VERSION-Windows-x64.zip"
+          Invoke-WebRequest $url -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          if ($hash -ne $env:OBS_OLDEST_ZIP_SHA256) { throw "OBS's zip has an unexpected checksum: $hash" }
+          Expand-Archive $zip -DestinationPath $dir
+          if (-not (Test-Path "$dir\bin\64bit\obs.dll")) { throw "OBS's zip has no bin\64bit\obs.dll." }
+          cmake --preset x64 "-DKNOBS_TEST_OBS_DIR=$dir"
+          ctest --preset release --exclude-regex '^unit$' 2>&1 | Tee-Object -Variable log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($log -match 'Skipped') { throw 'A test skipped although OBS is there.' }
+          # The tests copy the OBS they load into a folder named for its version.
+          $name = [regex]::Match((Get-Content -Raw src/app_info.h), '#define KNOBS_DISPLAY_NAME "([^"]+)"').Groups[1].Value
+          if (-not (Test-Path "$env:LOCALAPPDATA\$name\runtime\$env:OBS_OLDEST_VERSION\bin\64bit\obs.dll")) {
+            throw "The tests didn't load OBS $env:OBS_OLDEST_VERSION."
+          }
 
       - name: Install Inno Setup
         run: choco install innosetup --version $env:INNO_SETUP_VERSION --yes --no-progress
