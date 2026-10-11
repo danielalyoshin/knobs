@@ -19,10 +19,14 @@ bool IsSupportedObsVersion(const ObsVersion& version) {
 
 std::string DescribeSupportedObsVersions() {
   static_assert(kFirstUnsupportedObs.minor == 0 && kFirstUnsupportedObs.patch == 0 &&
-                    kFirstUnsupportedObs.major == kMinSupportedObs.major + 1,
+                    kFirstUnsupportedObs.major > kMinSupportedObs.major,
                 "Update the wording below to match the new range");
-  return std::format("OBS Studio {}.{} or a later {}.x release", kMinSupportedObs.major,
-                     kMinSupportedObs.minor, kMinSupportedObs.major);
+  const uint32_t last_major = kFirstUnsupportedObs.major - 1;
+  if (last_major == kMinSupportedObs.major) {
+    return std::format("OBS Studio {}.{} or a later {}.x release", kMinSupportedObs.major, kMinSupportedObs.minor,
+                       last_major);
+  }
+  return std::format("OBS Studio {}.{} to {}.x", kMinSupportedObs.major, kMinSupportedObs.minor, last_major);
 }
 
 std::string UnsupportedObsMessage(std::string_view version_text) {

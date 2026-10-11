@@ -123,8 +123,8 @@ TEST(WelcomeSaysWhatWasFound) {
   CHECK(notes(missing).ends_with("| new"));
   core::Snapshot unsupported = missing;
   unsupported.state = State::kObsUnsupported;
-  unsupported.obs = {"C:\\Program Files\\obs-studio", {33, 0, 0}};
-  CHECK(Contains(notes(unsupported), "\nOBS 33.0.0 is installed, and "));
+  unsupported.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
+  CHECK(Contains(notes(unsupported), "\nOBS 34.0.0 is installed, and "));
   CHECK(notes(unsupported).ends_with("| obs"));
   // Too old: no update will fix it, so not "yet".
   core::Snapshot too_old = unsupported;
@@ -426,9 +426,9 @@ TEST(ProblemsWithObsComeFirst) {
   CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
 
   snapshot.state = State::kObsUnsupported;
-  snapshot.obs = {"C:\\Program Files\\obs-studio", {33, 0, 0}};
+  snapshot.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
   view = ObsUser(snapshot).View(snapshot);
-  CHECK(view.page == Page::kObsUnsupported && Contains(view.content, "supports OBS 33.0.0."));
+  CHECK(view.page == Page::kObsUnsupported && Contains(view.content, "supports OBS 34.0.0."));
 
   snapshot.state = State::kNeedsSetup;
   snapshot.setup = SetupNeed::kObsSettings;
@@ -511,15 +511,15 @@ TEST(AnUnsupportedObsOffersAnotherFolder) {
   // one installed elsewhere, or wait for knobs.
   core::Snapshot snapshot;
   snapshot.state = State::kObsUnsupported;
-  snapshot.obs = {"C:\\Program Files\\obs-studio", {33, 0, 0}};
-  snapshot.detail = "OBS 33.0.0 isn't supported.";
+  snapshot.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
+  snapshot.detail = "OBS 34.0.0 isn't supported.";
   FirstRun first_run = ObsUser(snapshot);
   PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kObsUnsupported);
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Choose folder…"}));
   CHECK(view.default_button == kButtonTryAgain);
   CHECK(Contains(view.content, "If a supported OBS is installed somewhere else, choose that folder."));
-  CHECK(view.content.ends_with(std::format("Or wait for a {} update that supports OBS 33.0.0.", kDisplayName)));
+  CHECK(view.content.ends_with(std::format("Or wait for a {} update that supports OBS 34.0.0.", kDisplayName)));
   CHECK(first_run.Click(kButtonChooseObs, 0, false, snapshot).kind == Kind::kChooseObs);
   CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
 
@@ -588,7 +588,7 @@ TEST(SecondDoorWithoutOBSOrAMic) {
   core::Snapshot missing;
   missing.state = State::kObsMissing;
   PageView view = FirstRun({}, Page::kSteps).View(missing);
-  CHECK(Contains(view.content, "\n1. Install OBS Studio 32.2 or a later 32.x release from <a "
+  CHECK(Contains(view.content, "\n1. Install OBS Studio 32.2 to 33.x from <a "
                                "href=\"https://obsproject.com/download\">obsproject.com</a>, and open it.\n"));
   CHECK(Contains(view.content, "\n2. In Settings › Audio, set Mic/Auxiliary Audio to your mic. Then, in the Audio "
                                "Mixer, click Mic/Aux and choose Filters.\n"));
@@ -596,10 +596,10 @@ TEST(SecondDoorWithoutOBSOrAMic) {
 
   core::Snapshot unsupported = missing;
   unsupported.state = State::kObsUnsupported;
-  unsupported.obs = {"C:\\Program Files\\obs-studio", {33, 0, 0}};
+  unsupported.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
   view = FirstRun({}, Page::kSteps).View(unsupported);
   CHECK(Contains(view.content, "OBS's releases on GitHub</a>, and open it."));
-  CHECK(Contains(view.content, " doesn't support OBS 33.0.0 yet."));
+  CHECK(Contains(view.content, " doesn't support OBS 34.0.0 yet."));
   unsupported.obs.version = {31, 1, 4};
   view = FirstRun({}, Page::kSteps).View(unsupported);
   CHECK(Contains(view.content, std::format("and open it. OBS 31.1.4 is too old for {}.", kDisplayName)));

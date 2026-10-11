@@ -92,7 +92,7 @@ void EditChain(FakeWorld& world);
 // Adds a VST filter to the first mic in OBS, which knobs leaves out with a
 // warning, or takes it out again. Seen at the next import.
 void ToggleVstFilter(FakeWorld& world);
-// Updates OBS: from 32.2.2 to 32.2.3, then to 33.0.0, which knobs doesn't
+// Updates OBS: from 32.2.2 to 32.2.3, then to 34.0.0, which knobs doesn't
 // support. Seen at the next import. Returns the new version.
 std::string UpdateObs(FakeWorld& world);
 

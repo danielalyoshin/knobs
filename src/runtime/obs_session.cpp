@@ -76,8 +76,8 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
   }
 
   for (std::string_view name : kObsModules) {
-    const std::string binary = ToObsPath(PluginDll(runtime.root(), name));
-    const std::string data = ToObsPath(PluginDataDir(runtime.root(), name));
+    const std::string binary = ToObsPath(PluginDll(runtime.root(), name, runtime.version()));
+    const std::string data = ToObsPath(PluginDataDir(runtime.root(), name, runtime.version()));
     obs_module_t* module = nullptr;
     const int code = api.obs_open_module(&module, binary.c_str(), data.c_str());
     if (code != MODULE_SUCCESS) {

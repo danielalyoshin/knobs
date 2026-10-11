@@ -100,8 +100,10 @@ TEST(VersionRangeBoundaries) {
   CHECK(IsSupportedObsVersion({32, 2, 0}));
   CHECK(IsSupportedObsVersion({32, 2, 2}));
   CHECK(IsSupportedObsVersion({32, 99, 0}));
-  CHECK(!IsSupportedObsVersion({33, 0, 0}));
-  CHECK(!DescribeSupportedObsVersions().empty());
+  CHECK(IsSupportedObsVersion({33, 0, 0}));
+  CHECK(IsSupportedObsVersion({33, 99, 0}));
+  CHECK(!IsSupportedObsVersion({34, 0, 0}));
+  CHECK(DescribeSupportedObsVersions() == "OBS Studio 32.2 to 33.x");
 }
 
 // --- ObsApi --------------------------------------------------------------------
@@ -125,6 +127,20 @@ TEST(ApiReportsMissingExports) {
   CHECK(!missing.empty() && missing.front() == "obs_reset_audio");
   CHECK(api.obs_reset_audio == nullptr);
   CHECK(ObsApiSize() > 1);
+}
+
+TEST(ApiLeavesMissingOptionalExportsNull) {
+  // As on OBS 32.2, which has no obs_source_set_monitoring_enabled.
+  ObsApi api;
+  const auto missing = ResolveObsApi(api, [](const char* name) -> AnyFunction {
+    return std::string_view(name) == "obs_source_set_monitoring_enabled" ? nullptr : &Placeholder;
+  });
+  CHECK(missing.empty());
+  CHECK(api.obs_source_set_monitoring_enabled == nullptr);
+  CHECK(api.obs_source_set_monitoring_type != nullptr);
+
+  const auto all = ResolveObsApi(api, [](const char*) { return &Placeholder; });
+  CHECK(all.empty() && api.obs_source_set_monitoring_enabled != nullptr);
 }
 
 // --- PE imports ----------------------------------------------------------------
@@ -182,7 +198,7 @@ fs::path MakeFakeInstall(const fs::path& root) {
 TEST(PlanCoversImportClosureAndData) {
   TempDir dir(L"plan");
   const fs::path root = MakeFakeInstall(dir.path / L"obs");
-  auto plan = PlanRuntimeCopy(root);
+  auto plan = PlanRuntimeCopy(root, {32, 2, 2});
   CHECK(plan.ok());
   if (!plan) return;
 
@@ -203,6 +219,51 @@ TEST(PlanCoversImportClosureAndData) {
 
   CHECK(ContainsName(plan->system_dlls, "kernel32.dll"));
   CHECK(!ContainsName(plan->system_dlls, "version.dll"));
+}
+
+// The same, laid out as OBS 33.0 lays it out: each module in a folder of its
+// own under core\, with its data in a data folder there.
+fs::path MakeFakeCoreInstall(const fs::path& root) {
+  const fs::path self = SelfPath();
+  const fs::path bin = root / L"bin" / L"64bit";
+  fs::create_directories(bin);
+  fs::copy_file(self, bin / L"obs.dll");
+  fs::copy_file(self, bin / L"libobs-d3d11.dll");
+  WriteFile(root / L"data" / L"libobs" / L"default.effect", "effect");
+  for (const std::wstring module : {L"win-wasapi", L"obs-filters", L"obs-vst"}) {
+    const fs::path dir = root / L"core" / module;
+    fs::create_directories(dir);
+    fs::copy_file(self, dir / (module + L".dll"));
+    WriteFile(dir / L"data" / L"locale" / L"en-US.ini", "a=b");
+  }
+  // Shadows the system DLL for win-wasapi only.
+  fs::copy_file(self, root / L"core" / L"win-wasapi" / L"version.dll");
+  return root;
+}
+
+TEST(PlanFindsObs33sCoreModules) {
+  TempDir dir(L"plan-core");
+  const fs::path root = MakeFakeCoreInstall(dir.path / L"obs");
+  auto plan = PlanRuntimeCopy(root, {33, 0, 0});
+  CHECK(plan.ok());
+  if (!plan) return;
+
+  const std::vector<fs::path>& files = plan->files;
+  CHECK(ContainsPath(files, L"bin/64bit/obs.dll"));
+  CHECK(ContainsPath(files, L"bin/64bit/libobs-d3d11.dll"));
+  CHECK(ContainsPath(files, L"core/win-wasapi/win-wasapi.dll"));
+  CHECK(ContainsPath(files, L"core/win-wasapi/version.dll"));
+  CHECK(ContainsPath(files, L"core/obs-filters/obs-filters.dll"));
+  CHECK(ContainsPath(files, L"data/libobs/default.effect"));
+  CHECK(ContainsPath(files, L"core/win-wasapi/data/locale/en-US.ini"));
+  CHECK(ContainsPath(files, L"core/obs-filters/data/locale/en-US.ini"));
+  CHECK(!ContainsPath(files, L"core/obs-vst/obs-vst.dll"));
+  CHECK(!ContainsPath(files, L"core/obs-vst/data/locale/en-US.ini"));
+  CHECK(files.size() == 8);
+
+  // Each module's imports resolve from its own folder: obs.dll and
+  // obs-filters.dll get the system's version.dll.
+  CHECK(ContainsName(plan->system_dlls, "version.dll"));
 }
 
 TEST(EnsureCopiesReusesAndRepairs) {
@@ -261,7 +322,7 @@ TEST(EnsureRecopiesWhenInstallChanges) {
 TEST(EnsureRefusesUnsupportedVersions) {
   TempDir dir(L"unsupported");
   const fs::path base = dir.path / L"runtime";
-  for (const ObsVersion version : {ObsVersion{31, 1, 4}, ObsVersion{33, 0, 0}}) {
+  for (const ObsVersion version : {ObsVersion{31, 1, 4}, ObsVersion{34, 0, 0}}) {
     const ObsInstall install{MakeFakeInstall(dir.path / FromUtf8(version.ToString())), version};
     auto copy = EnsureRuntimeCopy(install, base, false);
     CHECK(!copy.ok());

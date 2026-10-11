@@ -370,12 +370,13 @@ RuntimeCopyLock::~RuntimeCopyLock() {
   if (mutex_) CloseHandle(mutex_);
 }
 
-Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root) {
+Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVersion& version) {
   const fs::path bin = BinDir(install_root);
-  std::map<fs::path, std::map<std::string, fs::path>> dlls_by_dir = {
-      {bin, ListDlls(bin)},
-      {PluginBinDir(install_root), ListDlls(PluginBinDir(install_root))},
-  };
+  std::map<fs::path, std::map<std::string, fs::path>> dlls_by_dir = {{bin, ListDlls(bin)}};
+  for (std::string_view module : kObsModules) {
+    const fs::path dir = PluginBinDir(install_root, module, version);
+    if (!dlls_by_dir.contains(dir)) dlls_by_dir.emplace(dir, ListDlls(dir));
+  }
   auto find_dll = [&](const fs::path& dir, const std::string& lower_name) -> const fs::path* {
     const auto dir_it = dlls_by_dir.find(dir);
     if (dir_it == dlls_by_dir.end()) return nullptr;
@@ -385,7 +386,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root) {
 
   std::vector<fs::path> pending = {ObsDll(install_root),
                                    bin / (fs::path(kGraphicsModule) += L".dll")};
-  for (std::string_view module : kObsModules) pending.push_back(PluginDll(install_root, module));
+  for (std::string_view module : kObsModules) pending.push_back(PluginDll(install_root, module, version));
 
   std::set<fs::path> binaries;
   std::map<std::string, std::string> system_dlls;  // Lowercase name -> as spelled.
@@ -430,7 +431,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root) {
   }
 
   std::vector<fs::path> data_dirs = {LibobsDataDir(install_root)};
-  for (std::string_view module : kObsModules) data_dirs.push_back(PluginDataDir(install_root, module));
+  for (std::string_view module : kObsModules) data_dirs.push_back(PluginDataDir(install_root, module, version));
   for (const fs::path& dir : data_dirs) {
     for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
          it.increment(ec)) {
@@ -458,7 +459,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
     }
   }
 
-  auto file_set = PlanRuntimeCopy(install.root);
+  auto file_set = PlanRuntimeCopy(install.root, install.version);
   if (!file_set) return Error{file_set.error()};
 
   const fs::path staging = runtime_base / FromUtf8(version + ".partial");

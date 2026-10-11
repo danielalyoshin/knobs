@@ -22,13 +22,13 @@ struct ObsVersion {
   static ObsVersion FromLibobs(uint32_t packed);
 };
 
-// The floor is the minor release the vendored headers come from
-// (third_party/libobs, currently 32.2.2). Patch releases don't change the
-// libobs API (semantic versioning, obs-config.h), so 32.2.0 and 32.2.1 have
-// the same declarations. The cap is the next major, where libobs makes
-// breaking changes. Only 32.2.2 has actually been tested so far.
+// The vendored headers are 33.0's (third_party/libobs). Every export knobs
+// requires has the same declaration back to 32.2.0, and the ones 33.0 adds
+// are optional (KNOBS_OBS_API_OPTIONAL), so the floor stays at 32.2. Patch
+// releases don't change the libobs API (semantic versioning, obs-config.h).
+// The cap is the next major, where libobs makes breaking changes.
 inline constexpr ObsVersion kMinSupportedObs{32, 2, 0};
-inline constexpr ObsVersion kFirstUnsupportedObs{33, 0, 0};
+inline constexpr ObsVersion kFirstUnsupportedObs{34, 0, 0};
 
 bool IsSupportedObsVersion(const ObsVersion& version);
 
@@ -36,7 +36,7 @@ bool IsSupportedObsVersion(const ObsVersion& version);
 // can support, rather than one that's too old.
 inline bool IsNewerThanSupportedObs(const ObsVersion& version) { return version >= kFirstUnsupportedObs; }
 
-// For messages, e.g. "OBS Studio 32.2 or a later 32.x release".
+// For messages, e.g. "OBS Studio 32.2 to 33.x".
 std::string DescribeSupportedObsVersions();
 
 // "OBS <version_text> isn't supported. knobs supports ..."

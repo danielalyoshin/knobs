@@ -387,7 +387,7 @@ int Run(const Options& options) {
   Check(true, "find OBS", std::format("OBS {} in {}", install->version.ToString(), ToUtf8(install->root)));
 
   if (options.list_files) {
-    auto file_set = PlanRuntimeCopy(install->root);
+    auto file_set = PlanRuntimeCopy(install->root, install->version);
     if (!file_set) {
       Check(false, "file set", file_set.error());
       return kExitFail;

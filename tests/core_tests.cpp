@@ -295,7 +295,7 @@ TEST(CoreReportsAMissingOrUnsupportedObs) {
   }
   {
     Fixture f;
-    f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {33, 0, 0}}, "OBS 33.0.0 isn't supported."};
+    f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {34, 0, 0}}, "OBS 34.0.0 isn't supported."};
     f.controller.Start(false, f.now);
     CHECK(f.state() == State::kObsUnsupported && f.backend.libobs_starts == 0);
   }
@@ -530,7 +530,7 @@ TEST(CoreAsksForARestartToFollowObs) {
   CHECK(f.state() == State::kRestartNeeded && f.last().detail.find("from 32.2.2 to 32.2.3") != std::string::npos);
   CHECK(f.last().restart == RestartNeed::kObsUpdated);
 
-  f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {33, 0, 0}}, "OBS 33.0.0 isn't supported."};
+  f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {34, 0, 0}}, "OBS 34.0.0 isn't supported."};
   f.controller.SetObsRunning(true, f.now);
   f.controller.SetObsRunning(false, f.now);
   CHECK(f.state() == State::kObsUnsupported && !f.backend.chain_running && f.last().restart == RestartNeed::kNone);
@@ -923,19 +923,14 @@ TEST(ObsBackendKeepsToAPickedInstallFolder) {
 
 TEST(ObsBackendKeepsToAPickedInstallOfAnUnsupportedObs) {
   // A portable OBS as CheckObs inspects it, with Windows' own version.dll as
-  // its obs.dll: a version no OBS has, so not one knobs supports.
+  // its obs.dll: a version no OBS has, so not one knobs supports. The rest of
+  // its files aren't checked, since knobs can't know where they'd be.
   const ScratchDir dir(L"picked-unsupported");
   const fs::path root = dir.path / L"OBS 31";
   wchar_t system[MAX_PATH];
   GetSystemDirectoryW(system, MAX_PATH);
   fs::create_directories(runtime::BinDir(root));
   fs::copy_file(fs::path(system) / L"version.dll", runtime::ObsDll(root));
-  WriteFile(runtime::BinDir(root) / (fs::path(runtime::kGraphicsModule) += L".dll"), "");
-  fs::create_directories(runtime::LibobsDataDir(root));
-  for (const std::string_view module : runtime::kObsModules) {
-    WriteFile(runtime::PluginDll(root, module), "");
-    fs::create_directories(runtime::PluginDataDir(root, module));
-  }
   WriteFile(root / L"portable_mode.txt", "");
 
   // It stays picked, even where OBS is installed as usual: the check is of

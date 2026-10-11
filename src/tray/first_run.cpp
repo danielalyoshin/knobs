@@ -257,12 +257,13 @@ PageView Steps(const core::Snapshot& snapshot) {
   const std::string mic = MicName(snapshot);
   std::string filters;
   if (snapshot.mics.empty()) {
-    // The names in OBS 32.2.2's en-US locale: Basic.Settings.Audio,
-    // Basic.Settings.Audio.AuxDevice, Mixer, Basic.AuxDevice1 and Filters.
+    // The names in OBS's en-US locale, the same in 32.2.2 and 33.0:
+    // Basic.Settings.Audio, Basic.Settings.Audio.AuxDevice, Mixer,
+    // Basic.AuxDevice1 and Filters.
     filters = "In Settings › Audio, set Mic/Auxiliary Audio to your mic. Then, in the Audio Mixer, click Mic/Aux "
               "and choose Filters.";
   } else {
-    // In 32.2's mixer, a source's name opens its menu (VolumeControl.cpp).
+    // In OBS's mixer, a source's name opens its menu (VolumeControl.cpp).
     filters = std::format("In the Audio Mixer, click {} and choose Filters.", mic.empty() ? "your mic" : mic);
   }
   // An audio-only source's list is Basic.Filters.AudioFilters. knobs

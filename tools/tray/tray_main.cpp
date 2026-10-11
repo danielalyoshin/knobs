@@ -115,7 +115,7 @@ Keys while it runs: o opens or closes OBS, c plugs the virtual cables in or out,
 m the mics, s stalls the chain or starts it again, f adds filters to OBS's mics
 without any, e adds Noise Suppression to the first mic's chain or takes it out,
 v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
-33.0.0), i re-imports from OBS, a clicks the notification, . waits a second,
+34.0.0), i re-imports from OBS, a clicks the notification, . waits a second,
 and q quits. Changes in OBS are seen when it closes or at a re-import. In the
 first run: y and n click the doors ("I set up my mic in OBS", "I'm new to OBS"),
 x Next, b Back, d Done, p Open OBS (which only says so: OBS would open the

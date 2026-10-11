@@ -10,6 +10,10 @@ std::vector<std::string_view> ResolveObsApi(ObsApi& api, const SymbolLookup& loo
   if (!api.name) missing.push_back(#name);
   KNOBS_OBS_API(KNOBS_RESOLVE_OBS_FUNCTION)
 #undef KNOBS_RESOLVE_OBS_FUNCTION
+#define KNOBS_RESOLVE_OPTIONAL_OBS_FUNCTION(name) \
+  api.name = reinterpret_cast<decltype(api.name)>(lookup(#name));
+  KNOBS_OBS_API_OPTIONAL(KNOBS_RESOLVE_OPTIONAL_OBS_FUNCTION)
+#undef KNOBS_RESOLVE_OPTIONAL_OBS_FUNCTION
   return missing;
 }
 

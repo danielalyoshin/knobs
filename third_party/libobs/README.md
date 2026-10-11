@@ -1,15 +1,15 @@
-# libobs headers (obs-studio 32.2.2)
+# libobs headers (obs-studio 33.0.0-rc1)
 
-Declarations knOBS compiles its `GetProcAddress` function table against.
-knOBS never links libobs and never ships it; at runtime it loads the user's
+Declarations knobs compiles its `GetProcAddress` function table against.
+knobs never links libobs and never ships it; at runtime it loads the user's
 installed `obs.dll` from a shadow copy.
 
-- Source: https://github.com/obsproject/obs-studio/tree/32.2.2/libobs
-- Commit: `ba2f32bdf791005443988a4955e963663e16b1ed`
+- Source: https://github.com/obsproject/obs-studio/tree/33.0.0-rc1/libobs
+- Commit: `7d98bebe1115b12608837b622164ea5fe6d9483a`
 - License: GPL-2.0-or-later, as stated in each file.
 
 Only the include closure of `obs.h`, `util/base.h` and `util/bmem.h` is
-vendored. `obsconfig.h` is a knOBS stub for the header obs-studio generates
+vendored. `obsconfig.h` is a knobs stub for the header obs-studio generates
 at build time.
 
 Don't edit these files. Regenerate them for another tag with:

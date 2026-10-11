@@ -72,22 +72,26 @@ Result<ObsInstall> InspectObsInstall(const fs::path& folder) {
     root = root.parent_path().parent_path();
   }
 
-  std::vector<fs::path> required = {ObsDll(root),
-                                    BinDir(root) / (fs::path(kGraphicsModule) += L".dll"),
-                                    LibobsDataDir(root)};
-  for (std::string_view module : kObsModules) {
-    required.push_back(PluginDll(root, module));
-    required.push_back(PluginDataDir(root, module));
-  }
-  for (const fs::path& path : required) {
-    if (!fs::exists(path, ec)) {
-      return Error{std::format("{} isn't a complete OBS Studio install: {} is missing.",
-                               ToUtf8(root), ToUtf8(path.lexically_relative(root)))};
-    }
-  }
-
+  auto missing = [&](const fs::path& path) {
+    return Error{std::format("{} isn't a complete OBS Studio install: {} is missing.", ToUtf8(root),
+                             ToUtf8(path.lexically_relative(root)))};
+  };
+  if (!fs::exists(ObsDll(root), ec)) return missing(ObsDll(root));
   auto version = ReadFileVersion(ObsDll(root));
   if (!version) return Error{version.error()};
+  // Where the rest is depends on the version, and an OBS knobs doesn't
+  // support may keep it somewhere knobs doesn't know. Its caller says it
+  // isn't supported, which beats saying it's incomplete.
+  if (!IsSupportedObsVersion(*version)) return ObsInstall{root, *version};
+
+  std::vector<fs::path> required = {BinDir(root) / (fs::path(kGraphicsModule) += L".dll"), LibobsDataDir(root)};
+  for (std::string_view module : kObsModules) {
+    required.push_back(PluginDll(root, module, *version));
+    required.push_back(PluginDataDir(root, module, *version));
+  }
+  for (const fs::path& path : required) {
+    if (!fs::exists(path, ec)) return missing(path);
+  }
   return ObsInstall{root, *version};
 }
 

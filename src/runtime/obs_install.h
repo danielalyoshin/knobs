@@ -13,7 +13,7 @@ namespace knobs::runtime {
 // A user's OBS Studio install. knobs only ever reads from it: to find the
 // version and to make the runtime copy. It never loads code from here.
 struct ObsInstall {
-  std::filesystem::path root;  // Holds bin\, data\ and obs-plugins\.
+  std::filesystem::path root;  // Holds bin\, data\, and core\ or obs-plugins\.
   ObsVersion version;          // From bin\64bit\obs.dll's version resource.
 
   friend bool operator==(const ObsInstall&, const ObsInstall&) = default;
@@ -21,7 +21,8 @@ struct ObsInstall {
 
 // Checks that `folder` is an OBS install with everything knobs needs, and
 // reads its version. Also accepts the install's bin\64bit folder, which is
-// what people tend to pick when browsing for it.
+// what people tend to pick when browsing for it. An OBS knobs doesn't
+// support passes once its version is read, without the rest checked.
 Result<ObsInstall> InspectObsInstall(const std::filesystem::path& folder);
 
 // Existing folders where the installer puts OBS: the ones recorded in the

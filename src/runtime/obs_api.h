@@ -99,21 +99,33 @@ namespace knobs::runtime {
   X(signal_handler_connect)                   \
   X(signal_handler_disconnect)
 
+// Exports that only some of the supported OBS versions have. They're null
+// where the loaded libobs lacks them, so check before calling.
+#define KNOBS_OBS_API_OPTIONAL(X) \
+  /* OBS 33.0 */                  \
+  X(obs_source_set_monitoring_enabled)
+
+// OBS 33.0 deprecates obs_source_set_monitoring_type, which 32.2 still needs.
+#pragma warning(push)
+#pragma warning(disable : 4996)
 struct ObsApi {
 #define KNOBS_DECLARE_OBS_FUNCTION(name) decltype(&::name) name = nullptr;
   KNOBS_OBS_API(KNOBS_DECLARE_OBS_FUNCTION)
+  KNOBS_OBS_API_OPTIONAL(KNOBS_DECLARE_OBS_FUNCTION)
 #undef KNOBS_DECLARE_OBS_FUNCTION
 };
+#pragma warning(pop)
 
 using AnyFunction = void (*)();
 // Returns the export with the given name, or null.
 using SymbolLookup = std::function<AnyFunction(const char* name)>;
 
-// Fills every entry of `api` from `lookup`. Returns the names that couldn't
-// be resolved; the table is only usable if that's empty.
+// Fills every entry of `api` from `lookup`. Returns the names of required
+// exports that couldn't be resolved; the table is only usable if that's
+// empty. Optional exports that are missing stay null.
 std::vector<std::string_view> ResolveObsApi(ObsApi& api, const SymbolLookup& lookup);
 
-// Number of entries in ObsApi.
+// Number of required entries in ObsApi.
 size_t ObsApiSize();
 
 }  // namespace knobs::runtime

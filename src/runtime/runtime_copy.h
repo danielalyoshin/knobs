@@ -26,9 +26,10 @@ struct RuntimeFileSet {
 //    import, directly or indirectly, that the install ships, and the PDBs
 //    next to them;
 //  - data\libobs and the two modules' data folders.
+// The modules are where that version of OBS keeps them (HasCoreModules).
 // Imports are resolved like the loader will once they run from the copy: the
 // importing DLL's own folder, then bin\64bit, then the system.
-Result<RuntimeFileSet> PlanRuntimeCopy(const std::filesystem::path& install_root);
+Result<RuntimeFileSet> PlanRuntimeCopy(const std::filesystem::path& install_root, const ObsVersion& version);
 
 struct RuntimeCopy {
   std::filesystem::path root;  // <runtime_base>\<version>, laid out like the install.

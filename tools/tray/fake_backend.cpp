@@ -179,10 +179,10 @@ const std::vector<FakeScenario>& FakeScenarios() {
                       std::format("OBS Studio isn't installed. {} needs {}.", kDisplayName,
                                   runtime::DescribeSupportedObsVersions())};
        }},
-      {"obs-unsupported", "OBS 33.0.0 is installed",
+      {"obs-unsupported", "OBS 34.0.0 is installed",
        [](FakeWorld& world, FakeScript&) {
-         world.obs = {core::ObsFound::kUnsupported, {"C:\\Program Files\\obs-studio", {33, 0, 0}},
-                      runtime::UnsupportedObsMessage("33.0.0")};
+         world.obs = {core::ObsFound::kUnsupported, {"C:\\Program Files\\obs-studio", {34, 0, 0}},
+                      runtime::UnsupportedObsMessage("34.0.0")};
        }},
       {"obs-too-old", "OBS 31.1.4 is installed, which is too old",
        [](FakeWorld& world, FakeScript&) {
@@ -261,8 +261,8 @@ std::string UpdateObs(FakeWorld& world) {
   if (world.obs.install.version < runtime::ObsVersion{32, 2, 3}) {
     world.obs.install.version = {32, 2, 3};
   } else {
-    world.obs = {core::ObsFound::kUnsupported, {world.obs.install.root, {33, 0, 0}},
-                 runtime::UnsupportedObsMessage("33.0.0")};
+    world.obs = {core::ObsFound::kUnsupported, {world.obs.install.root, {34, 0, 0}},
+                 runtime::UnsupportedObsMessage("34.0.0")};
   }
   return world.obs.install.version.ToString();
 }

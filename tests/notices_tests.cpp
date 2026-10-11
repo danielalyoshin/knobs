@@ -638,7 +638,7 @@ TEST(NoticesSayKnobsStoppedForAnUnsupportedObs) {
     tools::UpdateObs(world);
   });
   CHECK(f.state() == State::kObsUnsupported);
-  CHECK(f.events == std::vector<std::string>{"OBS was updated to 33.0.0"});
+  CHECK(f.events == std::vector<std::string>{"OBS was updated to 34.0.0"});
   CHECK(f.last.text ==
         std::format("{} doesn't support it yet, so it stopped. Click for what you can do.", kDisplayName));
   CHECK(f.last.page == FirstRunPage::kObsUnsupported && f.last.problem && f.notifier.badge() == Badge::kAttention);
@@ -652,7 +652,7 @@ TEST(NoticesSayKnobsStoppedForAnUnsupportedObs) {
   start.Start();
   CHECK(start.events == std::vector<std::string>{"This version of OBS isn't supported"});
   CHECK(start.last.text ==
-        std::format("{} doesn't support OBS 33.0.0 yet, so it stopped. Click for what you can do.", kDisplayName));
+        std::format("{} doesn't support OBS 34.0.0 yet, so it stopped. Click for what you can do.", kDisplayName));
 
   // Too old, at start and when OBS changes to it: not "yet", since no update
   // will support it.

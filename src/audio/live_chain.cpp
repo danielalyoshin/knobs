@@ -10,6 +10,18 @@ namespace {
 
 std::string OrEmpty(const char* text) { return text ? text : ""; }
 
+// OBS 33 only turns monitoring on or off, and warns in the log on every call
+// to obs_source_set_monitoring_type. 32.2 has no
+// obs_source_set_monitoring_enabled, and its Monitor Only keeps the source
+// out of libobs's output buffers (docs/design.md, OBS 33.0).
+void SetMonitoring(const runtime::ObsApi& api, obs_source_t* source, bool on) {
+  if (api.obs_source_set_monitoring_enabled) {
+    api.obs_source_set_monitoring_enabled(source, on);
+  } else {
+    api.obs_source_set_monitoring_type(source, on ? OBS_MONITORING_TYPE_MONITOR_ONLY : OBS_MONITORING_TYPE_NONE);
+  }
+}
+
 }  // namespace
 
 std::string MicWithGainSourceJson(std::string_view device_id, double gain_db) {
@@ -47,7 +59,7 @@ Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_vie
   // if the source was saved before libobs 23.2.2 (obs_load_source_type).
   // Neither win-wasapi's inputs nor the push source do, but turn it off
   // regardless.
-  api.obs_source_set_monitoring_type(source, OBS_MONITORING_TYPE_NONE);
+  SetMonitoring(api, source, false);
 
   // An unknown type still gets a source, with no callbacks and no flags.
   if (!(api.obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO)) {
@@ -91,7 +103,7 @@ Result<std::unique_ptr<LiveChain>> LiveChain::Start(const runtime::ObsApi& api,
   auto source = LoadSourceJson(api, source_json, options);
   if (!source) return Error{source.error()};
   std::unique_ptr<LiveChain> chain(new LiveChain(api, session, *source));
-  api.obs_source_set_monitoring_type(*source, OBS_MONITORING_TYPE_MONITOR_ONLY);
+  SetMonitoring(api, *source, true);
   api.obs_source_inc_active(*source);
   return chain;
 }
@@ -100,7 +112,7 @@ void LiveChain::RestartMonitor() { api_.obs_reset_audio_monitoring(); }
 
 LiveChain::~LiveChain() {
   api_.obs_source_dec_active(source_);
-  api_.obs_source_set_monitoring_type(source_, OBS_MONITORING_TYPE_NONE);
+  SetMonitoring(api_, source_, false);
   api_.obs_source_release(source_);
   session_.DrainDestroyQueue();
 }
