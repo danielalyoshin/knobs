@@ -28,7 +28,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 ## Operating Context
 
 - Lives in the Windows tray with no window by default, and starts with Windows.
-- Needs OBS Studio installed (32.2 to 33.x; 33.x from the release after 0.1.1) and a virtual cable such as VB-Cable. Other apps pick the cable as their mic.
+- Needs OBS Studio installed (32.2 to 33.x) and a virtual cable such as VB-Cable. Other apps pick the cable as their mic.
 - Users tune filters in OBS. knobs reads the active OBS profile and scene collection and never changes them.
 - Pauses while OBS runs and resumes when it exits, so the cable never gets the mic twice.
 - Found through GitHub, the OBS forums and r/obs.

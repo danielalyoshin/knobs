@@ -15,7 +15,7 @@ Your other apps get the same processed mic while OBS stays closed.
 [![Release](https://img.shields.io/github/v/release/danielalyoshin/knobs?include_prereleases&sort=semver&label=release&color=5c5f66&labelColor=33353a)](https://github.com/danielalyoshin/knobs/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/danielalyoshin/knobs/ci.yml?branch=main&label=CI&labelColor=33353a)](https://github.com/danielalyoshin/knobs/actions/workflows/ci.yml)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-5c5f66?labelColor=33353a)](#requirements)
-[![OBS Studio 32.2](https://img.shields.io/badge/OBS%20Studio-32.2-5c5f66?labelColor=33353a)](#requirements)
+[![OBS Studio 32.2 to 33](https://img.shields.io/badge/OBS%20Studio-32.2%20to%2033-5c5f66?labelColor=33353a)](#requirements)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-5c5f66?labelColor=33353a)](LICENSE)
 
 [Download](https://github.com/danielalyoshin/knobs/releases/latest) · [Setup](#setup) · [How it works](#how-it-works) · [Known limits](#known-limits) · [Design](docs/design.md) · [Issues](https://github.com/danielalyoshin/knobs/issues)
@@ -67,7 +67,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 | Requirement | Supported |
 |:---|:---|
 | Windows | 64-bit |
-| OBS Studio | 32.2.x, tested on 32.2.2. knobs finds an install from OBS's installer by itself; for a Steam or portable OBS, you choose its folder. Support for 33.0 follows its release. |
+| OBS Studio | 32.2 to 33.x, tested on 32.2.2 and 33.0.0-rc1. knobs finds an install from OBS's installer by itself; for a Steam or portable OBS, you choose its folder. |
 | Virtual cable | [VB-Cable](https://vb-audio.com/Cable/), or another one: knobs recognizes VB-Audio's cables (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. |
 | Mic filters | OBS's built-in audio filters: Noise Suppression (RNNoise or Speex), Noise Gate, Expander, Upward Compressor, Compressor, Limiter, Gain, 3-Band Equalizer and Invert Polarity. [Known limits](#known-limits) has the exceptions. |
 
@@ -75,7 +75,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 
 ### 1. Install OBS and a virtual cable
 
-- [OBS Studio](https://obsproject.com/download) 32.2.x.
+- [OBS Studio](https://obsproject.com/download) 32.2 or 33.
 - [VB-Cable](https://vb-audio.com/Cable/). Restart Windows after installing it.
 
 ### 2. Tune your mic in OBS
@@ -91,7 +91,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 5. Click each filter and adjust it by ear, starting from OBS's defaults.
 6. Close OBS. knobs reads your filters when OBS closes.
 
-To hear the filters while you adjust them, choose headphones as the **Monitoring Device** in **Settings › Audio**, then set the mic's **Audio Monitoring** to **Monitor Only (mute output)** in **Edit › Advanced Audio Properties**.
+To hear the filters while you adjust them, choose headphones as the **Monitoring Device** in **Settings › Audio**, then turn on the mic's **Audio Monitoring** in **Edit › Advanced Audio Properties**: check **Enable** in OBS 33, or choose **Monitor Only (mute output)** in OBS 32.2.
 
 <details>
 <summary><b>What each audio filter does</b></summary>
@@ -164,7 +164,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Folder | Holds |
 |:---|:---|
 | `%AppData%\knobs` | `settings.ini`: your choices in the menu and the first run |
-| `%LocalAppData%\knobs` | The private copy of OBS's files (about 54 MB for 32.2.2) and the logs |
+| `%LocalAppData%\knobs` | The private copy of OBS's files (about 54 MB) and the logs |
 
 **To uninstall,** use **Settings › Apps › Installed apps** in Windows. Uninstalling quits knobs, turns off Start with Windows, and removes the copy of OBS's files and the logs. It then asks whether to delete your settings too. For a portable copy, turn off **Start with Windows** in its menu, quit it, and delete its folder.
 
@@ -177,7 +177,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 - **Mute and push-to-talk don't silence the cable.** OBS's monitoring ignores them too. The first run says so.
 - **The cable is quiet while OBS is open**, unless OBS monitors your mic to it. Turn off **Pause while OBS is open** to keep knobs running then.
 - **A new sample rate or channel layout in OBS restarts knobs**, as it restarts OBS, with a moment of silence.
-- **Windows only, and OBS 32.2.x only,** for now.
+- **Windows only, and OBS 32.2 to 33.x only,** for now.
 
 ## Privacy
 
