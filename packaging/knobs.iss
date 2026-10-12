@@ -182,8 +182,9 @@ begin
 end;
 
 // Whether VB-CABLE's setup installed its driver: it adds itself to the
-// installed apps as "VBCABLE, The Virtual Audio Cable" (VbCableInstalled in
-// src/audio/device_watch.cpp).
+// installed apps as "VBCABLE, The Virtual Audio Cable" (VbCablePending in
+// src/audio/device_watch.cpp, which also asks whether it was since Windows
+// started).
 function VbCableDriverInstalled(): Boolean;
 var
   Apps: TArrayOfString;
