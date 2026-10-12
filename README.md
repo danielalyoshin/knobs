@@ -117,7 +117,7 @@ OBS's [Filters Guide](https://obsproject.com/kb/filters-guide) has more on each.
 
 Download knobs from the [latest release](https://github.com/danielalyoshin/knobs/releases/latest). There are two ways to run it:
 
-- **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end. With no virtual cable on your PC, it offers to install VB-Cable, VB-Audio's virtual cable: VB-Audio's own setup opens, Windows asks to let it install its driver, and you click **Install Driver**. If Windows has to restart before the cable appears, the installer asks, and knobs opens again after the restart.
+- **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end. With no virtual cable on your PC, it offers to install VB-Cable, VB-Audio's virtual cable: VB-Audio's own setup opens, Windows asks to let it install its driver, and you click **Install Driver**. VB-Audio's website may then open in your browser. If Windows has to restart before the cable appears, the installer asks, and knobs opens again after the restart.
 - **The portable zip**, `knobs-<version>-portable.zip`. Unzip it anywhere and run `knobs.exe`. It keeps its settings and its data in a `data` folder beside the exe, and nothing in your user folders.
 
 knobs is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows SmartScreen may still warn about a new release until enough people have run it. Choose **More info**, then **Run anyway**.

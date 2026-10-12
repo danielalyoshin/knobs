@@ -535,7 +535,7 @@ PageView Problem(const core::Snapshot& snapshot) {
   view.content = EscapeMarkup(snapshot.detail);
   view.buttons = {Button(kButtonBack, "&Back")};
   if (snapshot.state == State::kRestartNeeded) {
-      view.instruction = std::format("{} needs to restart", kDisplayName);
+    view.instruction = std::format("{} needs to restart", kDisplayName);
     view.buttons.push_back(Button(kButtonRestart, std::format("&Restart {}", kDisplayName)));
     view.default_button = kButtonRestart;
   } else {

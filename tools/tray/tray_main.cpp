@@ -111,6 +111,8 @@ Options:
   --signature <how>      How the made-up installers' signatures check out:
                          ok, unknown (Windows couldn't finish the check) or
                          rejected. Default: ok.
+  --recheck <how>        How the check again, just before an update runs,
+                         turns out, the same ways. Default: as --signature.
   --portable             Run as a portable copy, which can't update itself.
   --updated <version>    Start as the copy an update to <version> started,
                          which says how the update went in a notification.
@@ -133,7 +135,8 @@ Options:
                          that folder, as {0} does. The audio devices are made
                          up to match tests/fixtures/obs-config's.
 
-Keys while it runs: o opens or closes OBS, c plugs the virtual cables in or out,
+Keys while it runs: o opens or closes OBS, w opens or closes OBS in another
+Windows account (Alex's), c plugs the virtual cables in or out,
 m the mics, s stalls the chain or starts it again, f adds filters to OBS's mics
 without any, e adds Noise Suppression to the first mic's chain or takes it out,
 v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
@@ -173,6 +176,7 @@ struct Options {
   bool install_updates = false;
   std::optional<update::Version> latest;
   update::SignatureCheck::Verdict signature = update::SignatureCheck::Verdict::kRelease;
+  std::optional<update::SignatureCheck::Verdict> recheck;
   bool portable = false;
   std::optional<update::Version> updated;
 };
@@ -248,17 +252,19 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     } else if (arg == L"--latest") {
       options.latest = update::ParseVersion(ToUtf8(value));
       if (!options.latest) return std::nullopt;
-    } else if (arg == L"--signature") {
+    } else if (arg == L"--signature" || arg == L"--recheck") {
       using Verdict = update::SignatureCheck::Verdict;
+      std::optional<Verdict> verdict;
       if (value == L"ok") {
-        options.signature = Verdict::kRelease;
+        verdict = Verdict::kRelease;
       } else if (value == L"unknown") {
-        options.signature = Verdict::kUnknown;
+        verdict = Verdict::kUnknown;
       } else if (value == L"rejected") {
-        options.signature = Verdict::kRejected;
+        verdict = Verdict::kRejected;
       } else {
         return std::nullopt;
       }
+      (arg == L"--signature" ? options.signature : options.recheck.emplace()) = *verdict;
     } else if (arg == L"--updated") {
       options.updated = update::ParseVersion(ToUtf8(value));
       if (!options.updated) return std::nullopt;
@@ -321,6 +327,7 @@ struct Session {
   tray::TrayApp* app = nullptr;
   core::Core* core = nullptr;
   std::atomic<bool> obs_running = false;
+  std::atomic<bool> other_obs = false;  // In Alex's account.
   bool start_with_windows = false;
   Clock::time_point start = Clock::now();
   UINT_PTR settle_timer = 0;
@@ -355,6 +362,12 @@ void Press(wchar_t key) {
       const bool running = !session.obs_running;
       session.obs_running = running;
       Print(running ? "OBS opens\n" : "OBS closes\n");
+      break;
+    }
+    case L'w': {
+      const bool running = !session.other_obs;
+      session.other_obs = running;
+      Print(running ? "OBS opens in Alex's account\n" : "OBS closes in Alex's account\n");
       break;
     }
     case L'c': {
@@ -792,8 +805,11 @@ int Run(const Options& options) {
     Print(std::format("{} would download {}\n", kDisplayName, update::InstallerUrl(version)));
     return WriteText(file, "A made-up installer.");
   };
-  tray_options.updates.verify = [verdict = options.signature](const fs::path& file) {
+  tray_options.updates.verify = [download = options.signature,
+                                 recheck = options.recheck.value_or(options.signature)](const fs::path& file) {
     using Verdict = update::SignatureCheck::Verdict;
+    // A download is checked in a folder of its own, then again where it's kept.
+    const Verdict verdict = file.parent_path().filename() == L"download" ? download : recheck;
     Print(std::format("{}'s signature would be checked: {}\n", ToUtf8(file.filename()),
                       verdict == Verdict::kRelease   ? "ok"
                       : verdict == Verdict::kUnknown ? "Windows couldn't finish the check"
@@ -825,6 +841,10 @@ int Run(const Options& options) {
     core::CoreOptions core_options;
     core_options.settings = settings;
     core_options.obs_running = [] { return g_session->obs_running.load(); };
+    core_options.other_obs = [] {
+      if (!g_session->other_obs) return std::vector<core::OtherObs>();
+      return std::vector<core::OtherObs>{{.session = 2, .account = "Alex"}};
+    };
     core_options.obs_poll = 250ms;
     core_options.watch_devices = false;
     const auto log = [](std::string_view line) { Print(std::format("{:13}log: {}\n", "", line)); };

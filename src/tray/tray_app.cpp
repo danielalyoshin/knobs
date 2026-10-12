@@ -391,33 +391,37 @@ void TrayApp::AddIcon() {
   UpdateTip();
 }
 
-void TrayApp::UpdateTip() {
+void TrayApp::ModifyIcon(NOTIFYICONDATAW& data) {
   if (!icon_added_) return;
-  NOTIFYICONDATAW data = {sizeof(data)};
   data.hWnd = window_;
   data.uID = kIconId;
-  data.uFlags = NIF_TIP | NIF_SHOWTIP;
+  // With the tooltip every time: Windows 11 names the icon in the hidden
+  // icons' flyout, for screen readers, from the change it got last, and a
+  // change without one leaves the icon nameless.
+  data.uFlags |= NIF_TIP | NIF_SHOWTIP;
   std::wstring tip = std::format(L"{}\n{}", kDisplayNameW, FromUtf8(StatusLine(snapshot_)));
   if (tip.size() >= std::size(data.szTip)) {
     tip.resize(std::size(data.szTip) - 2);
     tip += L'…';
   }
   tip.copy(data.szTip, tip.size());
+  data.szTip[tip.size()] = L'\0';
   Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+void TrayApp::UpdateTip() {
+  NOTIFYICONDATAW data = {sizeof(data)};
+  ModifyIcon(data);
 }
 
 void TrayApp::UpdateBadge() {
   const Badge badge = notifier_.badge();
   if (badge == badge_) return;
   badge_ = badge;
-  if (icon_added_) {
-    NOTIFYICONDATAW data = {sizeof(data)};
-    data.hWnd = window_;
-    data.uID = kIconId;
-    data.uFlags = NIF_ICON;
-    data.hIcon = icons_[static_cast<size_t>(badge_)];
-    Shell_NotifyIconW(NIM_MODIFY, &data);
-  }
+  NOTIFYICONDATAW data = {sizeof(data)};
+  data.uFlags = NIF_ICON;
+  data.hIcon = icons_[static_cast<size_t>(badge_)];
+  ModifyIcon(data);
   if (options_.on_badge) options_.on_badge(badge_);
 }
 
@@ -438,10 +442,7 @@ void TrayApp::Notify(const Notifier::Update& update) {
 }
 
 void TrayApp::ShowBalloon(const Notice& notice) {
-  if (!icon_added_) return;
   NOTIFYICONDATAW data = {sizeof(data)};
-  data.hWnd = window_;
-  data.uID = kIconId;
   data.uFlags = NIF_INFO;
   CopyField(data.szInfoTitle, notice.title);
   CopyField(data.szInfo, notice.text);
@@ -449,17 +450,14 @@ void TrayApp::ShowBalloon(const Notice& notice) {
   // icons.
   data.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON | (notice.sound ? 0u : NIIF_NOSOUND);
   data.hBalloonIcon = notification_icons_[static_cast<size_t>(notice.problem ? Badge::kAttention : Badge::kNone)];
-  Shell_NotifyIconW(NIM_MODIFY, &data);
+  ModifyIcon(data);
 }
 
 void TrayApp::HideBalloon() {
-  if (!icon_added_) return;
   // An empty text takes it down.
   NOTIFYICONDATAW data = {sizeof(data)};
-  data.hWnd = window_;
-  data.uID = kIconId;
   data.uFlags = NIF_INFO;
-  Shell_NotifyIconW(NIM_MODIFY, &data);
+  ModifyIcon(data);
 }
 
 bool TrayApp::Quiet() const { return !first_run_.done || setup_window_ != nullptr; }

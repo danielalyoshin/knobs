@@ -54,6 +54,11 @@ std::optional<MenuItem> Fix(const core::Snapshot& snapshot) {
     case State::kObsMissing:
       fix = Command(kIdFindObs, "&Find OBS…");
       break;
+    case State::kObsUnsupported:
+      // The first run's page for it, as Finish setup… opens the page the
+      // state calls for.
+      fix = Command(kIdFinishSetup, "&Find a supported OBS…");
+      break;
     case State::kNeedsSetup:
       if (snapshot.setup == SetupNeed::kPickMic) {
         fix = Command(kIdChooseMic, "C&hoose a mic…");

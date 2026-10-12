@@ -212,11 +212,11 @@ The tray app shows the core's state and sends it commands. The menu and notifica
 
 ### Status line and menu
 
-The status line names the state and the chain in short form, such as `Mic/Aux › 4 filters › CABLE In 16ch` or `Mic missing: …`, counting only the filters that run. The icon's tooltip repeats it, and the first run and notifications give the chain in full.
+The status line names the state and the chain in short form, such as `Mic/Aux › 4 filters › CABLE In 16ch` or `Mic missing: …`, counting only the filters that run. The icon's tooltip repeats it, sent with every change to the icon, since Windows 11 names the icon for screen readers from the last change, and the first run and notifications give the chain in full.
 
 The menu is native (`TrackPopupMenuEx`): the status line, Pause/Resume, Mic ▸, Cable ▸, Re-import from OBS, Pause while OBS is open, Start with Windows, Automatically check for new versions, Automatically update, Setup…, Open log folder, About and Quit.
 
-- When something needs the user, the item after the status line is the fix, in bold, such as Choose a cable….
+- When something needs the user, the item after the status line is the fix, in bold, such as Choose a cable…, or Find a supported OBS…, which opens the first run's page for an OBS knobs doesn't support.
 - Mic ▸ and Cable ▸ start with "Same as OBS" when OBS has one mic or monitors to a cable. Any other pick is knobs's own and survives re-imports.
 - Cables are recognized by name: VB-Audio's (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. A VB-Audio cable's recording side follows from its name, so CABLE In 16ch records from CABLE Output.
 - When a check has found a newer version, the item after the status lines offers it: Get knobs 0.3.0… opens its page, or once an update has downloaded, Update to knobs 0.3.0 installs it now (Updates).

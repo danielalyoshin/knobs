@@ -239,7 +239,8 @@ begin
   ForceDirectories(Folder);
   ExtractTemporaryFile('{#VbCablePackName}');
   Pack := ExpandConstant('{tmp}\{#VbCablePackName}');
-  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver, then close it.';
+  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver. VB-Audio''s website may ' +
+                                    'open in your browser after it.';
   WizardForm.FilenameLabel.Caption := '';
   // tar, which ships with Windows, unzips it.
   Ran := Exec(ExpandConstant('{sys}\tar.exe'), '-xf "' + Pack + '" -C "' + Folder + '"', Folder, SW_HIDE,

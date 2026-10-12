@@ -2,6 +2,7 @@
 #pragma once
 
 #include <windows.h>
+#include <shellapi.h>
 
 #include <array>
 #include <chrono>
@@ -156,6 +157,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void LoadIcons();
   void DestroyIcons();
   void AddIcon();
+  // Changes the icon as `data` says, with the tooltip.
+  void ModifyIcon(NOTIFYICONDATAW& data);
   void UpdateTip();
   void UpdateBadge();
   // Shows or takes down a notification, then updates the badge and the

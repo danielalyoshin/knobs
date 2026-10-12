@@ -242,13 +242,16 @@ TEST(MenuOffersTheFixInBold) {
     return item ? std::format("{} {}", item->id, item->text) : std::string("none");
   };
   core::Snapshot snapshot = Running();
-  for (const State state : {State::kRunning, State::kPausedByUser, State::kPausedForObs, State::kMicMissing,
-                            State::kObsUnsupported, State::kStarting}) {
+  for (const State state :
+       {State::kRunning, State::kPausedByUser, State::kPausedForObs, State::kMicMissing, State::kStarting}) {
     snapshot.state = state;
     CHECK(fix(snapshot) == "none");
   }
   snapshot.state = State::kObsMissing;
   CHECK(fix(snapshot) == std::format("{} &Find OBS…", +kIdFindObs));
+  // The first run's page for it.
+  snapshot.state = State::kObsUnsupported;
+  CHECK(fix(snapshot) == std::format("{} &Find a supported OBS…", +kIdFinishSetup));
   snapshot.state = State::kCableMissing;
   CHECK(fix(snapshot) == std::format("{} C&hoose a cable…", +kIdChooseCable));
   snapshot.state = State::kNeedsSetup;
