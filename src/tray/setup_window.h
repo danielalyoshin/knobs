@@ -113,10 +113,18 @@ class SetupWindow final : private SetupUiaHost {
   void StartMotion(bool first, bool new_page);
   void Step();
   // A page's walkthrough: from the start, playing unless Windows' animations
-  // are off; a frame of it; and play or pause.
+  // are off; a frame of it; play or pause; the moment it shows; its
+  // screenshots, decoded before it needs them; and whether the user can
+  // see it.
   void StartWalk();
   void WalkStep();
   void SetWalkPlaying(bool playing);
+  void SetWalkTime(float time);
+  void PreloadWalk();
+  bool WalkSeen() const;
+  // Asks for `box`, in client DIPs, and `margin` DIPs round it, to be drawn
+  // again.
+  void InvalidateDips(const D2D1_RECT_F& box, float margin);
 
   ID2D1Bitmap* Picture(const std::string& name);
 
@@ -192,7 +200,9 @@ class SetupWindow final : private SetupUiaHost {
   float arrive_ = 1;
   SceneState shown_;
   float walk_time_ = 0;  // Seconds into the page's walkthrough.
+  std::optional<WalkFrame> walk_frame_;  // What it shows then.
   bool walk_playing_ = false;
+  bool walk_unseen_ = false;  // Playing, but waiting for the user to see it.
   Clock::time_point walk_tick_;
 
   std::unique_ptr<SetupUia> uia_;

@@ -190,8 +190,11 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       if (zoom < 1 || zoom > 3) return std::nullopt;
       options.zoom = zoom;
     } else if (arg == L"--walk-at") {
-      const float at = std::wcstof(std::wstring(value).c_str(), nullptr);
-      if (at < 0) return std::nullopt;
+      // A number of seconds, all of it: "abc", "1x" and "inf" aren't.
+      const std::wstring text(value);
+      wchar_t* end = nullptr;
+      const float at = std::wcstof(text.c_str(), &end);
+      if (end == text.c_str() || *end != L'\0' || !std::isfinite(at) || at < 0) return std::nullopt;
       options.walk_at = at;
     } else if (arg == L"--settings") {
       options.settings = fs::absolute(value);

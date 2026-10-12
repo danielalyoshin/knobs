@@ -114,16 +114,12 @@ struct PageButton {
   friend bool operator==(const PageButton&, const PageButton&) = default;
 };
 
-// A screenshot beside a page's steps, showing one of them, or a walkthrough
-// of them (walkthrough.h).
-struct Picture {
-  // A walkthrough's name ("obs-filters"), or a screenshot's resource
-  // ("vb-cable-setup").
-  std::string name;
-  int step = 0;     // The step a screenshot shows, from 1. A walkthrough shows its own.
-  std::string alt;  // What it shows, for screen readers.
+// The walkthrough beside a page's steps (walkthrough.h).
+struct PageWalkthrough {
+  std::string name;  // "obs-filters", "vb-cable-setup".
+  std::string alt;   // What it shows, for screen readers.
 
-  friend bool operator==(const Picture&, const Picture&) = default;
+  friend bool operator==(const PageWalkthrough&, const PageWalkthrough&) = default;
 };
 
 // A note on the warnings page.
@@ -142,9 +138,9 @@ struct PageView {
   std::string instruction;  // The heading.
   // Paragraphs, "\n\n" between.
   std::string content;
-  // Numbered steps after the content, and the screenshot beside them.
+  // Numbered steps after the content, and the walkthrough beside them.
   std::vector<std::string> steps;
-  std::optional<Picture> picture;
+  std::optional<PageWalkthrough> walkthrough;
   std::vector<PageNote> notes;
   // The chain as it will run, set out on the last page.
   std::optional<core::ChainSummary> chain;

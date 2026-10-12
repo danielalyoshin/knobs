@@ -318,7 +318,7 @@ ID2D1StrokeStyle* SharpStroke() {
   return style.Get();
 }
 
-ComPtr<ID2D1Bitmap> LoadPngResource(ID2D1RenderTarget* target, HINSTANCE instance, std::wstring_view name) {
+ComPtr<ID2D1Bitmap> LoadPictureResource(ID2D1RenderTarget* target, HINSTANCE instance, std::wstring_view name) {
   const std::wstring id(name);
   const HRSRC resource = FindResourceW(instance, id.c_str(), RT_RCDATA);
   if (!target || !resource) return nullptr;
@@ -336,8 +336,24 @@ ComPtr<ID2D1Bitmap> LoadPngResource(ID2D1RenderTarget* target, HINSTANCE instanc
       FAILED(wic->CreateStream(&stream)) ||
       FAILED(stream->InitializeFromMemory(static_cast<BYTE*>(const_cast<void*>(bytes)), size)) ||
       FAILED(wic->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder)) ||
-      FAILED(decoder->GetFrame(0, &frame)) || FAILED(wic->CreateFormatConverter(&converter)) ||
-      FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0,
+      FAILED(decoder->GetFrame(0, &frame))) {
+    return nullptr;
+  }
+  ComPtr<IWICBitmapSource> source = frame;
+  UINT width = 0, height = 0;
+  frame->GetSize(&width, &height);
+  if (const UINT32 most = target->GetMaximumBitmapSize(); most > 0 && (width > most || height > most)) {
+    const double fit = std::min(static_cast<double>(most) / width, static_cast<double>(most) / height);
+    ComPtr<IWICBitmapScaler> scaler;
+    if (FAILED(wic->CreateBitmapScaler(&scaler)) ||
+        FAILED(scaler->Initialize(frame.Get(), std::max(1u, static_cast<UINT>(width * fit)),
+                                  std::max(1u, static_cast<UINT>(height * fit)), WICBitmapInterpolationModeFant))) {
+      return nullptr;
+    }
+    source = scaler;
+  }
+  if (FAILED(wic->CreateFormatConverter(&converter)) ||
+      FAILED(converter->Initialize(source.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0,
                                    WICBitmapPaletteTypeMedianCut)) ||
       FAILED(target->CreateBitmapFromWicBitmap(converter.Get(), nullptr, &bitmap))) {
     return nullptr;

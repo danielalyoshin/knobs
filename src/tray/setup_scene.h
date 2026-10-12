@@ -95,9 +95,8 @@ struct Item {
     kRule,     // A hairline along the rect's top.
     kIcon,     // `icon`, scaled to the rect, in `ink`.
     kMark,     // A badge, the rect's width across.
-    kNumeral,  // Step `step`'s number: on an ink disc while that step is shown.
-    kShownDisc,  // The number of the step shown, on an ink disc.
-    kPicture,  // A screenshot, framed.
+    kNumeral,  // Step `step`'s number: on an ink disc while the walkthrough shows it.
+    kShownDisc,  // The number of the step the walkthrough shows, on an ink disc.
     kWalkthrough,  // The scene's walkthrough, framed.
     kDot,      // The waiting dot.
   };
@@ -113,7 +112,6 @@ struct Item {
   StageState mark = StageState::kSet;
   bool ring = false;  // A disc with a ring of the panel around it.
   int step = 0;       // A numeral's.
-  std::string picture;
   bool in_panel = false;
 };
 
@@ -137,8 +135,6 @@ struct Scene {
   int status = -1;
   bool waiting = false;
   D2D1_RECT_F dot{};  // The waiting dot, which moves by itself.
-  // The step a guide's screenshot shows, or 0: a walkthrough shows its own.
-  int pictured = 0;
   // The steps' numbers for their discs, by step.
   std::vector<ComPtr<IDWriteTextLayout>> digits;
   // A guide's walkthrough, its frame in the panel, and its play and pause.
@@ -155,11 +151,8 @@ struct Scene {
   bool Visible(const Element& element, float scroll) const;
 };
 
-// How big a screenshot is, in pixels, if knobs has it.
-using PictureSize = std::function<std::optional<D2D1_SIZE_U>(std::string_view name)>;
-
 // Lays out `view`, with the choice and the check box as the user has them.
-Scene LayoutScene(const PageView& view, int choice, bool checked, const PictureSize& picture_size);
+Scene LayoutScene(const PageView& view, int choice, bool checked);
 
 // What changes as the window is used, for the painter.
 struct SceneState {
@@ -176,20 +169,15 @@ struct SceneState {
   std::array<float, kStageCount - 1> wire{};
   float arrive = 1;
   float pulse = 1;
-  // How far into its walkthrough the page is, in seconds, and whether it's
-  // playing.
-  float walk_time = 0;
+  // The moment of its walkthrough the page shows, and whether it's playing.
+  std::optional<WalkFrame> walk;
   bool walk_playing = false;
 };
-
-// The step the scene shows at that moment: its walkthrough's, or its
-// screenshot's.
-int ShownStep(const Scene& scene, float walk_time);
 
 class ScenePainter {
  public:
   // `pixel` is a device pixel in DIPs, for hairlines that stay sharp.
-  // `picture` gives a screenshot, decoded for `target`.
+  // `picture` gives a walkthrough's screenshot, decoded for `target`.
   void Paint(ID2D1RenderTarget* target, const Scene& scene, const SetupPalette& palette, const SceneState& state,
              float pixel, const std::function<ID2D1Bitmap*(const std::string&)>& picture);
   // Brushes belong to a render target: forget them with it.
@@ -198,6 +186,11 @@ class ScenePainter {
  private:
   ComPtr<ID2D1RenderTarget> target_;
   ComPtr<ID2D1SolidColorBrush> brush_, ink_, link_;
+  // The walkthrough's clip, kept from frame to frame: its layer belongs to
+  // the target, and its shape to the frame's box.
+  ComPtr<ID2D1Layer> walk_layer_;
+  ComPtr<ID2D1RoundedRectangleGeometry> walk_clip_;
+  D2D1_RECT_F walk_clip_box_{};
 };
 
 // The centre of a stage's icon, where the caret points.

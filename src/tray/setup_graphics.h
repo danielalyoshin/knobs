@@ -63,8 +63,9 @@ ComPtr<ID2D1PathGeometry> PathGeometry(std::string_view svg, bool filled = false
 ID2D1StrokeStyle* RoundStroke();
 ID2D1StrokeStyle* SharpStroke();
 
-// A PNG in the module's resources (RCDATA named `name`), decoded for
-// `target`, or null if there's none.
-ComPtr<ID2D1Bitmap> LoadPngResource(ID2D1RenderTarget* target, HINSTANCE instance, std::wstring_view name);
+// A picture in the module's resources (RCDATA named `name`), a PNG or a
+// JPEG, decoded for `target`, or null if there's none. One bigger than
+// `target` can hold, as on older graphics hardware, is scaled down to fit.
+ComPtr<ID2D1Bitmap> LoadPictureResource(ID2D1RenderTarget* target, HINSTANCE instance, std::wstring_view name);
 
 }  // namespace knobs::tray

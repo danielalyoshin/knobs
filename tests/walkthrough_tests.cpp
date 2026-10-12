@@ -11,14 +11,15 @@
 #include <vector>
 
 #include "test_harness.h"
+#include "tray/setup_scene.h"
 #include "tray/walkthrough.h"
 
 namespace {
 
 using namespace knobs::tray;
 
-// The frame the setup window plays it in (setup_scene.cpp).
-constexpr D2D1_SIZE_F kFrame = {300, 188};
+// The frame the setup window plays it in.
+constexpr D2D1_SIZE_F kFrame = kWalkFrame;
 constexpr float kTick = 0.005f;
 
 // A walkthrough, and what it should do.

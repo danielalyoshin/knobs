@@ -33,6 +33,7 @@ constexpr UINT_PTR kRenderTimer = 1;  // Catches a render put off by a button's 
 constexpr UINT kActivateMessage = WM_APP + 0x41;
 constexpr UINT_PTR kMotionTimer = 2;
 constexpr UINT_PTR kWalkTimer = 3;  // A walkthrough's frames.
+constexpr UINT kWalkUnseenMs = 250;  // How often an unseen walkthrough looks again.
 constexpr UINT kRenderMs = 200;
 constexpr UINT kFrameMs = 16;
 // The motion (docs/design.md, The setup window): 320 ms for structure,
@@ -44,6 +45,7 @@ constexpr UINT kBreathFrameMs = 50;  // The dot needs no more.
 // DWM's attributes, by number: older SDKs lack the names.
 constexpr DWORD kDarkMode = 20;      // DWMWA_USE_IMMERSIVE_DARK_MODE
 constexpr DWORD kCaptionColor = 35;  // DWMWA_CAPTION_COLOR, Windows 11
+constexpr DWORD kCloaked = 14;       // DWMWA_CLOAKED: on another desktop
 
 // cubic-bezier(0.2, 0, 0, 1), the site's one curve, solved for x.
 float Ease(float t) {
@@ -71,7 +73,7 @@ float TextScale() {
   return std::clamp(static_cast<float>(percent) / 100, 1.0f, 2.25f);
 }
 
-// A picture's resource name: "obs-filters" is OBS_FILTERS.
+// A picture's resource name: "obs-main" is OBS_MAIN.
 std::wstring ResourceName(const std::string& name) {
   std::wstring resource = FromUtf8(name);
   for (wchar_t& c : resource) c = c == L'-' ? L'_' : static_cast<wchar_t>(towupper(c));
@@ -222,9 +224,11 @@ bool SetupWindow::Create() {
 }
 
 void SetupWindow::ApplyTheme() {
+  const bool animated = animate_;
   animate_ = AnimationsOn();
-  // Turned off, they stop the walkthrough too: it can be played again.
-  if (!animate_) SetWalkPlaying(false);
+  // Turned off, they stop the walkthrough too, once: it can be played again,
+  // and keeps playing through other changes of setting.
+  if (animated && !animate_) SetWalkPlaying(false);
   palette_ = MakeSetupPalette(CurrentSetupMode(theme_));
   if (!window_) return;
   const BOOL dark = palette_.mode == SetupMode::kDark;
@@ -251,6 +255,7 @@ bool SetupWindow::MakeTarget() {
   if (FAILED(made)) return false;
   painter_.Reset();
   pictures_.clear();
+  PreloadWalk();
   return true;
 }
 
@@ -258,7 +263,7 @@ ID2D1Bitmap* SetupWindow::Picture(const std::string& name) {
   if (!target_) return nullptr;
   auto found = pictures_.find(name);
   if (found == pictures_.end()) {
-    found = pictures_.emplace(name, LoadPngResource(target_.Get(), instance_, ResourceName(name))).first;
+    found = pictures_.emplace(name, LoadPictureResource(target_.Get(), instance_, ResourceName(name))).first;
   }
   return found->second.Get();
 }
@@ -277,7 +282,7 @@ void SetupWindow::Paint(const RECT& dirty) {
   SystemParametersInfoW(SPI_GETKEYBOARDCUES, 0, &always, 0);
   shown_.show_access_keys = always || show_access_keys_;
   shown_.scroll = scroll_;
-  shown_.walk_time = walk_time_;
+  shown_.walk = walk_frame_;
   shown_.walk_playing = walk_playing_;
   target_->BeginDraw();
   // Only what needs it: the waiting dot asks for no more than its own box.
@@ -572,8 +577,9 @@ void SetupWindow::ShowView(PageView view) {
     }
   }
   StartMotion(first, new_page);
-  if (new_page || scene_.walkthrough != walk_before) StartWalk();
   uia_->SceneChanged(new_page, rebuilt, FromUtf8(view_.instruction));
+  // After the scene's providers are made: the walkthrough's toggle is one.
+  if (new_page || scene_.walkthrough != walk_before) StartWalk();
   if (GetFocus() == window_) uia_->FocusChanged(focus_);
   if (scene_.status >= 0 && scene_.elements[static_cast<size_t>(scene_.status)].name != status_before) {
     uia_->StatusChanged(scene_.status);
@@ -582,10 +588,7 @@ void SetupWindow::ShowView(PageView view) {
 }
 
 void SetupWindow::Layout() {
-  scene_ = LayoutScene(view_, choice_, checked_, [this](std::string_view name) -> std::optional<D2D1_SIZE_U> {
-    if (ID2D1Bitmap* bitmap = Picture(std::string(name))) return bitmap->GetPixelSize();
-    return std::nullopt;
-  });
+  scene_ = LayoutScene(view_, choice_, checked_);
   if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = walk_playing_;
 }
 
@@ -755,7 +758,8 @@ void SetupWindow::OnKey(WPARAM key, bool repeat) {
       if (repeat) return;
       show_focus_ = true;
       // The control with the focus, or else the page's default button.
-      if (focused && (focused->role == Role::kButton || focused->role == Role::kDoor || focused->role == Role::kLink)) {
+      if (focused && (focused->role == Role::kButton || focused->role == Role::kDoor || focused->role == Role::kLink ||
+                      focused->role == Role::kToggle)) {
         Activate(focus_);
       } else if (scene_.default_element >= 0) {
         Activate(scene_.default_element);
@@ -883,16 +887,26 @@ void SetupWindow::StartMotion(bool first, bool new_page) {
 void SetupWindow::StartWalk() {
   if (window_) KillTimer(window_, kWalkTimer);
   walk_playing_ = false;
+  walk_unseen_ = false;
+  walk_frame_.reset();
   if (!scene_.walkthrough) return;
+  PreloadWalk();
   // Held for a picture, or still with Windows' animations off, until played.
-  walk_time_ = walk_at_ ? *walk_at_ : animate_ ? 0 : scene_.walkthrough->still;
-  if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = false;
-  if (animate_ && !walk_at_) SetWalkPlaying(true);
+  // The new page has told screen readers what it shows, so playing from the
+  // start needs no word of its own.
+  walk_playing_ = animate_ && !walk_at_;
+  SetWalkTime(walk_at_ ? *walk_at_ : walk_playing_ ? 0 : scene_.walkthrough->still);
+  if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = walk_playing_;
+  if (walk_playing_ && window_) {
+    walk_tick_ = Clock::now();
+    SetTimer(window_, kWalkTimer, kFrameMs, nullptr);
+  }
 }
 
 void SetupWindow::SetWalkPlaying(bool playing) {
   if (!scene_.walkthrough || playing == walk_playing_) return;
   walk_playing_ = playing;
+  walk_unseen_ = false;
   if (scene_.walk_toggle >= 0) {
     scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = playing;
     uia_->Toggled(scene_.walk_toggle, !playing);
@@ -907,30 +921,81 @@ void SetupWindow::SetWalkPlaying(bool playing) {
   Redraw();
 }
 
+void SetupWindow::SetWalkTime(float time) {
+  walk_time_ = time;
+  walk_frame_.reset();
+  if (scene_.walkthrough) walk_frame_ = WalkAt(*scene_.walkthrough, time, kWalkFrame);
+}
+
+void SetupWindow::PreloadWalk() {
+  if (!scene_.walkthrough || !target_) return;
+  for (const Walkthrough::Shot& shot : scene_.walkthrough->shots) Picture(shot.picture);
+}
+
+bool SetupWindow::WalkSeen() const {
+  if (!window_ || !IsWindowVisible(window_) || IsIconic(window_)) return false;
+  // On another desktop, or with the screen locked or off.
+  BOOL cloaked = FALSE;
+  if (SUCCEEDED(DwmGetWindowAttribute(window_, kCloaked, &cloaked, sizeof(cloaked))) && cloaked) return false;
+  if (target_ && (target_->CheckWindowState() & D2D1_WINDOW_STATE_OCCLUDED)) return false;
+  // Behind the window the user is using, such as OBS, over all of the frame.
+  const HWND front = GetForegroundWindow();
+  if (!front || front == window_ || IsIconic(front)) return true;
+  RECT cover = {};
+  if (FAILED(DwmGetWindowAttribute(front, DWMWA_EXTENDED_FRAME_BOUNDS, &cover, sizeof(cover)))) {
+    GetWindowRect(front, &cover);
+  }
+  const float scale = Scale();
+  POINT corners[2] = {{std::lround(scene_.walk.left * scale), std::lround((scene_.walk.top - scroll_) * scale)},
+                      {std::lround(scene_.walk.right * scale), std::lround((scene_.walk.bottom - scroll_) * scale)}};
+  MapWindowPoints(window_, nullptr, corners, 2);
+  const RECT frame = {corners[0].x, corners[0].y, corners[1].x, corners[1].y};
+  RECT both = {};
+  IntersectRect(&both, &frame, &cover);
+  if (!EqualRect(&both, &frame)) return true;
+  // Over it, not under it, as the desktop is.
+  for (HWND above = GetWindow(window_, GW_HWNDPREV); above; above = GetWindow(above, GW_HWNDPREV)) {
+    if (above == front) return false;
+  }
+  return true;
+}
+
+void SetupWindow::InvalidateDips(const D2D1_RECT_F& box, float margin) {
+  if (!window_ || box.right <= box.left || box.bottom <= box.top) return;
+  const float scale = Scale();
+  const RECT dirty = {static_cast<LONG>(std::floor((box.left - margin) * scale)),
+                      static_cast<LONG>(std::floor((box.top - margin) * scale)),
+                      static_cast<LONG>(std::ceil((box.right + margin) * scale)),
+                      static_cast<LONG>(std::ceil((box.bottom + margin) * scale))};
+  InvalidateRect(window_, &dirty, FALSE);
+}
+
 void SetupWindow::WalkStep() {
   const Clock::time_point now = Clock::now();
   // A long gap, such as a dialog's, doesn't skip it on.
   const float elapsed = std::min(std::chrono::duration<float>(now - walk_tick_).count(), 0.1f);
   walk_tick_ = now;
-  if (!scene_.walkthrough || !walk_playing_ || !window_ || IsIconic(window_)) return;
-  const int before = ShownStep(scene_, walk_time_);
-  walk_time_ = std::fmod(walk_time_ + elapsed, scene_.walkthrough->length);
-  if (moving_ || ShownStep(scene_, walk_time_) != before) {
+  if (!scene_.walkthrough || !walk_playing_ || !window_) return;
+  // Unseen, it waits where it is, drawing nothing and looking a few times a
+  // second for the user to come back.
+  const bool unseen = !WalkSeen();
+  if (unseen != walk_unseen_) {
+    walk_unseen_ = unseen;
+    SetTimer(window_, kWalkTimer, unseen ? kWalkUnseenMs : kFrameMs, nullptr);
+  }
+  if (unseen) return;
+  const int before = walk_frame_ ? walk_frame_->step : 0;
+  SetWalkTime(std::fmod(walk_time_ + elapsed, scene_.walkthrough->length));
+  if (moving_ || !walk_frame_ || walk_frame_->step != before) {
     // The step lights up in the list too.
     Redraw();
     return;
   }
   // Only the frame moves: only the part of it the panel shows is drawn again.
   const D2D1_RECT_F& frame = scene_.walk;
-  const float left = std::max(frame.left, scene_.panel.left + 1);
-  const float right = std::min(frame.right, scene_.panel.right - 1);
-  const float top = std::max(frame.top - scroll_, scene_.panel.top + 1);
-  const float bottom = std::min(frame.bottom - scroll_, scene_.panel.bottom - 1);
-  if (right <= left || bottom <= top) return;
-  const float scale = Scale();
-  const RECT dirty = {static_cast<LONG>(std::floor((left - 1) * scale)), static_cast<LONG>(std::floor((top - 1) * scale)),
-                      static_cast<LONG>(std::ceil((right + 1) * scale)), static_cast<LONG>(std::ceil((bottom + 1) * scale))};
-  InvalidateRect(window_, &dirty, FALSE);
+  InvalidateDips({std::max(frame.left, scene_.panel.left + 1), std::max(frame.top - scroll_, scene_.panel.top + 1),
+                  std::min(frame.right, scene_.panel.right - 1), std::min(frame.bottom - scroll_, scene_.panel.bottom - 1)},
+                 1);
 }
 
 void SetupWindow::Step() {
@@ -960,12 +1025,7 @@ void SetupWindow::Step() {
     Redraw();
   } else if (window_ && !IsIconic(window_)) {
     // Only the dot moves: only its box is drawn again.
-    const float scale = Scale();
-    const RECT dot = {static_cast<LONG>(std::floor((scene_.dot.left - 2) * scale)),
-                      static_cast<LONG>(std::floor((scene_.dot.top - 2) * scale)),
-                      static_cast<LONG>(std::ceil((scene_.dot.right + 2) * scale)),
-                      static_cast<LONG>(std::ceil((scene_.dot.bottom + 2) * scale))};
-    InvalidateRect(window_, &dot, FALSE);
+    InvalidateDips(scene_.dot, 2);
   }
 }
 

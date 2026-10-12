@@ -316,7 +316,7 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   FirstRun first_run = ObsUser(none);
   const PageView view = first_run.View(none);
   CHECK(view.page == Page::kCable && view.waiting && view.instruction == "Install a virtual cable");
-  // The guide to installing VB-Cable, with a picture of its setup.
+  // The guide to installing VB-Cable, with a walkthrough of it.
   CHECK(view.content == "There's no virtual cable on this PC yet. To install VB-Cable:");
   CHECK(view.steps.size() == 6);
   CHECK(view.steps[0] == "Download its driver pack from <a href=\"https://vb-audio.com/Cable/\"><code>vb-audio.com/"
@@ -325,7 +325,7 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
                                 "then <b>Yes</b>"));
   CHECK(view.steps[3] == "Click <b>Install Driver</b>.");
   CHECK(Contains(view.steps[5], "not CABLE Input."));
-  CHECK(view.picture && view.picture->name == "vb-cable-setup" && view.picture->step == 0);
+  CHECK(view.walkthrough && view.walkthrough->name == "vb-cable-setup");
   CHECK(view.status == std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName));
   CHECK(view.stage == Stage::kCable);
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back"}));
@@ -580,7 +580,7 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
              "Under Audio Filters, click <b>+</b> and add filters as needed.",
              "Click each filter and adjust it by ear, starting from OBS's defaults.",
              std::format("Close OBS. {} then reads your filters and carries on here.", kDisplayName)}));
-  CHECK(view.picture && view.picture->name == "obs-filters" && view.picture->step == 0);
+  CHECK(view.walkthrough && view.walkthrough->name == "obs-filters");
   CHECK(Contains(view.footer, std::format("<a href=\"{}\">", kSetupGuideUrl)));
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open OBS", "Next"}));
   CHECK(FindButton(view, kButtonOpenObs)->enabled && !FindButton(view, kButtonNext)->enabled);

@@ -17,8 +17,9 @@
 namespace knobs::tray {
 
 struct Walkthrough {
-  // A screenshot, shown from `at`: a PNG resource (pictures.rc2), cropped to
-  // `crop` of the whole screen, which is as much as the camera sees of it.
+  // A screenshot, shown from `at`: a picture resource, PNG or JPEG
+  // (pictures.rc2), cropped to `crop` of the whole screen, which is as much
+  // as the camera sees of it.
   struct Shot {
     float at = 0;
     std::string picture;

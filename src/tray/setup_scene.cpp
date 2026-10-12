@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cwctype>
 #include <format>
 #include <utility>
@@ -459,38 +460,23 @@ float LayoutChoices(const PageView& view, int choice, Builder& build, float y) {
   return y;
 }
 
-// The steps, with a screenshot beside them level with the step it shows, or
-// a walkthrough beside them all. The step shown has its number on an ink
-// disc, and so has the picture's corner.
-float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y, const PictureSize& picture_size) {
+// The steps, with the page's walkthrough of them beside them. The step it
+// shows has its number on an ink disc, and so has the walkthrough's corner.
+float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
   const float x = kContent.left;
   const float width = Width(kContent);
-  const Walkthrough* walk = view.picture ? WalkthroughNamed(view.picture->name) : nullptr;
-  std::optional<D2D1_SIZE_F> frame;
-  if (walk) {
-    frame = kWalkFrame;
-  } else if (view.picture) {
-    if (const std::optional<D2D1_SIZE_U> pixels = picture_size(view.picture->name);
-        pixels && pixels->width > 0 && pixels->height > 0) {
-      const float aspect = static_cast<float>(pixels->width) / static_cast<float>(pixels->height);
-      const float frame_width = aspect > 1.45f ? 264.0f : 212.0f;
-      frame = D2D1_SIZE_F{frame_width, frame_width / aspect};
-    }
-  }
+  const Walkthrough* walk = view.walkthrough ? WalkthroughNamed(view.walkthrough->name) : nullptr;
   scene.walkthrough = walk;
-  scene.pictured = frame && !walk ? view.picture->step : 0;
-  const float steps_width = frame ? width - 28 - frame->width : width;
+  const float steps_width = walk ? width - 28 - kWalkFrame.width : width;
   Element list;
   list.role = Role::kStepList;
   list.in_panel = true;
   list.name = L"Steps";
   const int list_index = build.Add(std::move(list));
   const float top = y;
-  float pictured_top = top;
   scene.digits.assign(view.steps.size() + 1, nullptr);
   for (size_t i = 0; i < view.steps.size(); ++i) {
     const int number = static_cast<int>(i) + 1;
-    if (number == scene.pictured) pictured_top = y;
     // Plain, and on its disc.
     scene.digits[i + 1] = MakeText(std::to_string(number), Style(12, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), 20).layout;
     Text digits = MakeText(std::to_string(number), Style(14, 21, DWRITE_FONT_WEIGHT_SEMI_BOLD), 20);
@@ -504,36 +490,28 @@ float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y, c
   }
   y -= 5;
   build.At(list_index).bounds = Rect(x, top, steps_width, y - top);
-  if (frame) {
-    const float frame_top = walk ? top : std::clamp(pictured_top - 2, top, std::max(top, y - frame->height));
-    const D2D1_RECT_F at = Rect(x + width - frame->width, frame_top, frame->width, frame->height);
-    if (walk) {
-      scene.walk = at;
-      build.AddItem({.kind = Item::Kind::kWalkthrough, .rect = at, .in_panel = true});
-    } else {
-      build.AddItem({.kind = Item::Kind::kPicture, .rect = at, .picture = view.picture->name, .in_panel = true});
-    }
+  if (walk) {
+    const D2D1_RECT_F at = Rect(x + width - kWalkFrame.width, top, kWalkFrame.width, kWalkFrame.height);
+    scene.walk = at;
+    build.AddItem({.kind = Item::Kind::kWalkthrough, .rect = at, .in_panel = true});
     build.AddItem({.kind = Item::Kind::kShownDisc, .rect = Rect(at.left - 7, at.top - 7, 20, 20), .ring = true,
                    .in_panel = true});
     Element image;
     image.role = Role::kPicture;
     image.bounds = at;
     image.in_panel = true;
-    image.name = walk ? FromUtf8(view.picture->alt)
-                      : std::format(L"Step {}: {}", scene.pictured, FromUtf8(view.picture->alt));
+    image.name = FromUtf8(view.walkthrough->alt);
     build.Add(std::move(image));
-    if (walk) {
-      // The whole frame plays and pauses it, as its corner shows.
-      Element toggle;
-      toggle.role = Role::kToggle;
-      toggle.id = kWalkToggleId;
-      toggle.bounds = at;
-      toggle.in_panel = true;
-      toggle.focusable = true;
-      toggle.name = L"Play the walkthrough";
-      toggle.access_key = L'P';
-      scene.walk_toggle = build.Add(std::move(toggle));
-    }
+    // The whole frame plays and pauses it, as its corner shows.
+    Element toggle;
+    toggle.role = Role::kToggle;
+    toggle.id = kWalkToggleId;
+    toggle.bounds = at;
+    toggle.in_panel = true;
+    toggle.focusable = true;
+    toggle.name = L"Play the walkthrough";
+    toggle.access_key = L'P';
+    scene.walk_toggle = build.Add(std::move(toggle));
     y = std::max(y, at.bottom);
   }
   return y;
@@ -856,19 +834,15 @@ class Painter {
                             Brush(palette_.on_ink));
   }
 
-  // A walkthrough at a moment, in `box`: its shots through the camera, then
-  // the pointer and its click on top. `picture` gives the shots.
+  // A walkthrough at a moment, in `box`, clipped to `clip` in `layer`: its
+  // shots through the camera, then the pointer and its click on top.
+  // `picture` gives the shots.
   void Walkthrough(const knobs::tray::Walkthrough& walk, const WalkFrame& frame, const D2D1_RECT_F& box,
-                   const std::function<ID2D1Bitmap*(const std::string&)>& picture) {
-    ComPtr<ID2D1RoundedRectangleGeometry> clip;
-    ComPtr<ID2D1Layer> layer;
-    if (!D2DFactory() ||
-        FAILED(D2DFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(box, kControlRadius, kControlRadius),
-                                                             &clip)) ||
-        FAILED(target_->CreateLayer(&layer))) {
-      return;
-    }
-    target_->PushLayer(D2D1::LayerParameters(box, clip.Get()), layer.Get());
+                   const std::function<ID2D1Bitmap*(const std::string&)>& picture, ID2D1Layer* layer,
+                   ID2D1Geometry* clip) {
+    if (!layer || !clip) return;
+    const bool contrast = palette_.mode == SetupMode::kHighContrast;
+    target_->PushLayer(D2D1::LayerParameters(box, clip), layer);
     target_->FillRectangle(box, Brush(walk.ground));
     D2D1_MATRIX_3X2_F before;
     target_->GetTransform(&before);
@@ -895,10 +869,13 @@ class Painter {
     target_->SetTransform(before);
     const D2D1_POINT_2F tip = {mid.x + (frame.pointer.x - frame.centre.x) * frame.scale,
                                mid.y + (frame.pointer.y - frame.centre.y) * frame.scale};
+    // In high contrast, the click's ring is the user's highlight, and the
+    // pointer their window's colours.
     if (frame.ring) {
       const float spread = 1 - (1 - *frame.ring) * (1 - *frame.ring);
       const float r = 4 + 16 * spread;
-      target_->DrawEllipse(D2D1::Ellipse(tip, r, r), Brush(D2D1::ColorF(D2D1::ColorF::White), 0.75f * (1 - *frame.ring)),
+      target_->DrawEllipse(D2D1::Ellipse(tip, r, r),
+                           Brush(contrast ? palette_.here : D2D1::ColorF(D2D1::ColorF::White), 0.75f * (1 - *frame.ring)),
                            2);
     }
     // As big as Windows' pointer on the app at its own size, and never
@@ -906,26 +883,35 @@ class Painter {
     const float u = std::max(38 * frame.scale, 15.0f) / 19 * frame.press;
     if (ID2D1Geometry* arrow = PointerArrow()) {
       target_->SetTransform(D2D1::Matrix3x2F::Scale(u, u) * D2D1::Matrix3x2F::Translation(tip.x, tip.y) * before);
-      target_->FillGeometry(arrow, Brush(D2D1::ColorF(D2D1::ColorF::White)));
-      target_->DrawGeometry(arrow, Brush(D2D1::ColorF(D2D1::ColorF::Black)), 1, RoundStroke());
+      target_->FillGeometry(arrow, Brush(contrast ? palette_.surface : D2D1::ColorF(D2D1::ColorF::White)));
+      target_->DrawGeometry(arrow, Brush(contrast ? palette_.ink : D2D1::ColorF(D2D1::ColorF::Black)), 1, RoundStroke());
       target_->SetTransform(before);
     }
     target_->PopLayer();
   }
 
   // The walkthrough's play or pause, on a dark disc in its frame's corner.
+  // In high contrast, the disc is the user's window colour, ringed and marked
+  // with their text colour, and their highlight under the pointer.
   void WalkToggle(const D2D1_RECT_F& frame, bool playing, bool hover) {
     const D2D1_POINT_2F c = {frame.right - 19, frame.bottom - 19};
-    target_->FillEllipse(D2D1::Ellipse(c, 13, 13), Brush(D2D1::ColorF(0x111317), hover ? 0.92f : 0.72f));
+    D2D1_COLOR_F glyph = D2D1::ColorF(D2D1::ColorF::White);
+    if (palette_.mode == SetupMode::kHighContrast) {
+      target_->FillEllipse(D2D1::Ellipse(c, 13, 13), Brush(hover ? palette_.here : palette_.surface));
+      target_->DrawEllipse(D2D1::Ellipse(c, 12.5f, 12.5f), Brush(palette_.ink), 1);
+      glyph = hover ? palette_.on_ink : palette_.ink;
+    } else {
+      target_->FillEllipse(D2D1::Ellipse(c, 13, 13), Brush(D2D1::ColorF(0x111317), hover ? 0.92f : 0.72f));
+    }
     if (playing) {
-      ID2D1SolidColorBrush* white = Brush(D2D1::ColorF(D2D1::ColorF::White));
-      target_->FillRectangle(Rect(c.x - 4.5f, c.y - 5, 3, 10), white);
-      target_->FillRectangle(Rect(c.x + 1.5f, c.y - 5, 3, 10), white);
+      ID2D1SolidColorBrush* bars = Brush(glyph);
+      target_->FillRectangle(Rect(c.x - 4.5f, c.y - 5, 3, 10), bars);
+      target_->FillRectangle(Rect(c.x + 1.5f, c.y - 5, 3, 10), bars);
     } else if (ID2D1Geometry* play = PlayTriangle()) {
       D2D1_MATRIX_3X2_F before;
       target_->GetTransform(&before);
       target_->SetTransform(D2D1::Matrix3x2F::Translation(c.x, c.y) * before);
-      target_->FillGeometry(play, Brush(D2D1::ColorF(D2D1::ColorF::White)));
+      target_->FillGeometry(play, Brush(glyph));
       target_->SetTransform(before);
     }
   }
@@ -980,11 +966,7 @@ int Scene::HitTest(D2D1_POINT_2F point, float scroll) const {
   return -1;
 }
 
-int ShownStep(const Scene& scene, float walk_time) {
-  return scene.walkthrough ? WalkAt(*scene.walkthrough, walk_time, kWalkFrame).step : scene.pictured;
-}
-
-Scene LayoutScene(const PageView& view, int choice, bool checked, const PictureSize& picture_size) {
+Scene LayoutScene(const PageView& view, int choice, bool checked) {
   Scene scene;
   scene.panel = kPanel;
   scene.content = kContent;
@@ -1012,7 +994,7 @@ Scene LayoutScene(const PageView& view, int choice, bool checked, const PictureS
   }
   if (view.command_links) y = LayoutDoors(view, build, scene, y + 20);
   if (!view.choices.empty()) y = LayoutChoices(view, choice, build, y + 16);
-  if (!view.steps.empty()) y = LayoutGuide(view, build, scene, y + 14, picture_size);
+  if (!view.steps.empty()) y = LayoutGuide(view, build, scene, y + 14);
   if (!view.notes.empty()) y = LayoutNotes(view, build, y + 16);
   if (!view.check.empty()) y = LayoutCheck(view, checked, build, y + 18);
   scene.content_height = y - kContent.top;
@@ -1039,6 +1021,7 @@ void ScenePainter::Reset() {
   brush_.Reset();
   ink_.Reset();
   link_.Reset();
+  walk_layer_.Reset();
 }
 
 void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const SetupPalette& palette,
@@ -1056,9 +1039,19 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
   link_->SetColor(palette.link);
   Painter p(target, brush_.Get(), palette, pixel);
   target->Clear(palette.paper);
-  std::optional<WalkFrame> walk;
-  if (scene.walkthrough) walk = WalkAt(*scene.walkthrough, state.walk_time, kWalkFrame);
-  const int shown_step = walk ? walk->step : scene.pictured;
+  const std::optional<WalkFrame> walk = scene.walkthrough ? state.walk : std::nullopt;
+  const int shown_step = walk ? walk->step : 0;
+  if (walk) {
+    if (!walk_layer_) target->CreateLayer(&walk_layer_);
+    if (!walk_clip_ || std::memcmp(&walk_clip_box_, &scene.walk, sizeof(D2D1_RECT_F)) != 0) {
+      walk_clip_.Reset();
+      if (D2DFactory()) {
+        D2DFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(scene.walk, kControlRadius, kControlRadius),
+                                                     &walk_clip_);
+      }
+      walk_clip_box_ = scene.walk;
+    }
+  }
   const auto digits = [&scene](int step) {
     return step > 0 && static_cast<size_t>(step) < scene.digits.size() ? scene.digits[static_cast<size_t>(step)].Get()
                                                                        : nullptr;
@@ -1157,24 +1150,7 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         if (shown_step > 0) p.Disc(item.rect, digits(shown_step), item.ring);
         break;
       case Item::Kind::kWalkthrough:
-        if (walk) p.Walkthrough(*scene.walkthrough, *walk, item.rect, picture);
-        p.Border(item.rect, palette.line_strong, kControlRadius);
-        break;
-      case Item::Kind::kPicture:
-        if (ID2D1Bitmap* bitmap = picture ? picture(item.picture) : nullptr) {
-          ComPtr<ID2D1RoundedRectangleGeometry> clip;
-          ComPtr<ID2D1Layer> layer;
-          if (D2DFactory() &&
-              SUCCEEDED(D2DFactory()->CreateRoundedRectangleGeometry(
-                  D2D1::RoundedRect(item.rect, kControlRadius, kControlRadius), &clip)) &&
-              SUCCEEDED(target->CreateLayer(&layer))) {
-            target->PushLayer(D2D1::LayerParameters(item.rect, clip.Get()), layer.Get());
-            target->DrawBitmap(bitmap, item.rect, 1, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-            target->PopLayer();
-          }
-        } else {
-          p.Fill(item.rect, palette.sunken, kControlRadius);
-        }
+        if (walk) p.Walkthrough(*scene.walkthrough, *walk, item.rect, picture, walk_layer_.Get(), walk_clip_.Get());
         p.Border(item.rect, palette.line_strong, kControlRadius);
         break;
       case Item::Kind::kDot:

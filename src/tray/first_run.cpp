@@ -402,9 +402,9 @@ PageView Steps(const core::Snapshot& snapshot) {
   view.steps = {open, filters, "Under Audio Filters, click <b>+</b> and add filters as needed.",
                 "Click each filter and adjust it by ear, starting from OBS's defaults.",
                 std::format("Close OBS. {} then reads your filters and carries on here.", kDisplayName)};
-  view.picture = Picture{"obs-filters", 0,
-                         "A walkthrough in OBS: Mic/Aux clicked in the Audio Mixer, Filters chosen from its menu, then "
-                         "+ clicked under Audio Filters"};
+  view.walkthrough = PageWalkthrough{"obs-filters",
+                                     "A walkthrough in OBS: Mic/Aux clicked in the Audio Mixer, Filters chosen from its menu, then "
+                                     "+ clicked under Audio Filters"};
   view.footer = std::format("<a href=\"{}\">The setup guide</a> has more on each step.", kSetupGuideUrl);
   if (snapshot.obs_running) {
     view.waiting = true;
@@ -606,9 +606,9 @@ PageView Cable(const core::Snapshot& snapshot) {
         std::format("Restart Windows, then open {} again.", kDisplayName),
         "After the restart, open <b>Settings › System › Sound</b> and check that Output is still your speakers or "
         "headphones, not CABLE Input."};
-    view.picture = Picture{"vb-cable-setup", 0,
-                           "A walkthrough in Windows: the driver pack extracted with Extract All, VBCABLE_Setup_x64 "
-                           "run as administrator, then Install Driver clicked in VB-Cable's setup"};
+    view.walkthrough = PageWalkthrough{"vb-cable-setup",
+                                       "A walkthrough in Windows: the driver pack extracted with Extract All, VBCABLE_Setup_x64 "
+                                       "run as administrator, then Install Driver clicked in VB-Cable's setup"};
     view.waiting = true;
     view.status = std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName);
     view.buttons = {Button(kButtonBack, "&Back")};
