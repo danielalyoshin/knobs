@@ -12,7 +12,9 @@
 #include <cwctype>
 #include <format>
 #include <numbers>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "app_info.h"
 #include "import/obs_config.h"
@@ -26,6 +28,9 @@ namespace knobs::tray {
 namespace {
 
 constexpr UINT_PTR kRenderTimer = 1;  // Catches a render put off by a button's handler.
+// An activation from UI Automation, carried out once its call has returned:
+// wParam is the element, lParam the layout's generation.
+constexpr UINT kActivateMessage = WM_APP + 0x41;
 constexpr UINT_PTR kMotionTimer = 2;
 constexpr UINT kRenderMs = 200;
 constexpr UINT kFrameMs = 16;
@@ -71,6 +76,16 @@ std::wstring ResourceName(const std::string& name) {
   for (wchar_t& c : resource) c = c == L'-' ? L'_' : static_cast<wchar_t>(towupper(c));
   return resource;
 }
+
+// The parts of a scene, as screen readers know them.
+std::vector<std::tuple<Role, int, int, std::wstring>> Parts(const Scene& scene) {
+  std::vector<std::tuple<Role, int, int, std::wstring>> parts;
+  for (const Element& element : scene.elements) parts.emplace_back(element.role, element.id, element.parent, element.name);
+  return parts;
+}
+
+// Links open in the browser, and nothing else does.
+bool IsWebLink(std::string_view url) { return url.starts_with("https://") || url.starts_with("http://"); }
 
 bool IsControl(Role role) {
   return role == Role::kButton || role == Role::kDoor || role == Role::kRadio || role == Role::kCheckBox ||
@@ -147,8 +162,10 @@ bool SetupWindow::Create() {
     window_class.lpfnWndProc = WindowProc;
     window_class.hInstance = instance_;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    window_class.hIcon = icon_large_;
-    window_class.hIconSm = icon_small_;
+    // Icons of the class's own, for as long as the process lasts: each
+    // window's are destroyed with it.
+    window_class.hIcon = LoadAppIcon(instance_, LIM_LARGE);
+    window_class.hIconSm = LoadAppIcon(instance_, LIM_SMALL);
     window_class.lpszClassName = kSetupWindowClass;
     return RegisterClassExW(&window_class) != 0;
   }();
@@ -198,6 +215,7 @@ bool SetupWindow::Create() {
     return false;
   }
   SetTimer(window_, kRenderTimer, kRenderMs, nullptr);
+  breath_start_ = Clock::now();
   return true;
 }
 
@@ -211,7 +229,7 @@ void SetupWindow::ApplyTheme() {
   // versions keep theirs.
   const COLORREF caption = palette_.caption;
   DwmSetWindowAttribute(window_, kCaptionColor, &caption, sizeof(caption));
-  InvalidateRect(window_, nullptr, FALSE);
+  Redraw();
 }
 
 bool SetupWindow::MakeTarget() {
@@ -222,8 +240,9 @@ bool SetupWindow::MakeTarget() {
   const HRESULT made = D2DFactory()->CreateHwndRenderTarget(
       D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
                                    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), dpi, dpi),
-      D2D1::HwndRenderTargetProperties(window_, D2D1::SizeU(static_cast<UINT32>(client.right),
-                                                            static_cast<UINT32>(client.bottom))),
+      D2D1::HwndRenderTargetProperties(window_,
+                                       D2D1::SizeU(static_cast<UINT32>(client.right), static_cast<UINT32>(client.bottom)),
+                                       D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS),
       &target_);
   if (FAILED(made)) return false;
   painter_.Reset();
@@ -240,7 +259,11 @@ ID2D1Bitmap* SetupWindow::Picture(const std::string& name) {
   return found->second.Get();
 }
 
-void SetupWindow::Paint() {
+void SetupWindow::Redraw() {
+  if (window_) InvalidateRect(window_, nullptr, FALSE);
+}
+
+void SetupWindow::Paint(const RECT& dirty) {
   if (!MakeTarget()) return;
   shown_.hover = hover_;
   shown_.pressed = pressed_;
@@ -251,13 +274,18 @@ void SetupWindow::Paint() {
   shown_.show_access_keys = always || show_access_keys_;
   shown_.scroll = scroll_;
   target_->BeginDraw();
-  painter_.Paint(target_.Get(), scene_, palette_, shown_, 1 / Scale(),
+  // Only what needs it: the waiting dot asks for no more than its own box.
+  const float scale = Scale();
+  target_->PushAxisAlignedClip({dirty.left / scale, dirty.top / scale, dirty.right / scale, dirty.bottom / scale},
+                               D2D1_ANTIALIAS_MODE_ALIASED);
+  painter_.Paint(target_.Get(), scene_, palette_, shown_, 1 / scale,
                  [this](const std::string& name) { return Picture(name); });
+  target_->PopAxisAlignedClip();
   if (target_->EndDraw() == D2DERR_RECREATE_TARGET) {
     target_.Reset();
     painter_.Reset();
     pictures_.clear();
-    InvalidateRect(window_, nullptr, FALSE);
+    Redraw();
   }
 }
 
@@ -282,7 +310,7 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     case WM_PAINT: {
       PAINTSTRUCT paint;
       BeginPaint(window_, &paint);
-      Paint();
+      Paint(paint.rcPaint);
       EndPaint(window_, &paint);
       return 0;
     }
@@ -297,7 +325,7 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       SetWindowPos(window_, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
                    suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
       if (target_) target_->SetDpi(96 * Scale(), 96 * Scale());
-      InvalidateRect(window_, nullptr, FALSE);
+      Redraw();
       return 0;
     }
     case WM_SETTINGCHANGE:
@@ -313,7 +341,7 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       const int hover = scene_.HitTest(ToDips(lparam), scroll_);
       if (hover != hover_) {
         hover_ = hover;
-        InvalidateRect(window_, nullptr, FALSE);
+        Redraw();
       }
       return 0;
     }
@@ -321,7 +349,7 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       tracking_mouse_ = false;
       if (hover_ >= 0) {
         hover_ = -1;
-        InvalidateRect(window_, nullptr, FALSE);
+        Redraw();
       }
       return 0;
     case WM_SETCURSOR:
@@ -338,9 +366,9 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (hit >= 0 && scene_.elements[static_cast<size_t>(hit)].enabled) {
         pressed_ = hit;
         SetCapture(window_);
-        FocusOn(hit);
+        FocusOn(hit, false);
       }
-      InvalidateRect(window_, nullptr, FALSE);
+      Redraw();
       return 0;
     }
     case WM_LBUTTONUP: {
@@ -348,40 +376,55 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       pressed_ = -1;
       if (GetCapture() == window_) ReleaseCapture();
       if (pressed >= 0 && scene_.HitTest(ToDips(lparam), scroll_) == pressed) Activate(pressed);
-      InvalidateRect(window_, nullptr, FALSE);
+      Redraw();
       return 0;
     }
     case WM_CAPTURECHANGED:
       pressed_ = -1;
-      InvalidateRect(window_, nullptr, FALSE);
+      Redraw();
       return 0;
     case WM_MOUSEWHEEL:
       ScrollTo(scroll_ - static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA * 48);
       return 0;
     case WM_KEYDOWN:
-      OnKey(wparam);
+      OnKey(wparam, (lparam & (1 << 30)) != 0);
+      return 0;
+    case WM_KEYUP:
+      // Space clicks as it comes up, on the control it went down on, as a
+      // Windows button does.
+      if (wparam == VK_SPACE && space_down_ >= 0) {
+        const int down = space_down_;
+        space_down_ = -1;
+        pressed_ = -1;
+        if (down == focus_) Activate(down);
+        Redraw();
+      }
       return 0;
     case WM_SYSKEYDOWN:
       if (wparam == VK_MENU && !show_access_keys_) {
         show_access_keys_ = true;
-        InvalidateRect(window_, nullptr, FALSE);
+        Redraw();
       }
       break;
     case WM_SYSCHAR:
-      // Alt and a letter. Anything else, such as Alt+Space, is Windows'.
+      // Alt and a letter, once per press. Anything else, such as Alt+Space,
+      // is Windows'.
+      if ((lparam & (1 << 30)) != 0 && iswalpha(static_cast<wint_t>(wparam))) return 0;
       if (OnAccessKey(static_cast<wchar_t>(wparam))) return 0;
       break;
     case WM_CHAR:
       // A letter alone does it too, as in Windows' dialogs: nothing here
       // takes typing.
-      if (iswalpha(static_cast<wint_t>(wparam))) OnAccessKey(static_cast<wchar_t>(wparam));
+      if ((lparam & (1 << 30)) == 0 && iswalpha(static_cast<wint_t>(wparam))) {
+        OnAccessKey(static_cast<wchar_t>(wparam));
+      }
       return 0;
     case WM_SETFOCUS:
       uia_->FocusChanged(focus_);
-      InvalidateRect(window_, nullptr, FALSE);
+      Redraw();
       return 0;
     case WM_KILLFOCUS:
-      InvalidateRect(window_, nullptr, FALSE);
+      Redraw();
       return 0;
     case WM_GETOBJECT:
       if (const LRESULT result = uia_->OnGetObject(wparam, lparam)) return result;
@@ -402,6 +445,9 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       target_.Reset();
       painter_.Reset();
       pictures_.clear();
+      return 0;
+    case kActivateMessage:
+      if (static_cast<uintptr_t>(lparam) == layout_generation_) Activate(static_cast<int>(wparam));
       return 0;
     case kSetupClickMessage:
       for (size_t i = 0; i < scene_.elements.size(); ++i) {
@@ -436,6 +482,10 @@ D2D1_POINT_2F SetupWindow::UiaClientPoint(POINT screen) const {
   return {static_cast<float>(screen.x) / Scale(), static_cast<float>(screen.y) / Scale()};
 }
 
+void SetupWindow::UiaActivate(int element) {
+  if (window_) PostMessageW(window_, kActivateMessage, static_cast<WPARAM>(element), layout_generation_);
+}
+
 void SetupWindow::UiaFocusOn(int element) {
   show_focus_ = true;
   FocusOn(element);
@@ -453,11 +503,12 @@ void SetupWindow::Render() {
   PageView view;
   if (pending_ && snapshot.settings != *pending_) {
     // Until the core has the new settings, the page is as it was, with
-    // nothing to click.
+    // nothing to click, and says so.
     view = view_;
     for (PageButton& button : view.buttons) button.enabled = false;
     for (PageButton& choice : view.choices) choice.enabled = false;
     view.waiting = true;
+    if (view.status.empty()) view.status = "Applying your choice…";
   } else {
     pending_.reset();
     view = first_run_.View(snapshot, 0);
@@ -479,11 +530,14 @@ void SetupWindow::ShowView(PageView view) {
   }
   const std::wstring status_before =
       scene_.status >= 0 ? scene_.elements[static_cast<size_t>(scene_.status)].name : L"";
-  const Scene before = scene_;
+  const bool first = scene_.elements.empty();
+  const auto parts_before = Parts(scene_);
   view_ = std::move(view);
   choice_ = view_.default_choice;
   if (!view_.check.empty()) checked_ = view_.checked;
   Layout();
+  const bool rebuilt = Parts(scene_) != parts_before;
+  if (rebuilt) ++layout_generation_;
   if (new_page) scroll_ = 0;
   scroll_ = std::clamp(scroll_, 0.0f, scene_.MaxScroll());
   hover_ = -1;
@@ -508,13 +562,13 @@ void SetupWindow::ShowView(PageView view) {
       }
     }
   }
-  StartMotion(before, new_page);
-  uia_->SceneChanged(new_page, FromUtf8(view_.instruction));
+  StartMotion(first, new_page);
+  uia_->SceneChanged(new_page, rebuilt, FromUtf8(view_.instruction));
   if (GetFocus() == window_) uia_->FocusChanged(focus_);
   if (scene_.status >= 0 && scene_.elements[static_cast<size_t>(scene_.status)].name != status_before) {
     uia_->StatusChanged(scene_.status);
   }
-  InvalidateRect(window_, nullptr, FALSE);
+  Redraw();
 }
 
 void SetupWindow::Layout() {
@@ -537,10 +591,11 @@ void SetupWindow::Activate(int index) {
       if (!element.selected) {
         choice_ = element.id;
         Render();
+        // The chosen radio has the focus, as Windows' radios do.
         for (size_t i = 0; i < scene_.elements.size(); ++i) {
           if (scene_.elements[i].role == Role::kRadio && scene_.elements[i].id == element.id) {
-            focus_ = static_cast<int>(i);
-            uia_->Selected(focus_);
+            FocusOn(static_cast<int>(i));
+            uia_->Selected(static_cast<int>(i));
           }
         }
       }
@@ -548,16 +603,19 @@ void SetupWindow::Activate(int index) {
     case Role::kCheckBox:
       checked_ = !checked_;
       Render();
-      uia_->Toggled(focus_ >= 0 && scene_.elements[static_cast<size_t>(focus_)].role == Role::kCheckBox ? focus_ : -1,
-                    !checked_);
+      for (size_t i = 0; i < scene_.elements.size(); ++i) {
+        if (scene_.elements[i].role == Role::kCheckBox) uia_->Toggled(static_cast<int>(i), !checked_);
+      }
       break;
     case Role::kLink:
-      ShellExecuteW(window_, L"open", FromUtf8(element.url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+      if (IsWebLink(element.url)) {
+        ShellExecuteW(window_, L"open", FromUtf8(element.url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+      }
       break;
     default:
       break;
   }
-  InvalidateRect(window_, nullptr, FALSE);
+  Redraw();
 }
 
 void SetupWindow::Click(int id) {
@@ -644,7 +702,7 @@ void SetupWindow::Close() {
 
 // --- Keyboard and focus ------------------------------------------------------------------
 
-void SetupWindow::OnKey(WPARAM key) {
+void SetupWindow::OnKey(WPARAM key, bool repeat) {
   const bool shift = GetKeyState(VK_SHIFT) < 0;
   const Element* focused =
       focus_ >= 0 && static_cast<size_t>(focus_) < scene_.elements.size() ? &scene_.elements[static_cast<size_t>(focus_)]
@@ -670,10 +728,17 @@ void SetupWindow::OnKey(WPARAM key) {
       ScrollTo(scroll_ + (key == VK_PRIOR ? -1 : 1) * (scene_.content.bottom - scene_.content.top - 40));
       break;
     case VK_SPACE:
+      // Down: the control looks pressed. It clicks when Space comes up.
       show_focus_ = true;
-      if (focused) Activate(focus_);
+      if (!repeat && focused && focused->enabled) {
+        space_down_ = focus_;
+        pressed_ = focus_;
+        hover_ = focus_;
+      }
       break;
     case VK_RETURN:
+      // Once per press: held down, it doesn't click on through the pages.
+      if (repeat) return;
       show_focus_ = true;
       // The control with the focus, or else the page's default button.
       if (focused && (focused->role == Role::kButton || focused->role == Role::kDoor || focused->role == Role::kLink)) {
@@ -688,7 +753,7 @@ void SetupWindow::OnKey(WPARAM key) {
     default:
       return;
   }
-  InvalidateRect(window_, nullptr, FALSE);
+  Redraw();
 }
 
 bool SetupWindow::OnAccessKey(wchar_t letter) {
@@ -703,12 +768,12 @@ bool SetupWindow::OnAccessKey(wchar_t letter) {
   return false;
 }
 
-void SetupWindow::FocusOn(int element) {
+void SetupWindow::FocusOn(int element, bool scroll) {
   if (element == focus_) return;
   focus_ = element;
-  ScrollIntoView(element);
+  if (scroll) ScrollIntoView(element);
   if (GetFocus() == window_) uia_->FocusChanged(element);
-  InvalidateRect(window_, nullptr, FALSE);
+  Redraw();
 }
 
 void SetupWindow::MoveFocus(int step) {
@@ -757,7 +822,7 @@ void SetupWindow::ScrollTo(float scroll) {
   const float clamped = std::clamp(scroll, 0.0f, scene_.MaxScroll());
   if (clamped == scroll_) return;
   scroll_ = clamped;
-  InvalidateRect(window_, nullptr, FALSE);
+  Redraw();
 }
 
 void SetupWindow::ScrollIntoView(int element) {
@@ -776,16 +841,16 @@ void SetupWindow::ScrollIntoView(int element) {
 
 // --- Motion ------------------------------------------------------------------------------
 
-void SetupWindow::StartMotion(const Scene& before, bool new_page) {
+void SetupWindow::StartMotion(bool first, bool new_page) {
   // Where everything is headed.
   caret_to_.reset();
   if (scene_.here) caret_to_ = StageCentre(static_cast<size_t>(*scene_.here));
   for (size_t i = 0; i + 1 < kStageCount; ++i) {
-    wire_from_[i] = before.elements.empty() ? (WireLive(scene_, i) ? 1.0f : 0.0f) : shown_.wire[i];
+    wire_from_[i] = first ? (WireLive(scene_, i) ? 1.0f : 0.0f) : shown_.wire[i];
     wire_to_[i] = WireLive(scene_, i) ? 1.0f : 0.0f;
   }
   caret_from_ = shown_.caret_x && caret_to_ ? *shown_.caret_x : caret_to_.value_or(0);
-  if (!animate_ || before.elements.empty()) {
+  if (!animate_ || first) {
     shown_.caret_x = caret_to_;
     shown_.wire = wire_to_;
     shown_.arrive = 1;
@@ -813,8 +878,8 @@ void SetupWindow::Step() {
   }
   // The waiting dot breathes for as long as the page waits.
   if (scene_.waiting && animate_) {
-    const float phase = std::fmod(std::chrono::duration<float, std::milli>(Clock::now().time_since_epoch()).count(),
-                                  kBreathMs) / kBreathMs;
+    const double breath = std::chrono::duration<double, std::milli>(Clock::now() - breath_start_).count();
+    const auto phase = static_cast<float>(std::fmod(breath, kBreathMs) / kBreathMs);
     shown_.pulse = 0.5f + 0.5f * std::cos(phase * 2 * std::numbers::pi_v<float>);
   } else {
     shown_.pulse = 1;
@@ -824,7 +889,17 @@ void SetupWindow::Step() {
   } else if (!moving_) {
     SetTimer(window_, kMotionTimer, kBreathFrameMs, nullptr);
   }
-  InvalidateRect(window_, nullptr, FALSE);
+  if (moving_ || !scene_.waiting) {
+    Redraw();
+  } else if (window_ && !IsIconic(window_)) {
+    // Only the dot moves: only its box is drawn again.
+    const float scale = Scale();
+    const RECT dot = {static_cast<LONG>(std::floor((scene_.dot.left - 2) * scale)),
+                      static_cast<LONG>(std::floor((scene_.dot.top - 2) * scale)),
+                      static_cast<LONG>(std::ceil((scene_.dot.right + 2) * scale)),
+                      static_cast<LONG>(std::ceil((scene_.dot.bottom + 2) * scale))};
+    InvalidateRect(window_, &dot, FALSE);
+  }
 }
 
 }  // namespace knobs::tray

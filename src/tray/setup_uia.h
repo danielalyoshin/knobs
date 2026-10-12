@@ -44,9 +44,10 @@ class SetupUia {
 
   // WM_GETOBJECT.
   LRESULT OnGetObject(WPARAM wparam, LPARAM lparam);
-  // The scene was laid out again: providers for the old one go stale. A
-  // new page also says its heading.
-  void SceneChanged(bool new_page, const std::wstring& heading);
+  // The scene was laid out again. Providers go stale only if its parts did
+  // (`rebuilt`), so a screen reader keeps its place on the same page. A new
+  // page also says its heading.
+  void SceneChanged(bool new_page, bool rebuilt, const std::wstring& heading);
   void FocusChanged(int element);
   void Toggled(int element, bool was_on);
   void Selected(int element);

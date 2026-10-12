@@ -196,6 +196,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
                                                     "out.",
                                                     name, kDisplayName)});
     key("vst");
+    if (enabled) notes.back().file = plugin;
     return false;
   }
   if (api.obs_get_source_output_flags(type.c_str()) == 0) {

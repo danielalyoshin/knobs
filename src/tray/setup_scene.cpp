@@ -64,11 +64,11 @@ TextStyle Style(float size, float line, DWRITE_FONT_WEIGHT weight = DWRITE_FONT_
   return {&Fonts().text, size, line, weight};
 }
 
-// Lays out `markup` `width` DIPs wide. Unwrapped, each line is cut short
-// with an ellipsis to fit.
-Text MakeText(std::string_view markup, const TextStyle& style, float width, bool wrap = true) {
+// Lays out `text`, markup unless `markup` is false, `width` DIPs wide.
+// Unwrapped, each line is cut short with an ellipsis to fit.
+Text MakeText(std::string_view text, const TextStyle& style, float width, bool wrap = true, bool markup = true) {
   Text made;
-  RichText rich = ParseRichText(markup);
+  RichText rich = markup ? ParseRichText(text) : RichText{FromUtf8(text), {}};
   // Typographic quotes for the copy's straight ones, one for one, so the
   // spans stay where they are: apostrophes, and double quotes that open
   // after a space or a bracket and close otherwise.
@@ -186,7 +186,7 @@ Label MakeLabel(std::string_view marked, const TextStyle& style, float width, bo
     plain += marked[i];
   }
   Label label;
-  label.text = MakeText(plain, style, width, wrap);
+  label.text = MakeText(plain, style, width, wrap, false);
   label.name = Plain(label.text.text);
   if (key_at && static_cast<unsigned char>(plain[*key_at]) < 0x80 && label.text.layout) {
     label.key = static_cast<wchar_t>(towupper(static_cast<wint_t>(plain[*key_at])));
@@ -383,7 +383,7 @@ float LayoutDoors(const PageView& view, Builder& build, Scene& scene, float y) {
     const auto [title, note] = Lines(button.text);
     const Label label = MakeLabel(title, Style(14, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width - 64);
     const Text& t = label.text;
-    const Text n = MakeText(note, Style(13, 18), width - 64);
+    const Text n = MakeText(note, Style(13, 18), width - 64, true, false);
     const float height = std::max(62.0f, 11 + t.height + 2 + n.height + 11);
     Element door;
     door.role = Role::kDoor;
@@ -424,8 +424,8 @@ float LayoutChoices(const PageView& view, int choice, Builder& build, float y) {
   const float top = y;
   for (const PageButton& option : view.choices) {
     const auto [title, note] = Lines(option.text);
-    const Text t = MakeText(title, Style(14, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width - 58);
-    const Text n = MakeText(note, Style(13, 18), width - 58);
+    const Text t = MakeText(title, Style(14, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width - 58, true, false);
+    const Text n = MakeText(note, Style(13, 18), width - 58, true, false);
     const float height = 10 + t.height + (note.empty() ? 0 : n.height) + 10;
     if (y > top) {
       Item rule;
@@ -573,12 +573,12 @@ float LayoutChain(const core::ChainSummary& chain, Builder& build, float y) {
     bool end = false;
   };
   std::vector<Piece> pieces;
-  pieces.push_back({Icon::kMic, MakeText(chain.mic, Style(13, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width, false), true});
-  for (const std::string& filter : chain.filters) pieces.push_back({std::nullopt, MakeText(filter, Style(13, 20), width, false)});
-  if (!chain.cable.empty()) {
-    pieces.push_back({Icon::kCable, MakeText(chain.cable, Style(13, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width, false),
-                      true});
+  const TextStyle end = Style(13, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+  pieces.push_back({Icon::kMic, MakeText(chain.mic, end, width, false, false), true});
+  for (const std::string& filter : chain.filters) {
+    pieces.push_back({std::nullopt, MakeText(filter, Style(13, 20), width, false, false)});
   }
+  if (!chain.cable.empty()) pieces.push_back({Icon::kCable, MakeText(chain.cable, end, width, false, false), true});
   const float left = x + 12;
   const float right = x + width - 12;
   float px = left;
@@ -659,20 +659,25 @@ void LayoutFoot(const PageView& view, Builder& build, Scene& scene) {
     buttons.push_back(std::move(button));
     right -= width + 8;
   }
-  // The note and what the page waits for, beside them, centred on them.
+  // The note and what the page waits for, beside them, centred on them. A
+  // page that waits shows the dot, with what it waits for if it says.
   const float note_left = kPanel.left;
   const float note_width = right + 8 - 24 - note_left;
   const bool status = view.waiting && !view.status.empty();
-  const Text waiting = MakeText(status ? view.status : "", Style(13, 18), note_width - 15);
+  const Text waiting = MakeText(status ? view.status : "", Style(13, 18), note_width - 15, true, false);
   const Text footer = MakeText(view.footer, Style(12, 17), note_width);
-  const float height = (status ? waiting.height : 0) + (status && !view.footer.empty() ? 2 : 0) +
+  const float status_height = status ? waiting.height : view.waiting ? 18.0f : 0.0f;
+  const float height = status_height + (status_height > 0 && !view.footer.empty() ? 2 : 0) +
                        (view.footer.empty() ? 0 : footer.height);
   float y = kFootTop + (kButtonHeight - height) / 2;
-  if (status) {
+  if (view.waiting) {
     build.AddItem({.kind = Item::Kind::kDot, .rect = Rect(note_left, y + 5.5f, 7, 7)});
-    scene.status = build.Paragraph(waiting, note_left + 15, y, note_width - 15, Ink::kText2, false, Role::kStatus);
     scene.waiting = true;
-    y += waiting.height + 2;
+    scene.dot = Rect(note_left, y + 5.5f, 7, 7);
+    if (status) {
+      scene.status = build.Paragraph(waiting, note_left + 15, y, note_width - 15, Ink::kText2, false, Role::kStatus);
+    }
+    y += status_height + 2;
   }
   if (!view.footer.empty()) build.Paragraph(footer, note_left, y, note_width, Ink::kText3, false);
   for (auto it = buttons.rbegin(); it != buttons.rend(); ++it) {
@@ -895,8 +900,8 @@ Scene LayoutScene(const PageView& view, int choice, bool checked, const PictureS
   const float x = kContent.left;
   const float width = Width(kContent);
   float y = kContent.top;
-  const Text heading = MakeText(view.instruction,
-                                {&Fonts().display, 22, 28, DWRITE_FONT_WEIGHT_SEMI_BOLD}, width);
+  const Text heading =
+      MakeText(view.instruction, {&Fonts().display, 22, 28, DWRITE_FONT_WEIGHT_SEMI_BOLD}, width, true, false);
   scene.heading = build.Paragraph(heading, x, y, width, Ink::kInk, true, Role::kHeading);
   y += heading.height;
   if (view.chain) y = LayoutChain(*view.chain, build, y + 12);

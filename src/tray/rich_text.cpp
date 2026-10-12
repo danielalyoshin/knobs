@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "tray/rich_text.h"
 
+#include <algorithm>
 #include <optional>
 
 #include "util/win_strings.h"
@@ -41,9 +42,24 @@ RichText ParseRichText(std::string_view markup) {
   // Spans still open, by index in rich.spans.
   std::vector<size_t> open;
   size_t done = 0;  // Bytes of `markup` turned into text or tags.
+  // Text between tags, with its "<" and "&" escapes undone.
   const auto flush = [&](size_t to) {
-    if (to > done) rich.text += FromUtf8(markup.substr(done, to - done));
-    done = to;
+    std::string_view part = markup.substr(done, to > done ? to - done : 0);
+    std::string text;
+    while (!part.empty()) {
+      if (part.starts_with("&lt;")) {
+        text += '<';
+        part.remove_prefix(4);
+      } else if (part.starts_with("&amp;")) {
+        text += '&';
+        part.remove_prefix(5);
+      } else {
+        text += part.front();
+        part.remove_prefix(1);
+      }
+    }
+    rich.text += FromUtf8(text);
+    done = std::max(done, to);
   };
   for (size_t at = markup.find('<'); at != std::string_view::npos; at = markup.find('<', at + 1)) {
     const std::optional<Tag> tag = TagAt(markup.substr(at));
@@ -74,5 +90,19 @@ RichText ParseRichText(std::string_view markup) {
 }
 
 std::string PlainText(std::string_view markup) { return ToUtf8(ParseRichText(markup).text); }
+
+std::string EscapeMarkup(std::string_view text) {
+  std::string escaped;
+  for (const char c : text) {
+    if (c == '<') {
+      escaped += "&lt;";
+    } else if (c == '&') {
+      escaped += "&amp;";
+    } else {
+      escaped += c;
+    }
+  }
+  return escaped;
+}
 
 }  // namespace knobs::tray

@@ -406,8 +406,8 @@ LRESULT SetupUia::OnGetObject(WPARAM wparam, LPARAM lparam) {
   return UiaReturnRawElementProvider(bridge_->host->UiaWindow(), wparam, lparam, bridge_->root);
 }
 
-void SetupUia::SceneChanged(bool new_page, const std::wstring& heading) {
-  ++bridge_->generation;
+void SetupUia::SceneChanged(bool new_page, bool rebuilt, const std::wstring& heading) {
+  if (rebuilt) ++bridge_->generation;
   if (!new_page || !bridge_->root || !UiaClientsAreListening()) return;
   const BSTR said = SysAllocString(heading.c_str());
   const BSTR activity = SysAllocString(L"knobs.setup.page");

@@ -418,9 +418,11 @@ TEST(WarningsShowWhatChangesExpectations) {
 
   // File names are set as the pages set them.
   core::Snapshot named = snapshot;
-  named.notes = {{true, "Filter \"VST\" is a VST plugin (ReaComp-standalone.dll)."}};
+  named.notes = {{.warning = true,
+                  .text = "Filter \"VST <3\" is a VST plugin (Pro-Q 3.dll).",
+                  .file = "Pro-Q 3.dll"}};
   CHECK(ObsUser(named).View(named).notes[0].text ==
-        "Filter \"VST\" is a VST plugin (<code>ReaComp-standalone.dll</code>).");
+        "Filter \"VST &lt;3\" is a VST plugin (<code>Pro-Q 3.dll</code>).");
 
   snapshot.notes.erase(snapshot.notes.begin());
   view = ObsUser(snapshot).View(snapshot);
@@ -755,6 +757,10 @@ TEST(RichTextReadsThePagesMarkup) {
   rich = ParseRichText("<b>Settings › Sound");
   CHECK(rich.text == L"Settings › Sound" && rich.spans.size() == 1 && rich.spans[0].length == 16);
   CHECK(PlainText("In <b>Settings</b>, <a href=\"x\">this</a>.") == "In Settings, this.");
+  // A name from OBS stays text, whatever it holds.
+  const std::string name = "<a href=\"ms-settings:\">Mic</a> & <b>";
+  rich = ParseRichText("Found " + EscapeMarkup(name) + ".");
+  CHECK(rich.spans.empty() && rich.text == L"Found <a href=\"ms-settings:\">Mic</a> & <b>.");
 }
 
 // --- Resuming, Back and pages asked for -----------------------------------------

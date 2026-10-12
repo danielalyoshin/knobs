@@ -123,7 +123,7 @@ v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
 and q quits. Changes in OBS are seen when it closes or at a re-import. In the
 first run: y and n click the doors ("I set up my mic in OBS", "I'm new to OBS"),
 x Next, b Back, d Done, p Open OBS (which only says so: OBS would open the
-mic), 1 to 9 pick a choice, k unchecks the check box, and h holds Alt down, so
+mic), 1 to 9 pick a choice, k clicks the check box, and h holds Alt down, so
 the access keys show.
 
 States:

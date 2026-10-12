@@ -8,8 +8,8 @@
 
 // The setup's text, with the little markup its pages use (first_run.h):
 // <a href="url">a link</a>, <b>a name in the UI</b> and <code>a file
-// name</code>. Anything else that looks like a tag is text, so a name from
-// OBS can't turn into markup.
+// name</code>, with &lt; and &amp; for "<" and "&". Names from OBS and
+// Windows go in through EscapeMarkup, so none can turn into markup.
 namespace knobs::tray {
 
 struct TextSpan {
@@ -35,5 +35,8 @@ RichText ParseRichText(std::string_view markup);
 
 // The text alone, in UTF-8: for screen readers and logs.
 std::string PlainText(std::string_view markup);
+
+// `text` as markup that shows it as it is.
+std::string EscapeMarkup(std::string_view text);
 
 }  // namespace knobs::tray

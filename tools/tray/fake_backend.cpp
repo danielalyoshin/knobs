@@ -64,7 +64,8 @@ import::ImportNote VstWarning() {
           .text = std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run VST "
                               "plugins yet, so it leaves the filter out.",
                               kDisplayName),
-          .key = "vst 6f0c1d2e-reacomp"};
+          .key = "vst 6f0c1d2e-reacomp",
+          .file = "reacomp-standalone.dll"};
 }
 
 // No virtual cable is installed. VB-Cable's input is the spare.

@@ -74,6 +74,9 @@ struct ImportNote {
   // kind of note and the filter's uuid. Notifications tell a new warning from
   // a renamed filter's by it. Empty for the source's own notes.
   std::string key;
+  // A file the text names, such as a VST plugin's, for the setup window to
+  // set as one.
+  std::string file;
 
   friend bool operator==(const ImportNote&, const ImportNote&) = default;
 };

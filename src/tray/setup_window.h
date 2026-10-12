@@ -76,7 +76,10 @@ class SetupWindow final : private SetupUiaHost {
   bool Create();
   void ApplyTheme();
   bool MakeTarget();
-  void Paint();
+  // Draws what `dirty` covers, in client pixels.
+  void Paint(const RECT& dirty);
+  // Asks for the whole window to be drawn again, while it's there.
+  void Redraw();
 
   // Shows the page for the host's snapshot, if it's changed.
   void Render();
@@ -92,11 +95,13 @@ class SetupWindow final : private SetupUiaHost {
   void Close();
 
   // Keyboard and focus.
-  void OnKey(WPARAM key);
+  void OnKey(WPARAM key, bool repeat);
   // A letter typed, with Alt or without: clicks what has it as its access
   // key. Returns whether anything did.
   bool OnAccessKey(wchar_t letter);
-  void FocusOn(int element);
+  // Moves the focus to `element`, and scrolls it into view unless the
+  // mouse is on it.
+  void FocusOn(int element, bool scroll = true);
   void MoveFocus(int step);
   void MoveChoice(int step);
   void ScrollTo(float scroll);
@@ -104,7 +109,7 @@ class SetupWindow final : private SetupUiaHost {
   D2D1_POINT_2F ToDips(LPARAM lparam) const;
 
   // Motion.
-  void StartMotion(const Scene& before, bool new_page);
+  void StartMotion(bool first, bool new_page);
   void Step();
 
   ID2D1Bitmap* Picture(const std::string& name);
@@ -115,7 +120,8 @@ class SetupWindow final : private SetupUiaHost {
   float UiaScroll() const override { return scroll_; }
   int UiaFocus() const override { return focus_; }
   void UiaFocusOn(int element) override;
-  void UiaActivate(int element) override { Activate(element); }
+  // After the provider's call has returned: a click may open a dialog.
+  void UiaActivate(int element) override;
   RECT UiaScreenRect(const D2D1_RECT_F& box) const override;
   D2D1_POINT_2F UiaClientPoint(POINT screen) const override;
 
@@ -135,6 +141,9 @@ class SetupWindow final : private SetupUiaHost {
   int choice_ = 0;
   bool checked_ = false;
   Scene scene_;
+  // Goes up when a layout changes the scene's parts, so an activation posted
+  // for one layout can't land on another's.
+  uintptr_t layout_generation_ = 0;
   SetupPalette palette_;
   // Settings applied, until the core's snapshots carry them.
   std::optional<core::Settings> pending_;
@@ -157,6 +166,8 @@ class SetupWindow final : private SetupUiaHost {
   int pressed_ = -1;
   int focus_ = -1;
   bool show_focus_ = false;
+  // The control Space went down on, which it clicks when it comes up.
+  int space_down_ = -1;
   // Access keys show while Alt is down, until the mouse is used, or always if
   // Windows is set to underline them.
   bool show_access_keys_ = false;
@@ -166,6 +177,7 @@ class SetupWindow final : private SetupUiaHost {
   // Motion.
   bool animate_ = true;
   Clock::time_point motion_start_;
+  Clock::time_point breath_start_;  // The waiting dot's breath counts from here.
   bool moving_ = false;
   float caret_from_ = 0;
   std::optional<float> caret_to_;

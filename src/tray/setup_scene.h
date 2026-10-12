@@ -127,6 +127,7 @@ struct Scene {
   int heading = -1;
   int status = -1;
   bool waiting = false;
+  D2D1_RECT_F dot{};  // The waiting dot, the one part that moves by itself.
 
   float MaxScroll() const;
   // The control at `point` (client DIPs), or -1.
