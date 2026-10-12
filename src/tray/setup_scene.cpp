@@ -600,21 +600,30 @@ float LayoutChain(const core::ChainSummary& chain, Builder& build, float y) {
   return bottom;
 }
 
-float LayoutCheck(const PageView& view, bool checked, Builder& build, float y) {
-  const Label label = MakeLabel(view.check, Style(14, 20), Width(kContent) - 28);
-  Element check;
-  check.role = Role::kCheckBox;
-  check.id = kCheckBoxId;
-  check.bounds = Rect(kContent.left, y, 28 + label.text.width, std::max(20.0f, label.text.height));
-  check.in_panel = true;
-  check.focusable = true;
-  check.selected = checked;
-  check.name = label.name;
-  check.label = label.text.layout;
-  check.label_at = {kContent.left + 28, y};
-  SetAccessKey(check, label, check.label_at);
-  build.Add(std::move(check));
-  return y + std::max(20.0f, label.text.height);
+// The check boxes, one under the other. One that needs the one before it
+// sits under that one's label.
+float LayoutChecks(const PageView& view, Builder& build, float y) {
+  for (size_t i = 0; i < view.checks.size(); ++i) {
+    const PageCheck& page_check = view.checks[i];
+    const float x = kContent.left + (page_check.needs_previous ? 28 : 0);
+    if (i > 0) y += 8;
+    const Label label = MakeLabel(page_check.text, Style(14, 20), kContent.right - x - 28);
+    Element check;
+    check.role = Role::kCheckBox;
+    check.id = page_check.id;
+    check.bounds = Rect(x, y, 28 + label.text.width, std::max(20.0f, label.text.height));
+    check.in_panel = true;
+    check.focusable = true;
+    check.enabled = page_check.enabled;
+    check.selected = page_check.checked;
+    check.name = label.name;
+    check.label = label.text.layout;
+    check.label_at = {x + 28, y};
+    SetAccessKey(check, label, check.label_at);
+    build.Add(std::move(check));
+    y += std::max(20.0f, label.text.height);
+  }
+  return y;
 }
 
 void LayoutFoot(const PageView& view, Builder& build, Scene& scene) {
@@ -966,7 +975,7 @@ int Scene::HitTest(D2D1_POINT_2F point, float scroll) const {
   return -1;
 }
 
-Scene LayoutScene(const PageView& view, int choice, bool checked) {
+Scene LayoutScene(const PageView& view, int choice) {
   Scene scene;
   scene.panel = kPanel;
   scene.content = kContent;
@@ -996,7 +1005,7 @@ Scene LayoutScene(const PageView& view, int choice, bool checked) {
   if (!view.choices.empty()) y = LayoutChoices(view, choice, build, y + 16);
   if (!view.steps.empty()) y = LayoutGuide(view, build, scene, y + 14);
   if (!view.notes.empty()) y = LayoutNotes(view, build, y + 16);
-  if (!view.check.empty()) y = LayoutCheck(view, checked, build, y + 18);
+  if (!view.checks.empty()) y = LayoutChecks(view, build, y + 18);
   scene.content_height = y - kContent.top;
   if (!view.command_links) LayoutFoot(view, build, scene);
   else if (!view.footer.empty()) {
@@ -1226,15 +1235,17 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
       }
       case Role::kCheckBox: {
         const D2D1_RECT_F box = Rect(r.left, r.top + 1, 18, 18);
+        const D2D1_COLOR_F text = e.enabled ? palette.ink : palette.disabled;
         if (e.selected) {
-          p.Fill(box, palette.ink, kControlRadius);
+          p.Fill(box, text, kControlRadius);
           p.DrawIcon(Icon::kBoxCheck, Rect(box.left + 2, box.top + 2, 14, 14), palette.on_ink);
         } else {
           p.Fill(box, palette.surface, kControlRadius);
-          p.Border(box, hover ? palette.ink : palette.control_edge, kControlRadius);
+          p.Border(box, !e.enabled ? palette.line_strong : hover ? palette.ink : palette.control_edge,
+                   kControlRadius);
         }
-        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(palette.ink));
-        access_line(e, palette.ink);
+        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(text));
+        access_line(e, text);
         if (focused) p.FocusRing(Grown(r, 1), kControlRadius);
         break;
       }

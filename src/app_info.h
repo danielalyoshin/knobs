@@ -23,9 +23,18 @@ inline constexpr std::wstring_view kDisplayNameW = L"" KNOBS_DISPLAY_NAME;
 // The setup guide: the README's Setup section, which the first run links to.
 inline constexpr std::string_view kSetupGuideUrl = "https://github.com/danielalyoshin/knobs#setup";
 
-// The latest release, where an update comes from, which the first run links
-// to when OBS is newer than this version supports.
+// knobs's releases on GitHub, where updates come from (src/update).
+inline constexpr std::string_view kReleasesUrl = "https://github.com/danielalyoshin/knobs/releases";
+
+// The latest release, which the first run links to when OBS is newer than
+// this version supports. GitHub redirects it to the release's own page, which
+// is how the update check finds the latest version.
 inline constexpr std::string_view kLatestReleaseUrl = "https://github.com/danielalyoshin/knobs/releases/latest";
+
+// The installer's AppId (packaging/knobs.iss), which names its entry under
+// HKCU's Uninstall key: a copy in the folder that entry gives was installed by
+// the installer, and can update itself with the next one.
+inline constexpr std::wstring_view kInstallerAppId = L"{1FE50EC5-3715-4EE5-BD51-381BF3374BA2}";
 
 }  // namespace knobs
 

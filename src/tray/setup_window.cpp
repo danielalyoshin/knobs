@@ -520,12 +520,13 @@ void SetupWindow::Render() {
     view = view_;
     for (PageButton& button : view.buttons) button.enabled = false;
     for (PageButton& choice : view.choices) choice.enabled = false;
+    for (PageCheck& check : view.checks) check.enabled = false;
     view.waiting = true;
     if (view.status.empty()) view.status = "Applying your choice…";
   } else {
     pending_.reset();
     view = first_run_.View(snapshot, 0);
-    if (view.page == view_.page) view = first_run_.View(snapshot, choice_, checked_);
+    if (view.page == view_.page) view = first_run_.View(snapshot, choice_, checks_);
   }
   if (view == view_ && !scene_.elements.empty()) return;
   ShowView(std::move(view));
@@ -548,7 +549,8 @@ void SetupWindow::ShowView(PageView view) {
   const Walkthrough* walk_before = scene_.walkthrough;
   view_ = std::move(view);
   choice_ = view_.default_choice;
-  if (!view_.check.empty()) checked_ = view_.checked;
+  checks_.clear();
+  for (const PageCheck& check : view_.checks) checks_[check.id] = check.checked;
   Layout();
   const bool rebuilt = Parts(scene_) != parts_before;
   if (rebuilt) ++layout_generation_;
@@ -588,7 +590,7 @@ void SetupWindow::ShowView(PageView view) {
 }
 
 void SetupWindow::Layout() {
-  scene_ = LayoutScene(view_, choice_, checked_);
+  scene_ = LayoutScene(view_, choice_);
   if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = walk_playing_;
 }
 
@@ -615,10 +617,12 @@ void SetupWindow::Activate(int index) {
       }
       break;
     case Role::kCheckBox:
-      checked_ = !checked_;
+      checks_[element.id] = !element.selected;
       Render();
       for (size_t i = 0; i < scene_.elements.size(); ++i) {
-        if (scene_.elements[i].role == Role::kCheckBox) uia_->Toggled(static_cast<int>(i), !checked_);
+        if (scene_.elements[i].role == Role::kCheckBox && scene_.elements[i].id == element.id) {
+          uia_->Toggled(static_cast<int>(i), element.selected);
+        }
       }
       break;
     case Role::kToggle:
@@ -641,7 +645,7 @@ void SetupWindow::Click(int id) {
   if (in_button_) return;
   in_button_ = true;
   const core::Snapshot snapshot = host_.snapshot();
-  const FirstRunAction action = first_run_.Click(id, choice_, checked_, snapshot);
+  const FirstRunAction action = first_run_.Click(id, choice_, checks_, snapshot);
   Save();
   bool close = false;
   switch (action.kind) {
@@ -676,7 +680,7 @@ void SetupWindow::Click(int id) {
       close = host_.Restart();
       break;
     case FirstRunAction::Kind::kFinish:
-      host_.FinishFirstRun(action.start_with_windows);
+      host_.FinishFirstRun(action.finish);
       close = true;
       break;
   }

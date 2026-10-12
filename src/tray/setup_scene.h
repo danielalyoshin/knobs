@@ -25,10 +25,9 @@ namespace knobs::tray {
 inline constexpr float kSetupWidth = 760;
 inline constexpr float kSetupHeight = 520;
 
-// The check box's id, beside the buttons' and choices' (FirstRunId).
-inline constexpr int kCheckBoxId = 300;
-// The walkthrough's play and pause.
-inline constexpr int kWalkToggleId = 301;
+// The walkthrough's play and pause, beside the buttons', choices' and check
+// boxes' ids (FirstRunId).
+inline constexpr int kWalkToggleId = 400;
 // The frame a guide's walkthrough plays in.
 inline constexpr D2D1_SIZE_F kWalkFrame = {300, 188};
 
@@ -60,7 +59,7 @@ enum class Ink { kInk, kText2, kText3, kOnInk };
 
 struct Element {
   Role role = Role::kText;
-  int id = 0;       // A button's, door's or choice's (FirstRunId), or kCheckBoxId.
+  int id = 0;       // A button's, door's, choice's or check box's (FirstRunId).
   int parent = -1;  // Its list or group, by index; -1 for the window.
   // In client DIPs, as laid out: the panel's parts move up as it scrolls.
   D2D1_RECT_F bounds{};
@@ -70,7 +69,7 @@ struct Element {
   std::string url;           // A link's.
   bool focusable = false;
   bool enabled = true;
-  bool selected = false;  // A radio's, or the check box's.
+  bool selected = false;  // A radio's, or a check box's.
   bool is_default = false;
   bool warning = false;   // A note's.
   // A link: the boxes of its words and its glyph, one per line, and its
@@ -151,8 +150,8 @@ struct Scene {
   bool Visible(const Element& element, float scroll) const;
 };
 
-// Lays out `view`, with the choice and the check box as the user has them.
-Scene LayoutScene(const PageView& view, int choice, bool checked);
+// Lays out `view`, with the choice as the user has it.
+Scene LayoutScene(const PageView& view, int choice);
 
 // What changes as the window is used, for the painter.
 struct SceneState {

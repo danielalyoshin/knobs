@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "tray/settings_file.h"
 
+#include <charconv>
+#include <chrono>
 #include <format>
+#include <string>
 #include <system_error>
 
 #include "import/obs_ini.h"
@@ -79,6 +82,16 @@ std::string FormatSettings(const SavedSettings& saved) {
     Line(text, "Door", DoorName(first_run.door));
     Line(text, "Page", PageName(first_run.reached));
   }
+  const UpdateSettings& updates = saved.updates;
+  text += "\n[Updates]\n";
+  Line(text, "Check", updates.check ? "true" : "false");
+  Line(text, "Install", updates.install ? "true" : "false");
+  if (updates.checked) {
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(updates.checked->time_since_epoch());
+    Line(text, "Checked", std::to_string(seconds.count()));
+  }
+  if (updates.latest) Line(text, "Latest", updates.latest->ToString());
+  if (updates.tried) Line(text, "Tried", updates.tried->ToString());
   return text;
 }
 
@@ -109,6 +122,19 @@ SavedSettings ParseSettings(std::string_view text) {
     const auto page = PageNamed(ini.Get("Setup", "Page").value_or(""));
     if (page && *page >= FirstRunPage::kMic) first_run.reached = *page;
   }
+
+  UpdateSettings& updates = saved.updates;
+  updates.check = ReadBool(ini, "Updates", "Check", updates.check);
+  updates.install = updates.check && ReadBool(ini, "Updates", "Install", updates.install);
+  if (const auto checked = ini.Get("Updates", "Checked")) {
+    long long seconds = 0;
+    const auto [end, error] = std::from_chars(checked->data(), checked->data() + checked->size(), seconds);
+    if (error == std::errc{} && end == checked->data() + checked->size() && seconds > 0) {
+      updates.checked = std::chrono::system_clock::time_point(std::chrono::seconds(seconds));
+    }
+  }
+  updates.latest = update::ParseVersion(ini.Get("Updates", "Latest").value_or(""));
+  updates.tried = update::ParseVersion(ini.Get("Updates", "Tried").value_or(""));
   return saved;
 }
 

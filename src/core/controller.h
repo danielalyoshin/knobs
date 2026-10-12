@@ -100,6 +100,8 @@ class Controller {
   std::optional<Clock::time_point> NextDeadline() const;
   // Releases the chain for good. Nothing is published after this.
   void Stop();
+  // A line for knobs's log, from outside the core, once there is one.
+  void Log(std::string_view line) { backend_.Log(line); }
 
   const Snapshot& snapshot() const { return snapshot_; }
 

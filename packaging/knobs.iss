@@ -8,6 +8,10 @@
 ; and %LocalAppData%\knobs (the copy of OBS's files and the logs), and asks
 ; before removing %AppData%\knobs (the settings). A portable copy's Run entry
 ; is left alone.
+;
+; knobs runs it to update itself (src/main.cpp, StartInstaller), very silent
+; with /update=1: then it starts knobs again as it ends, with --updated,
+; whether the update worked or not.
 
 #ifndef AppName
   #error Run packaging\package.ps1, which passes AppName, AppVersion, StageDir and OutputDir.
@@ -93,6 +97,30 @@ const
   // The header images' heights: header-<height>.png is for a header that
   // tall, one for each display scale (tools\render-installer-images.ps1).
   HeaderHeights = '58,77,97,116,124,143,159';
+
+// An update knobs started itself (StartInstaller in src/main.cpp).
+function IsUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:update|0}') = '1';
+end;
+
+// After an update, knobs starts again: the new copy, or this one if the
+// update failed, which says so.
+procedure DeinitializeSetup();
+var
+  App: String;
+  Code: Integer;
+begin
+  if not IsUpdate() then
+    Exit;
+  try
+    App := ExpandConstant('{app}');
+  except
+    Exit;
+  end;
+  if FileExists(App + '\{#AppName}.exe') then
+    Exec(App + '\{#AppName}.exe', '--updated', App, SW_SHOWNORMAL, ewNoWait, Code);
+end;
 
 // Shows the lockup in the header, where Setup's small image goes. Setup keeps
 // that square, and would pick a WizardSmallImageFile by its area, the wrong

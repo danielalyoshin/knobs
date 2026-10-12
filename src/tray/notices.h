@@ -32,6 +32,9 @@ struct Notice {
     kFilterWarnings,  // New pre-flight warnings: filters knobs can't run.
     kRestarted,       // The copy before this one restarted to follow OBS.
     kOtherObs,        // OBS opened in another Windows session.
+    kUpdateAvailable,  // A new version is out (updates.h).
+    kUpdated,          // This copy is the version an update installed.
+    kUpdateFailed,     // An update didn't install by itself.
   };
 
   Kind kind = Kind::kChainChanged;
@@ -41,8 +44,10 @@ struct Notice {
   bool problem = false;
   // Played with a sound: a problem, or a filter that won't sound as in OBS.
   bool sound = false;
-  // What a click opens: the first run at this page, or else the tray menu.
+  // What a click opens: the first run at this page, a web page in the
+  // browser, or else the tray menu.
   std::optional<FirstRunPage> page;
+  std::string url;
 
   friend bool operator==(const Notice&, const Notice&) = default;
 };
@@ -62,7 +67,8 @@ std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name);
 // - The mic or its chain changing in OBS, and new pre-flight warnings, get
 //   one after the first import, but a change knobs's own settings made gets
 //   none.
-// - After a restart to follow OBS, the new copy says why.
+// - After a restart to follow OBS, the new copy says why, and after an
+//   update, what it did.
 // - OBS opening in another Windows session gets one, unless one of the
 //   above is shown at the same time, and it's taken down when that OBS
 //   closes.
@@ -84,6 +90,9 @@ class Notifier {
     Clock::duration mic_back_after = std::chrono::seconds(5);
     // Why the copy before this one restarted it, if it did.
     core::RestartNeed restarted_for = core::RestartNeed::kNone;
+    // What an update did, said as the restart is, by the copy it started
+    // (UpdatedNotice).
+    std::optional<Notice> updated;
   };
 
   struct Update {
@@ -97,6 +106,9 @@ class Notifier {
 
   // A new snapshot.
   Update Changed(const core::Snapshot& snapshot, bool quiet, Clock::time_point now);
+  // Something to say that isn't about the core's state, such as a new
+  // version (updates.h).
+  Update Say(Notice notice, bool quiet);
   // Does what's due by `now` (NextDeadline).
   Update Tick(bool quiet, Clock::time_point now);
   std::optional<Clock::time_point> NextDeadline() const;

@@ -66,6 +66,10 @@ void Core::DevicesChanged() {
   Post([](Controller& controller, Clock::time_point now) { controller.DevicesChanged(now); });
 }
 
+void Core::Log(std::string line) {
+  Post([line = std::move(line)](Controller& controller, Clock::time_point) { controller.Log(line); });
+}
+
 void Core::Post(Task task) {
   {
     std::lock_guard lock(mutex_);

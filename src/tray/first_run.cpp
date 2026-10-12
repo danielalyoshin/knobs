@@ -658,7 +658,7 @@ PageView Warnings(const core::Snapshot& snapshot) {
   return view;
 }
 
-PageView Done(const core::Snapshot& snapshot, bool start_checked) {
+PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool can_install_updates) {
   PageView view;
   view.instruction = "Your mic is set up";
   core::ChainSummary chain = snapshot.chain.value_or(core::ChainSummary{});
@@ -688,8 +688,17 @@ PageView Done(const core::Snapshot& snapshot, bool start_checked) {
     default:
       break;
   }
-  view.check = std::format("Start {} with &Windows", kDisplayName);
-  view.checked = start_checked;
+  view.checks.push_back(
+      {.id = kCheckStartWithWindows, .text = std::format("Start {} with &Windows", kDisplayName),
+       .checked = finish.start_with_windows});
+  view.checks.push_back({.id = kCheckForUpdates, .text = "Automatically &check for new versions",
+                         .checked = finish.check_for_updates});
+  if (can_install_updates) {
+    view.checks.push_back({.id = kCheckInstallUpdates,
+                           .text = "Automatically &update when a new version is available",
+                           .checked = finish.install_updates,
+                           .needs_previous = true});
+  }
   view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonDone, "&Done")};
   view.default_button = kButtonDone;
   return view;
@@ -741,8 +750,13 @@ std::vector<audio::AudioDevice> CableChoices(const core::Snapshot& snapshot) {
   return choices;
 }
 
-FirstRun::FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page, bool start_with_windows)
-    : progress_(progress), start_checked_(!progress.done || start_with_windows) {
+FirstRun::FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page, FinishChoices now,
+                   bool can_install_updates)
+    : progress_(progress),
+      finish_{.start_with_windows = !progress.done || now.start_with_windows,
+              .check_for_updates = now.check_for_updates,
+              .install_updates = can_install_updates && now.check_for_updates && now.install_updates},
+      can_install_updates_(can_install_updates) {
   if (!page) return;
   switch (*page) {
     case Page::kWelcome:
@@ -772,7 +786,7 @@ FirstRunPage FirstRun::Page(const core::Snapshot& snapshot) const {
   return Page::kDone;
 }
 
-PageView FirstRun::View(const core::Snapshot& snapshot, int choice, std::optional<bool> checked) const {
+PageView FirstRun::View(const core::Snapshot& snapshot, int choice, const CheckStates& checks) const {
   const FirstRunPage page = Page(snapshot);
   PageView view;
   switch (page) {
@@ -810,7 +824,7 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, std::optiona
       view = Warnings(snapshot);
       break;
     case Page::kDone:
-      view = Done(snapshot, start_checked_);
+      view = Done(snapshot, finish_, can_install_updates_);
       break;
   }
   view.page = page;
@@ -819,11 +833,20 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, std::optiona
   if (std::any_of(view.choices.begin(), view.choices.end(), [choice](const PageButton& c) { return c.id == choice; })) {
     view.default_choice = choice;
   }
-  if (checked && !view.check.empty()) view.checked = *checked;
+  for (PageCheck& check : view.checks) {
+    if (const auto it = checks.find(check.id); it != checks.end()) check.checked = it->second;
+  }
+  // One that needs the one before it is off while that one is.
+  for (size_t i = 1; i < view.checks.size(); ++i) {
+    PageCheck& check = view.checks[i];
+    if (!check.needs_previous) continue;
+    check.enabled = view.checks[i - 1].enabled && view.checks[i - 1].checked;
+    check.checked = check.checked && check.enabled;
+  }
   return view;
 }
 
-FirstRunAction FirstRun::Click(int button, int choice, bool checked, const core::Snapshot& snapshot) {
+FirstRunAction FirstRun::Click(int button, int choice, const CheckStates& checks, const core::Snapshot& snapshot) {
   const FirstRunPage page = Page(snapshot);
   core::Settings settings = snapshot.settings;
   const auto apply = [&settings, &snapshot]() {
@@ -869,9 +892,18 @@ FirstRunAction FirstRun::Click(int button, int choice, bool checked, const core:
       Leave(page);
       progress_.reached = std::max(progress_.reached, Page::kWarnings);
       return {};
-    case kButtonDone:
+    case kButtonDone: {
       progress_.done = true;
-      return {.kind = FirstRunAction::Kind::kFinish, .start_with_windows = checked};
+      FinishChoices finish = finish_;
+      const auto checked = [&checks](int id, bool& value) {
+        if (const auto it = checks.find(id); it != checks.end()) value = it->second;
+      };
+      checked(kCheckStartWithWindows, finish.start_with_windows);
+      checked(kCheckForUpdates, finish.check_for_updates);
+      checked(kCheckInstallUpdates, finish.install_updates);
+      finish.install_updates = can_install_updates_ && finish.check_for_updates && finish.install_updates;
+      return {.kind = FirstRunAction::Kind::kFinish, .finish = finish};
+    }
     case kButtonNext:
       break;
     default:

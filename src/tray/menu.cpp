@@ -257,7 +257,8 @@ std::string CableRecordingSide(std::string_view name) {
   return "";
 }
 
-Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, bool start_with_windows) {
+Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, bool start_with_windows,
+               const UpdateMenu& updates) {
   Menu menu;
   std::vector<MenuItem>& items = menu.items;
   MenuItem status = Command(kIdStatus, Escape(StatusLine(snapshot)));
@@ -272,6 +273,12 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
     other.enabled = false;
     items.push_back(std::move(other));
   }
+  if (updates.version) {
+    const std::string version = updates.version->ToString();
+    items.push_back(updates.install_now
+                        ? Command(kIdInstallUpdate, std::format("&Update to {} {}", kDisplayName, version))
+                        : Command(kIdGetUpdate, std::format("&Get {} {}…", kDisplayName, version)));
+  }
   items.push_back(Separator());
   items.push_back(snapshot.paused_by_user ? Command(kIdResume, "&Resume") : Command(kIdPause, "&Pause"));
   items.push_back(MicMenu(snapshot, settings, menu));
@@ -280,6 +287,14 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
   items.push_back(Separator());
   items.push_back(Toggle(kIdPauseForObs, "Pause while &OBS is open", settings.pause_for_obs));
   items.push_back(Toggle(kIdStartWithWindows, "Start with &Windows", start_with_windows));
+  if (updates.offered) {
+    items.push_back(Toggle(kIdCheckForUpdates, "Automatically check for &new versions", updates.check));
+    if (updates.can_install) {
+      MenuItem install = Toggle(kIdInstallUpdates, "Automatically up&date", updates.check && updates.install);
+      install.enabled = updates.check;
+      items.push_back(std::move(install));
+    }
+  }
   items.push_back(Separator());
   items.push_back(Command(kIdSetup, "&Setup…"));
   items.push_back(Command(kIdOpenLogs, "Open &log folder"));

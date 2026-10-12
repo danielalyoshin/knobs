@@ -62,6 +62,9 @@ class Core {
   // The audio devices may have changed, as a device watch reports it. For a
   // watch other than the core's own (CoreOptions::watch_devices off).
   void DevicesChanged();
+  // A line for knobs's log, which libobs's start opens: lines before it are
+  // lost.
+  void Log(std::string line);
 
  private:
   using Task = std::function<void(Controller& controller, Controller::Clock::time_point now)>;

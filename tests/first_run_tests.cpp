@@ -81,7 +81,7 @@ core::Snapshot PickMic() {
 // The first door's pages, from the welcome page.
 FirstRun ObsUser(const core::Snapshot& snapshot) {
   FirstRun first_run({});
-  first_run.Click(kButtonObsUser, 0, false, snapshot);
+  first_run.Click(kButtonObsUser, 0, {}, snapshot);
   return first_run;
 }
 
@@ -159,36 +159,36 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(done.stage == Stage::kApps);
   CHECK(Contains(done.content, "click ^ (Show hidden icons)"));
   CHECK(Contains(done.content, "It pauses while OBS is open"));
-  CHECK(done.check == std::format("Start {} with &Windows", kDisplayName) && done.checked);
+  CHECK(done.checks.size() == 2 && done.checks[0].id == kCheckStartWithWindows &&
+        done.checks[0].text == std::format("Start {} with &Windows", kDisplayName) && done.checks[0].checked);
   CHECK(done.default_button == kButtonDone);
-  CHECK(!first_run.View(Running(), 0, false).checked);
+  CHECK(!first_run.View(Running(), 0, {{kCheckStartWithWindows, false}}).checks[0].checked);
 
-  const FirstRunAction finish = first_run.Click(kButtonDone, 0, true, Running());
-  CHECK(finish.kind == Kind::kFinish && finish.start_with_windows && first_run.progress().done);
-  CHECK(first_run.Click(kButtonDone, 0, false, Running()).start_with_windows == false);
+  const FirstRunAction finish = first_run.Click(kButtonDone, 0, {{kCheckStartWithWindows, true}}, Running());
+  CHECK(finish.kind == Kind::kFinish && finish.finish.start_with_windows && first_run.progress().done);
+  CHECK(!first_run.Click(kButtonDone, 0, {{kCheckStartWithWindows, false}}, Running()).finish.start_with_windows);
 
   // A first run offers Start with Windows checked, even while it's off. One
   // that was finished, opened again, offers it as it is, so that Done
   // doesn't turn it back on.
-  const PageView first =
-      FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, std::nullopt, false).View(Running());
-  CHECK(first.page == Page::kDone && first.checked);
+  const PageView first = FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, std::nullopt, {}).View(Running());
+  CHECK(first.page == Page::kDone && first.checks[0].checked);
 
   // Also on the way from a page a notification opened.
   const FirstRunProgress finished = {.done = true, .door = Door::kObsUser, .reached = Page::kDone};
   core::Snapshot warned = Running();
   warned.notes = {{true, "Filter \"ReaComp\" is a VST plugin."}};
   for (const bool on : {false, true}) {
-    FirstRun again(finished, std::nullopt, on);
+    FirstRun again(finished, std::nullopt, {.start_with_windows = on});
     PageView last = again.View(Running());
-    CHECK(last.page == Page::kDone && last.checked == on);
-    CHECK(again.Click(kButtonDone, 0, last.checked, Running()).start_with_windows == on);
+    CHECK(last.page == Page::kDone && last.checks[0].checked == on);
+    CHECK(again.Click(kButtonDone, 0, {}, Running()).finish.start_with_windows == on);
 
-    FirstRun warnings(finished, Page::kWarnings, on);
+    FirstRun warnings(finished, Page::kWarnings, {.start_with_windows = on});
     CHECK(warnings.Page(warned) == Page::kWarnings);
-    warnings.Click(kButtonNext, 0, false, warned);
+    warnings.Click(kButtonNext, 0, {}, warned);
     last = warnings.View(warned);
-    CHECK(last.page == Page::kDone && last.checked == on);
+    CHECK(last.page == Page::kDone && last.checks[0].checked == on);
   }
 
   // The last page says why the mic isn't running yet.
@@ -220,7 +220,7 @@ TEST(SeveralMicsAskWhichOne) {
   snapshot.mics[2].monitored = false;
   CHECK(ObsUser(snapshot).View(snapshot).default_choice == kChoiceFirst + 1);
 
-  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 2, false, snapshot);
+  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 2, {}, snapshot);
   CHECK(picked.kind == Kind::kApply && picked.settings.mic == "Podcast Mic");
   CHECK(first_run.progress().reached == Page::kFilters);
   // Until the core has it, the state still asks for a mic.
@@ -236,7 +236,7 @@ TEST(SeveralMicsAskWhichOne) {
   CHECK(ObsUser(snapshot).Page(snapshot) == Page::kMic);
   CHECK(ObsUser(snapshot).View(snapshot).default_choice == kChoiceFirst + 2);
   FirstRun again = ObsUser(snapshot);
-  CHECK(again.Click(kButtonNext, kChoiceFirst + 2, false, snapshot).kind == Kind::kNone);
+  CHECK(again.Click(kButtonNext, kChoiceFirst + 2, {}, snapshot).kind == Kind::kNone);
 
   // A pick that's gone from OBS.
   snapshot = PickMic();
@@ -258,11 +258,11 @@ TEST(NoFiltersOffersTheSteps) {
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Continue without filters", "Show the steps"}));
   CHECK(view.default_button == kButtonShowSteps);
 
-  CHECK(first_run.Click(kButtonShowSteps, 0, false, snapshot).kind == Kind::kNone);
+  CHECK(first_run.Click(kButtonShowSteps, 0, {}, snapshot).kind == Kind::kNone);
   CHECK(first_run.Page(snapshot) == Page::kSteps);
-  first_run.Click(kButtonBack, 0, false, snapshot);
+  first_run.Click(kButtonBack, 0, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kFilters);
-  first_run.Click(kButtonSkipFilters, 0, false, snapshot);
+  first_run.Click(kButtonSkipFilters, 0, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kDone);
   CHECK((first_run.View(snapshot).chain == core::ChainSummary{"Mic/Aux", {}, "CABLE In 16ch"}));
 
@@ -296,7 +296,7 @@ TEST(CableWhenOBSMonitorsToTheDefaultDevice) {
   CHECK(Contains(view.content, "default playback device, which is usually your speakers"));
   CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch"}));
   CHECK(view.default_choice == kChoiceFirst);
-  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 1, false, snapshot);
+  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
   CHECK(picked.kind == Kind::kApply && picked.settings.cable == kCable16Id && picked.settings.cable_name == kCable16);
   CHECK(first_run.progress().reached == Page::kWarnings);
   // Still needed until the core has the cable.
@@ -339,7 +339,7 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   installed.state = State::kRunning;
   CHECK(first_run.Page(installed) == Page::kDone);
   // Back goes to it.
-  first_run.Click(kButtonBack, 0, false, installed);
+  first_run.Click(kButtonBack, 0, {}, installed);
   CHECK(first_run.Page(installed) == Page::kCable);
 
   // Two at once: the choice is the user's.
@@ -349,6 +349,44 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   two.outputs.push_back({kCable16, kCable16Id});
   CHECK(first_run.Changed(none, two).kind == Kind::kNone);
   CHECK(first_run.Page(two) == Page::kCable && !first_run.View(two).waiting);
+}
+
+TEST(LastPageAsksAboutUpdates) {
+  // Both off until the user turns them on, and updating by itself only in
+  // a copy the installer installed.
+  const FirstRunProgress progress{.door = Door::kObsUser, .reached = Page::kDone};
+  PageView view = FirstRun(progress, std::nullopt, {}, true).View(Running());
+  CHECK(view.checks.size() == 3);
+  CHECK(view.checks[1].id == kCheckForUpdates && view.checks[1].text == "Automatically &check for new versions" &&
+        !view.checks[1].checked);
+  CHECK(view.checks[2].id == kCheckInstallUpdates &&
+        view.checks[2].text == "Automatically &update when a new version is available" && !view.checks[2].checked);
+  // Updating by itself needs the check: off and disabled without it.
+  CHECK(view.checks[2].needs_previous && !view.checks[2].enabled);
+  CHECK(FirstRun(progress).View(Running()).checks.size() == 2);
+
+  FirstRun first_run(progress, std::nullopt, {}, true);
+  view = first_run.View(Running(), 0, {{kCheckForUpdates, true}});
+  CHECK(view.checks[1].checked && view.checks[2].enabled && !view.checks[2].checked);
+  view = first_run.View(Running(), 0, {{kCheckForUpdates, false}, {kCheckInstallUpdates, true}});
+  CHECK(!view.checks[2].enabled && !view.checks[2].checked);
+  FirstRunAction done = first_run.Click(kButtonDone, 0, {{kCheckForUpdates, true}, {kCheckInstallUpdates, true}},
+                                        Running());
+  CHECK(done.kind == Kind::kFinish && done.finish.check_for_updates && done.finish.install_updates &&
+        done.finish.start_with_windows);
+  first_run = FirstRun(progress, std::nullopt, {}, true);
+  done = first_run.Click(kButtonDone, 0, {{kCheckInstallUpdates, true}}, Running());
+  CHECK(!done.finish.check_for_updates && !done.finish.install_updates);
+  // A copy that can't install keeps it off, whatever it's told.
+  first_run = FirstRun(progress, std::nullopt, {.check_for_updates = true, .install_updates = true});
+  done = first_run.Click(kButtonDone, 0, {{kCheckInstallUpdates, true}}, Running());
+  CHECK(done.finish.check_for_updates && !done.finish.install_updates);
+
+  // Opened again, it shows them as they are.
+  view = FirstRun({.done = true, .door = Door::kObsUser, .reached = Page::kDone}, std::nullopt,
+                  {.check_for_updates = true, .install_updates = true}, true)
+             .View(Running());
+  CHECK(view.checks[1].checked && view.checks[2].checked && view.checks[2].enabled);
 }
 
 TEST(CableThatIsntACable) {
@@ -364,7 +402,7 @@ TEST(CableThatIsntACable) {
         (std::vector<std::string>{"CABLE Input", "CABLE In 16ch", "Headphones\nOBS's monitoring device"}));
   CHECK(view.default_choice == kChoiceFirst + 2);
   // Keeping it is an answer, and no change.
-  CHECK(first_run.Click(kButtonNext, kChoiceFirst + 2, false, snapshot).kind == Kind::kNone);
+  CHECK(first_run.Click(kButtonNext, kChoiceFirst + 2, {}, snapshot).kind == Kind::kNone);
   CHECK(first_run.Page(snapshot) == Page::kDone);
   CHECK(first_run.View(snapshot).content.starts_with(
       "In your other apps, choose the recording side of Headphones as your mic."));
@@ -379,7 +417,7 @@ TEST(CableThatIsntACable) {
   snapshot.outputs = {{kSpeakers, kSpeakersId}, snapshot.obs_cable};
   first_run = ObsUser(snapshot);
   CHECK(Texts(first_run.View(snapshot).buttons) == (std::vector<std::string>{"Back", "Keep Headphones"}));
-  CHECK(first_run.Click(kButtonKeepDevice, 0, false, snapshot).kind == Kind::kNone);
+  CHECK(first_run.Click(kButtonKeepDevice, 0, {}, snapshot).kind == Kind::kNone);
   CHECK(first_run.Page(snapshot) == Page::kDone);
 }
 
@@ -391,7 +429,7 @@ TEST(CableMissingAlwaysAsks) {
   const PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kCable && view.content.starts_with("CABLE In 16ch isn't connected. Choose another cable."));
   CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input"}));
-  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst, false, snapshot);
+  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst, {}, snapshot);
   CHECK(picked.kind == Kind::kApply && picked.settings.cable == kCableInputId);
   // Back to OBS's own: no pick of knobs's.
   snapshot.settings = picked.settings;
@@ -399,7 +437,7 @@ TEST(CableMissingAlwaysAsks) {
   first_run = FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, Page::kCable);
   const PageView again = first_run.View(snapshot);
   CHECK(again.choices.back().text == "CABLE In 16ch\nOBS's monitoring device");
-  const FirstRunAction obs = first_run.Click(kButtonNext, kChoiceFirst + 1, false, snapshot);
+  const FirstRunAction obs = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
   CHECK(obs.kind == Kind::kApply && obs.settings.cable.empty() && obs.settings.cable_name.empty());
 }
 
@@ -414,7 +452,7 @@ TEST(WarningsShowWhatChangesExpectations) {
   CHECK((view.notes == std::vector<PageNote>{{true, "Filter \"VST\" is a VST plugin."},
                                              {false, "The mic is on push-to-talk in OBS."}}));
   CHECK(view.stages[static_cast<size_t>(Stage::kFilters)].state == StageState::kWarning);
-  first_run.Click(kButtonNext, 0, false, snapshot);
+  first_run.Click(kButtonNext, 0, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kDone && first_run.progress().reached == Page::kDone);
 
   // File names are set as the pages set them.
@@ -445,8 +483,8 @@ TEST(ProblemsWithObsComeFirst) {
   CHECK(view.page == Page::kFindObs && view.content.starts_with("OBS Studio isn't installed.\n\nIf OBS is installed"));
   CHECK(Contains(view.content, "<a href=\"https://obsproject.com/download\">get OBS Studio</a>"));
   CHECK(view.default_button == kButtonChooseObs);
-  CHECK(first_run.Click(kButtonChooseObs, 0, false, snapshot).kind == Kind::kChooseObs);
-  CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
+  CHECK(first_run.Click(kButtonChooseObs, 0, {}, snapshot).kind == Kind::kChooseObs);
+  CHECK(first_run.Click(kButtonTryAgain, 0, {}, snapshot).kind == Kind::kReimport);
 
   snapshot.state = State::kObsUnsupported;
   snapshot.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
@@ -461,10 +499,10 @@ TEST(ProblemsWithObsComeFirst) {
   CHECK(view.page == Page::kObsSettings);
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Choose folder…", "Open OBS"}));
   CHECK(view.default_button == kButtonOpenObs);
-  CHECK(first_run.Click(kButtonOpenObs, 0, false, snapshot).kind == Kind::kOpenObs);
-  CHECK(first_run.Click(kButtonChooseObsSettings, 0, false, snapshot).kind == Kind::kChooseObsSettings);
+  CHECK(first_run.Click(kButtonOpenObs, 0, {}, snapshot).kind == Kind::kOpenObs);
+  CHECK(first_run.Click(kButtonChooseObsSettings, 0, {}, snapshot).kind == Kind::kChooseObsSettings);
   // Settings put there some other way, or a folder that's back.
-  CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
+  CHECK(first_run.Click(kButtonTryAgain, 0, {}, snapshot).kind == Kind::kReimport);
   snapshot.obs_running = true;
   view = first_run.View(snapshot);
   CHECK(!FindButton(view, kButtonOpenObs)->enabled && view.default_button == kButtonChooseObsSettings);
@@ -474,7 +512,7 @@ TEST(ProblemsWithObsComeFirst) {
   first_run = ObsUser(snapshot);
   view = first_run.View(snapshot);
   CHECK(view.page == Page::kProblem && view.instruction == std::format("{} needs to restart", kDisplayName));
-  CHECK(first_run.Click(kButtonRestart, 0, false, snapshot).kind == Kind::kRestart);
+  CHECK(first_run.Click(kButtonRestart, 0, {}, snapshot).kind == Kind::kRestart);
   snapshot.state = State::kFailed;
   CHECK(ObsUser(snapshot).View(snapshot).instruction == "Stopped after an error");
   // Even a page that was answered waits for them.
@@ -493,7 +531,7 @@ TEST(APickedFolderThatStoppedWorkingIsTheUsersToChange) {
   CHECK(view.page == Page::kFindObs && Contains(view.content, "OBS isn't in the folder chosen for it."));
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Look for OBS", "Choose folder…"}));
   CHECK(view.default_button == kButtonChooseObs);
-  FirstRunAction action = first_run.Click(kButtonLookForObs, 0, false, snapshot);
+  FirstRunAction action = first_run.Click(kButtonLookForObs, 0, {}, snapshot);
   CHECK(action.kind == Kind::kApply && !action.settings.obs_dir);
   snapshot.settings.obs_dir.reset();
   view = ObsUser(snapshot).View(snapshot);
@@ -514,8 +552,8 @@ TEST(APickedFolderThatStoppedWorkingIsTheUsersToChange) {
         (std::vector<std::string>{"Back", "Try again", "Use OBS's own folder", "Choose folder…"}));
   CHECK(view.default_button == kButtonChooseObsSettings && view.footer.empty());
   // The same folder again, such as on a drive plugged back in.
-  CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
-  action = first_run.Click(kButtonOwnObsSettings, 0, false, snapshot);
+  CHECK(first_run.Click(kButtonTryAgain, 0, {}, snapshot).kind == Kind::kReimport);
+  action = first_run.Click(kButtonOwnObsSettings, 0, {}, snapshot);
   CHECK(action.kind == Kind::kApply && !action.settings.obs_config);
   // OBS's own folder picked, however it's spelled (the core says so): as
   // with no pick, where opening OBS once does fill it.
@@ -546,8 +584,8 @@ TEST(AnUnsupportedObsOffersAnotherFolder) {
                                            "href=\"https://github.com/danielalyoshin/knobs/releases/latest\">{0}'s "
                                            "latest release</a>.",
                                            kDisplayName)));
-  CHECK(first_run.Click(kButtonChooseObs, 0, false, snapshot).kind == Kind::kChooseObs);
-  CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
+  CHECK(first_run.Click(kButtonChooseObs, 0, {}, snapshot).kind == Kind::kChooseObs);
+  CHECK(first_run.Click(kButtonTryAgain, 0, {}, snapshot).kind == Kind::kReimport);
 
   // A folder picked for OBS that holds an older one stays picked, with the
   // ways back. No knobs update supports an older OBS.
@@ -559,9 +597,9 @@ TEST(AnUnsupportedObsOffersAnotherFolder) {
   CHECK(view.page == Page::kObsUnsupported && Contains(view.content, "the folder chosen for it, D:\\OBS 31."));
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Look for OBS", "Choose folder…"}));
   CHECK(view.default_button == kButtonChooseObs && !Contains(view.content, "wait"));
-  const FirstRunAction action = first_run.Click(kButtonLookForObs, 0, false, snapshot);
+  const FirstRunAction action = first_run.Click(kButtonLookForObs, 0, {}, snapshot);
   CHECK(action.kind == Kind::kApply && !action.settings.obs_dir);
-  CHECK(first_run.Click(kButtonChooseObs, 0, false, snapshot).kind == Kind::kChooseObs);
+  CHECK(first_run.Click(kButtonChooseObs, 0, {}, snapshot).kind == Kind::kChooseObs);
 }
 
 // --- The second door ----------------------------------------------------------------
@@ -571,7 +609,7 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   snapshot.chain->filters.clear();
   snapshot.mics[0].filters.clear();
   FirstRun first_run({});
-  first_run.Click(kButtonNewToObs, 0, false, snapshot);
+  first_run.Click(kButtonNewToObs, 0, {}, snapshot);
   PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kSteps && view.instruction == "Set up your mic in OBS");
   // As OBS 32.2.2 names them (docs/design.md, First run).
@@ -585,7 +623,7 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open OBS", "Next"}));
   CHECK(FindButton(view, kButtonOpenObs)->enabled && !FindButton(view, kButtonNext)->enabled);
   CHECK(view.default_button == kButtonOpenObs);
-  CHECK(first_run.Click(kButtonOpenObs, 0, false, snapshot).kind == Kind::kOpenObs);
+  CHECK(first_run.Click(kButtonOpenObs, 0, {}, snapshot).kind == Kind::kOpenObs);
 
   // OBS open: knobs waits for it to close.
   core::Snapshot open = snapshot;
@@ -599,15 +637,15 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   core::Snapshot tuned = Running();
   first_run.Changed(open, tuned);
   CHECK(first_run.progress().door == Door::kObsUser && first_run.Page(tuned) == Page::kDone);
-  first_run.Click(kButtonBack, 0, false, tuned);
+  first_run.Click(kButtonBack, 0, {}, tuned);
   CHECK(first_run.Page(tuned) == Page::kSteps);
   // Filters there already, and OBS closed: Next goes on.
   view = first_run.View(tuned);
   CHECK(FindButton(view, kButtonNext)->enabled);
-  first_run.Click(kButtonNext, 0, false, tuned);
+  first_run.Click(kButtonNext, 0, {}, tuned);
   CHECK(first_run.Page(tuned) == Page::kDone);
-  first_run.Click(kButtonBack, 0, false, tuned);
-  first_run.Click(kButtonBack, 0, false, tuned);
+  first_run.Click(kButtonBack, 0, {}, tuned);
+  first_run.Click(kButtonBack, 0, {}, tuned);
   CHECK(first_run.Page(tuned) == Page::kWelcome);
 }
 
@@ -704,7 +742,7 @@ TEST(EveryButtonHasItsOwnAccessKey) {
     std::vector<char> keys;
     std::vector<std::string> texts;
     for (const PageButton& button : view.buttons) texts.push_back(button.text);
-    if (!view.check.empty()) texts.push_back(view.check);
+    for (const PageCheck& check : view.checks) texts.push_back(check.text);
     for (const std::string& text : texts) {
       const size_t at = text.find('&');
       if (at == std::string::npos || at + 1 >= text.size()) return false;
@@ -789,7 +827,7 @@ TEST(BackRetracesThePages) {
   snapshot.obs_cable = {"", "default"};
   FirstRun first_run = ObsUser(snapshot);
   CHECK(first_run.Page(snapshot) == Page::kMic);
-  first_run.Click(kButtonNext, kChoiceFirst + 1, false, snapshot);
+  first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
   // The core picks Mic/Aux, and needs a cable.
   snapshot.state = State::kNeedsSetup;
   snapshot.setup = SetupNeed::kCable;
@@ -797,13 +835,13 @@ TEST(BackRetracesThePages) {
   snapshot.chain = core::ChainSummary{"Mic/Aux", kFourFilters, ""};
   snapshot.settings.mic = "Mic/Aux";
   CHECK(first_run.Page(snapshot) == Page::kCable);
-  first_run.Click(kButtonBack, 0, false, snapshot);
+  first_run.Click(kButtonBack, 0, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kMic && first_run.View(snapshot).default_choice == kChoiceFirst + 1);
-  first_run.Click(kButtonBack, 0, false, snapshot);
+  first_run.Click(kButtonBack, 0, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kWelcome && first_run.progress().door == Door::kNone);
   // With nothing to go back to, Back is the welcome page.
   first_run = FirstRun({.door = Door::kObsUser, .reached = Page::kCable});
-  first_run.Click(kButtonBack, 0, false, snapshot);
+  first_run.Click(kButtonBack, 0, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kWelcome);
 }
 
@@ -818,7 +856,7 @@ TEST(AnyPageCanBeAskedFor) {
   FirstRun first_run({}, Page::kCable);
   CHECK(first_run.Page(Running()) == Page::kCable);
   CHECK(Contains(first_run.View(Running()).content, " sends your mic to CABLE In 16ch."));
-  first_run.Click(kButtonNext, kChoiceFirst + 1, false, Running());
+  first_run.Click(kButtonNext, kChoiceFirst + 1, {}, Running());
   CHECK(first_run.Page(Running()) == Page::kDone);
   CHECK(FirstRun({}, Page::kMic).Page(Running()) == Page::kMic);
   // One that doesn't apply gives way.

@@ -55,6 +55,16 @@ target_link_libraries(knobs_runtime
   PRIVATE version shell32 ole32 wtsapi32
 )
 
+# The update check's requests to GitHub and its check of an installer's
+# signature, through WinHTTP and WinTrust, which ship with Windows.
+add_library(knobs_update STATIC
+  src/update/github.cpp
+  src/update/release.cpp
+  src/update/signature.cpp
+)
+target_include_directories(knobs_update PUBLIC src)
+target_link_libraries(knobs_update PUBLIC knobs_options PRIVATE winhttp wintrust crypt32)
+
 # The project's version, for the code and knobs.exe's version resource.
 configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
 
@@ -77,13 +87,14 @@ add_library(knobs_tray STATIC
   src/tray/setup_window.cpp
   src/tray/single_instance.cpp
   src/tray/tray_app.cpp
+  src/tray/updates.cpp
   src/tray/walkthrough.cpp
 )
 target_include_directories(knobs_tray PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 # The setup window draws itself with Direct2D and DirectWrite, decodes its
 # screenshots with WIC and speaks UI Automation, all of which ship with
 # Windows.
-target_link_libraries(knobs_tray PUBLIC knobs_runtime
+target_link_libraries(knobs_tray PUBLIC knobs_runtime knobs_update
                       PRIVATE comctl32 shell32 d2d1 dwrite windowscodecs uiautomationcore dwmapi shcore oleaut32)
 
 # The tray app. The manifest asks for per-monitor DPI awareness (v2) and
@@ -126,6 +137,10 @@ target_link_libraries(knobs-compare PRIVATE knobs_tools)
 add_executable(knobs-core tools/core/core_main.cpp)
 target_link_libraries(knobs-core PRIVATE knobs_tools ole32 psapi)
 
+add_executable(knobs-update tools/update/update_main.cpp)
+target_include_directories(knobs-update PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_link_libraries(knobs-update PRIVATE knobs_tools knobs_update)
+
 # The fake core's made-up OBS and devices, for knobs-tray and the unit tests.
 add_library(knobs_tray_fake STATIC tools/tray/fake_backend.cpp)
 target_link_libraries(knobs_tray_fake PUBLIC knobs_tray knobs_tools)
@@ -140,7 +155,7 @@ target_include_directories(knobs-tray PRIVATE assets src/tray/pictures)
 target_link_libraries(knobs-tray PRIVATE knobs_tray_fake dwmapi ole32 windowscodecs)
 
 add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp tests/first_run_tests.cpp
-                           tests/notices_tests.cpp tests/walkthrough_tests.cpp)
+                           tests/notices_tests.cpp tests/update_tests.cpp tests/walkthrough_tests.cpp)
 target_link_libraries(knobs-tests PRIVATE knobs_tray_fake delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)

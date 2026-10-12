@@ -6,6 +6,7 @@
 
 #include "core/state.h"
 #include "tray/first_run.h"
+#include "tray/updates.h"
 #include "util/result.h"
 
 // knobs's settings, kept in %AppData%\knobs\settings.ini, or in the data
@@ -23,7 +24,14 @@
 //   Done=false
 //   Door=obs
 //   Page=cable
+//   [Updates]
+//   Check=true
+//   Install=true
+//   Checked=1791763200
+//   Latest=0.3.0
+//   Tried=0.3.0
 //
+// Checked is when a check last got an answer, in seconds since 1970 (UTC).
 // Keys left out keep their defaults (core::Settings, FirstRunProgress).
 // Values are escaped as libobs's INI parser unescapes them (\\, \n, \r), and
 // read with that parser (import::ObsIni).
@@ -33,6 +41,7 @@ struct SavedSettings {
   core::Settings core;
   // How far the first run got: Door and Page while it's unfinished.
   FirstRunProgress first_run;
+  UpdateSettings updates;
 
   friend bool operator==(const SavedSettings&, const SavedSettings&) = default;
 };

@@ -29,8 +29,14 @@ constexpr UINT kTrayMessage = WM_APP + 1;      // From the icon (NOTIFYICON_VERS
 constexpr UINT kSnapshotMessage = WM_APP + 2;  // OnSnapshot left one in pending_.
 constexpr UINT kActivateMessage = WM_APP + 3;  // Another copy was started (ActivateTray).
 constexpr UINT kFirstRunMessage = WM_APP + 4;  // Open the unfinished first run.
-constexpr UINT_PTR kNoticeTimer = 1;           // Notifier::NextDeadline.
-constexpr UINT_PTR kRestartTimer = 2;          // RestartByItself, while a window is open.
+// The update check: a job is done (wParam 1), or it's time to look.
+constexpr UINT kUpdateMessage = WM_APP + 5;
+constexpr UINT_PTR kNoticeTimer = 1;   // Notifier::NextDeadline.
+constexpr UINT_PTR kRestartTimer = 2;  // RestartByItself, while a window is open.
+constexpr UINT_PTR kUpdateTimer = 3;   // Updater::NextDeadline.
+// The longest the update timer waits: a computer that sleeps doesn't count
+// the time asleep.
+constexpr long long kUpdateTimerMaxMs = 60 * 60 * 1000;
 constexpr UINT kRestartRetryMs = 1000;
 
 using Clock = Notifier::Clock;
@@ -78,6 +84,18 @@ void CopyField(wchar_t (&field)[N], std::string_view text) {
 
 }  // namespace
 
+// What an update job found or did, between its thread and the tray's.
+struct TrayApp::UpdateWork {
+  Updater::Job job = Updater::Job::kNone;
+  bool asked = false;
+  update::Cancel cancel;
+  // Written by the job's thread before it posts kUpdateMessage.
+  std::optional<update::Version> latest;
+  Updater::Downloaded downloaded = Updater::Downloaded::kFailed;
+  bool verified = false;
+  std::string error;
+};
+
 Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   std::unique_ptr<TrayApp> app(new TrayApp(std::move(options)));
   const TrayOptions& opts = app->options_;
@@ -86,9 +104,21 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
     if (auto loaded = LoadSettings(opts.settings_file)) {
       app->settings_ = std::move(loaded->core);
       app->first_run_ = loaded->first_run;
+      app->update_settings_ = loaded->updates;
     } else {
       settings_error = loaded.error();
     }
+  }
+  if (opts.updates.latest) {
+    app->updater_.emplace(Updater::Options{.current = opts.updates.current,
+                                           .can_install = opts.updates.can_install,
+                                           .first = opts.updates.first_check},
+                          app->update_settings_, Updater::Clock::now());
+    app->PrepareUpdates();
+  }
+  if (opts.updated) {
+    app->notifier_ = Notifier({.restarted_for = opts.restarted_for,
+                               .updated = UpdatedNotice(app->update_settings_, opts.updates.current)});
   }
 
   WNDCLASSEXW window_class = {sizeof(window_class)};
@@ -119,6 +149,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   }
   // Once Run pumps messages: the dialog's loop needs Run's to end with it.
   if (opts.open_first_run && !app->first_run_.done) PostMessageW(app->window_, kFirstRunMessage, 0, 0);
+  if (app->updater_) PostMessageW(app->window_, kUpdateMessage, 0, 0);
   return app;
 }
 
@@ -126,6 +157,7 @@ TrayApp::TrayApp(TrayOptions options)
     : options_(std::move(options)),
       settings_(options_.settings),
       first_run_(options_.first_run),
+      update_settings_(options_.update_settings),
       notifier_({.restarted_for = options_.restarted_for}) {}
 
 TrayApp::~TrayApp() {
@@ -146,6 +178,7 @@ int TrayApp::Run() {
 void TrayApp::Quit() {
   if (quitting_) return;
   quitting_ = true;
+  StopUpdates();
   core_.reset();  // Stops the chain and libobs, which releases the mic and the cable.
   if (icon_added_) {
     NOTIFYICONDATAW data = {sizeof(data)};
@@ -226,10 +259,23 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         if (setup_window_) setup_window_->Changed(before);
         Notify(notifier_.Changed(snapshot_, Quiet(), Clock::now()));
         if (options_.on_snapshot) options_.on_snapshot(snapshot_);
+        RunUpdates();
       }
       return 0;
     }
+    case kUpdateMessage:
+      if (wparam == 1) {
+        FinishUpdateJob();
+      } else {
+        RunUpdates();
+      }
+      return 0;
     case WM_TIMER:
+      if (wparam == kUpdateTimer) {
+        KillTimer(window_, kUpdateTimer);
+        RunUpdates();
+        return 0;
+      }
       if (wparam == kRestartTimer) {
         KillTimer(window_, kRestartTimer);
         RestartByItself();
@@ -430,7 +476,7 @@ void TrayApp::ShowMenu(POINT point) {
   if (in_menu_ || quitting_) return;
   in_menu_ = true;
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
-  const Menu menu = BuildMenu(snapshot_, settings_, starts);
+  const Menu menu = BuildMenu(snapshot_, settings_, starts, MenuUpdates());
   const HMENU native = CreateNativeMenu(menu.items);
   // Without this, the menu wouldn't close when the user clicks elsewhere.
   SetForegroundWindow(window_);
@@ -441,18 +487,20 @@ void TrayApp::ShowMenu(POINT point) {
   DestroyMenu(native);
   in_menu_ = false;
   if (id != 0) Execute(id, menu);
-  RestartByItself();
+  if (!RestartByItself()) RunUpdates();
 }
 
 void TrayApp::Execute(unsigned id) {
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
-  Execute(id, BuildMenu(snapshot_, settings_, starts));
+  Execute(id, BuildMenu(snapshot_, settings_, starts, MenuUpdates()));
 }
 
 void TrayApp::OpenNotice() {
   const std::optional<Notice> notice = notifier_.shown();
   notifier_.Clicked();
-  if (notice && notice->page) {
+  if (notice && !notice->url.empty()) {
+    OpenUrl(notice->url);
+  } else if (notice && notice->page) {
     ShowFirstRun(false, notice->page);
   } else if (const HWND dialog = OpenDialog()) {
     SetForegroundWindow(dialog);
@@ -507,6 +555,18 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
     case kIdRestart:
       Restart();
       break;
+    case kIdGetUpdate:
+      if (updater_ && updater_->latest()) OpenUrl(update::ReleasePageUrl(*updater_->latest()));
+      break;
+    case kIdInstallUpdate:
+      if (updater_ && !update_thread_.joinable()) StartUpdateJob(Updater::Job::kInstall, true);
+      break;
+    case kIdCheckForUpdates:
+      if (updater_) SetUpdates(!updater_->settings().check, updater_->settings().install);
+      break;
+    case kIdInstallUpdates:
+      if (updater_) SetUpdates(updater_->settings().check, !updater_->settings().install);
+      break;
     case kIdQuit:
       Quit();
       break;
@@ -528,12 +588,15 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
                           : FirstRunProgress{.done = true, .door = Door::kObsUser, .reached = FirstRunPage::kDone};
   }
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
-  SetupWindow dialog(*this, options_.instance, FirstRun(progress, page, starts), options_.theme,
-                     options_.setup_zoom, options_.setup_walk_at);
+  const UpdateSettings& updates = updater_ ? updater_->settings() : update_settings_;
+  const FinishChoices now{
+      .start_with_windows = starts, .check_for_updates = updates.check, .install_updates = updates.install};
+  SetupWindow dialog(*this, options_.instance, FirstRun(progress, page, now, updater_ && updater_->can_install()),
+                     options_.theme, options_.setup_zoom, options_.setup_walk_at);
   setup_window_ = &dialog;
   dialog.Show();
   setup_window_ = nullptr;
-  RestartByItself();
+  if (!RestartByItself()) RunUpdates();
 }
 
 void TrayApp::ApplySettings(const core::Settings& settings) {
@@ -550,13 +613,17 @@ Status TrayApp::StartObs(const std::filesystem::path& install_root) {
   return options_.open_obs ? options_.open_obs(install_root) : OpenObs(install_root);
 }
 
-void TrayApp::FinishFirstRun(bool start_with_windows) {
+void TrayApp::FinishFirstRun(const FinishChoices& finish) {
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
-  if (options_.set_start_with_windows && start_with_windows != starts) {
-    if (const Status set = options_.set_start_with_windows(start_with_windows); !set) ShowError(set.error());
+  if (options_.set_start_with_windows && finish.start_with_windows != starts) {
+    if (const Status set = options_.set_start_with_windows(finish.start_with_windows); !set) ShowError(set.error());
   }
   first_run_.done = true;
-  Save();
+  if (updater_) {
+    SetUpdates(finish.check_for_updates, finish.install_updates);
+  } else {
+    Save();
+  }
 }
 
 void TrayApp::SaveFirstRun(const FirstRunProgress& progress) {
@@ -566,7 +633,8 @@ void TrayApp::SaveFirstRun(const FirstRunProgress& progress) {
 
 void TrayApp::Save() {
   if (options_.settings_file.empty()) return;
-  if (const Status saved = SaveSettings(options_.settings_file, {settings_, first_run_}); !saved) {
+  const UpdateSettings& updates = updater_ ? updater_->settings() : update_settings_;
+  if (const Status saved = SaveSettings(options_.settings_file, {settings_, first_run_, updates}); !saved) {
     ShowError(std::format("Couldn't save the change, so it lasts only until {} quits.\n\n{}", kDisplayName,
                           saved.error()));
   }
@@ -622,6 +690,212 @@ void TrayApp::ShowError(std::string_view text) {
   // clicked again while the error is up: a button's handler may be why.
   const HWND owner = setup_window_ ? setup_window_->window() : nullptr;
   ShowMessageDialog(options_.instance, {.owner = owner, .icon = TD_WARNING_ICON, .content = FromUtf8(text)});
+}
+
+void TrayApp::OpenUrl(const std::string& url) {
+  const auto opened = reinterpret_cast<INT_PTR>(
+      ShellExecuteW(nullptr, L"open", FromUtf8(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+  if (opened <= 32) ShowError(std::format("Couldn't open {} in your browser.", url));
+}
+
+void TrayApp::Log(std::string line) {
+  if (core_) core_->Log(std::move(line));
+}
+
+// --- Updates ------------------------------------------------------------------------
+
+std::filesystem::path TrayApp::InstallerFile(const update::Version& version) const {
+  return options_.updates.folder / FromUtf8(update::InstallerName(version));
+}
+
+void TrayApp::PrepareUpdates() {
+  // The installer for a version that still installs by itself is kept, and
+  // nothing else: the update it was for is done, or another came out.
+  const UpdateSettings& updates = updater_->settings();
+  std::filesystem::path keep;
+  if (updater_->can_install() && updates.latest && *updates.latest > options_.updates.current &&
+      updates.tried != updates.latest) {
+    keep = InstallerFile(*updates.latest);
+  }
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(options_.updates.folder, ec)) {
+    if (entry.path() != keep) std::filesystem::remove_all(entry.path(), ec);
+  }
+  if (!keep.empty() && std::filesystem::is_regular_file(keep, ec)) updater_->Found();
+}
+
+void TrayApp::RunUpdates() {
+  if (!updater_ || quitting_) return;
+  KillTimer(window_, kUpdateTimer);
+  // A job is running: it says when it's done.
+  if (update_thread_.joinable()) return;
+  const Updater::Clock::time_point now = Updater::Clock::now();
+  // An update restarts knobs, so it waits until knobs isn't sending the mic
+  // to the cable and the user hasn't paused it, which a new copy wouldn't
+  // be, and nothing of knobs's is open.
+  const bool can_restart = snapshot_.state != core::State::kRunning && !snapshot_.paused_by_user && !Quiet() &&
+                           !in_menu_ && !OpenDialog();
+  if (const Updater::Job job = updater_->Due(now, can_restart); job != Updater::Job::kNone) {
+    StartUpdateJob(job);
+    return;
+  }
+  if (const auto next = updater_->NextDeadline(now)) {
+    const auto wait = std::chrono::ceil<std::chrono::milliseconds>(*next - now).count();
+    SetTimer(window_, kUpdateTimer, static_cast<UINT>(std::clamp<long long>(wait, USER_TIMER_MINIMUM, kUpdateTimerMaxMs)),
+             nullptr);
+  }
+}
+
+void TrayApp::StartUpdateJob(Updater::Job job, bool asked) {
+  const std::optional<update::Version> latest = updater_->latest();
+  if (job != Updater::Job::kCheck && !latest) return;
+  auto work = std::make_shared<UpdateWork>();
+  work->job = job;
+  work->asked = asked;
+  update_work_ = work;
+  const std::filesystem::path file = latest ? InstallerFile(*latest) : std::filesystem::path();
+  switch (job) {
+    case Updater::Job::kCheck:
+      Log("Asking GitHub for the latest release.");
+      break;
+    case Updater::Job::kDownload:
+      Log(std::format("Downloading {}.", update::InstallerUrl(*latest)));
+      break;
+    default:
+      break;
+  }
+  update_thread_ = std::thread([work, hooks = options_.updates, latest, file, window = window_] {
+    if (work->job == Updater::Job::kCheck) {
+      if (auto found = hooks.latest(work->cancel)) {
+        work->latest = *found;
+      } else {
+        work->error = found.error();
+      }
+    } else if (work->job == Updater::Job::kDownload) {
+      // Into a folder of its own, until its signature has been checked.
+      std::error_code ec;
+      const std::filesystem::path part = file.parent_path() / L"download" / file.filename();
+      std::filesystem::create_directories(part.parent_path(), ec);
+      if (const Status got = hooks.download(*latest, part, work->cancel); !got) {
+        work->error = got.error();
+      } else if (const Status verified = hooks.verify(part); !verified) {
+        work->downloaded = Updater::Downloaded::kRejected;
+        work->error = verified.error();
+      } else {
+        std::filesystem::rename(part, file, ec);
+        if (ec) {
+          work->error = std::format("Couldn't move the installer into {}: {}", ToUtf8(file.parent_path()),
+                                    ec.message());
+        } else {
+          work->downloaded = Updater::Downloaded::kDone;
+        }
+      }
+      std::filesystem::remove_all(part.parent_path(), ec);
+    } else if (work->job == Updater::Job::kInstall) {
+      // Again, just before it runs.
+      if (const Status verified = hooks.verify(file); !verified) {
+        work->error = verified.error();
+      } else {
+        work->verified = true;
+      }
+    }
+    PostMessageW(window, kUpdateMessage, 1, 0);
+  });
+}
+
+void TrayApp::FinishUpdateJob() {
+  if (update_thread_.joinable()) update_thread_.join();
+  const std::shared_ptr<UpdateWork> work = std::move(update_work_);
+  if (!work || !updater_ || quitting_) return;
+  const Updater::Clock::time_point now = Updater::Clock::now();
+  std::optional<Notice> notice;
+  switch (work->job) {
+    case Updater::Job::kCheck:
+      if (work->latest) {
+        Log(std::format("The latest release is {} {}.", kDisplayName, work->latest->ToString()));
+      } else {
+        Log(std::format("Couldn't check for a new version: {}", work->error));
+      }
+      notice = updater_->Checked(now, work->latest);
+      break;
+    case Updater::Job::kDownload:
+      if (work->downloaded == Updater::Downloaded::kDone) {
+        Log(std::format("Downloaded {}, signed as {}'s releases are.", ToUtf8(InstallerFile(*updater_->latest())),
+                        kDisplayName));
+      } else {
+        Log(std::format("Couldn't download the new version: {}", work->error));
+      }
+      notice = updater_->DownloadDone(now, work->downloaded);
+      break;
+    case Updater::Job::kInstall: {
+      const update::Version version = *updater_->latest();
+      const std::filesystem::path file = InstallerFile(version);
+      if (!work->verified) {
+        Log(std::format("Didn't install {} {}: {}", kDisplayName, version.ToString(), work->error));
+        std::error_code ec;
+        std::filesystem::remove(file, ec);
+        updater_->Lost(now);
+        break;
+      }
+      // What the user asked for happens now. By itself, it waits for a moment
+      // when knobs can restart, which may have passed while the signature was
+      // checked.
+      const bool can_restart = snapshot_.state != core::State::kRunning && !snapshot_.paused_by_user &&
+                               !Quiet() && !in_menu_ && !OpenDialog();
+      if (!work->asked && !can_restart) break;
+      Log(std::format("Updating to {} {}.", kDisplayName, version.ToString()));
+      updater_->Installing();
+      Save();
+      if (const Status started = options_.updates.install(file); !started) {
+        Log(std::format("Couldn't start the installer: {}", started.error()));
+        notice = UpdatedNotice(updater_->settings(), options_.updates.current);
+        break;
+      }
+      // The installer closes this copy too, once it's ready to: going now
+      // spares it the wait.
+      Quit();
+      return;
+    }
+    case Updater::Job::kNone:
+      break;
+  }
+  Save();
+  if (notice) Notify(notifier_.Say(std::move(*notice), Quiet()));
+  RunUpdates();
+}
+
+void TrayApp::SetUpdates(bool check, bool install) {
+  const UpdateSettings before = updater_->settings();
+  updater_->Set(check, install);
+  const UpdateSettings& after = updater_->settings();
+  if (after.check != before.check) {
+    Log(after.check ? "Checking for new versions once a day." : "No longer checking for new versions.");
+  }
+  if (after.install != before.install) {
+    Log(after.install ? "Installing new versions by itself." : "No longer installing new versions by itself.");
+  }
+  Save();
+  RunUpdates();
+}
+
+void TrayApp::StopUpdates() {
+  KillTimer(window_, kUpdateTimer);
+  if (update_work_) update_work_->cancel.Stop();
+  if (update_thread_.joinable()) update_thread_.join();
+}
+
+UpdateMenu TrayApp::MenuUpdates() const {
+  if (!updater_) return {};
+  const UpdateSettings& updates = updater_->settings();
+  UpdateMenu menu{.offered = true,
+                  .check = updates.check,
+                  .install = updates.install,
+                  .can_install = updater_->can_install()};
+  if (const auto offer = updater_->offer()) {
+    menu.version = offer->version;
+    menu.install_now = offer->install;
+  }
+  return menu;
 }
 
 HWND TrayApp::OpenDialog() const {

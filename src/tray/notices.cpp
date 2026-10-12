@@ -373,10 +373,17 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   if (first && !update.show && !Stopped(snapshot.state)) {
     if (auto notice = Restarted(options_.restarted_for, snapshot)) Show(std::move(*notice), quiet, update);
   }
+  if (first && !update.show && options_.updated) Show(*options_.updated, quiet, update);
   // OBS in another session, unless something above was said: that says more
   // about the mic, and the menu says this too.
   if (other_opened && !update.show) Show(OtherObs(snapshot), quiet, update);
   if (!snapshot.obs.root.empty()) obs_version_ = snapshot.obs.version;
+  return update;
+}
+
+Notifier::Update Notifier::Say(Notice notice, bool quiet) {
+  Update update;
+  Show(std::move(notice), quiet, update);
   return update;
 }
 

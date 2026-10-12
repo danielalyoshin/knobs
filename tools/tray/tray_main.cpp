@@ -37,8 +37,11 @@
 #include "tray/resource.h"
 #include "tray/screenshot.h"
 #include "tray/tray_app.h"
+#include "update/release.h"
 #include "util/app_dirs.h"
+#include "util/text_file.h"
 #include "util/win_strings.h"
+#include "version.h"
 
 namespace {
 
@@ -98,6 +101,15 @@ Options:
   --start-with-windows   Start with "Start with Windows" checked.
   --restarted-for <why>  Start as the copy {0} starts to follow OBS, which says
                          why in a notification: obs-updated or audio-changed.
+  --updates <how>        The update check: off, check (once a day, the first
+                         right away) or install (and update by itself).
+                         Default: off. A made-up GitHub answers it.
+  --latest <version>     The latest release the made-up GitHub has, such as
+                         0.3.0. Default: this version, {4}. Its "installer"
+                         downloads to %TEMP% and only says it would run.
+  --portable             Run as a portable copy, which can't update itself.
+  --updated <version>    Start as the copy an update to <version> started,
+                         which says how the update went in a notification.
   --first-run <page>     Open the first run: "resume" opens it as {0} does, a
                          page's name opens that page. Pages: {1}.
   --press <keys>         Press these keys (below) one at a time once it has
@@ -125,12 +137,13 @@ v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
 and q quits. Changes in OBS are seen when it closes or at a re-import. In the
 first run: y and n click the doors ("I set up my mic in OBS", "I'm new to OBS"),
 x Next, b Back, d Done, p Open OBS (which only says so: OBS would open the
-mic), 1 to 9 pick a choice, k clicks the check box, and h holds Alt down, so
-the access keys show.
+mic), 1 to 9 pick a choice, k, j and l click the last page's check boxes (Start
+with Windows, the update check and updating by itself), and h holds Alt down,
+so the access keys show.
 
 States:
 {3})",
-                     kDisplayName, pages, kImportUsage, states);
+                     kDisplayName, pages, kImportUsage, states, KNOBS_VERSION);
 }
 
 struct Options {
@@ -151,6 +164,12 @@ struct Options {
   bool notification = false;  // Or the notification the keys bring up.
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
   std::optional<fs::path> icons;
+  // The update check, and the made-up GitHub's latest release.
+  bool check_updates = false;
+  bool install_updates = false;
+  std::optional<update::Version> latest;
+  bool portable = false;
+  std::optional<update::Version> updated;
 };
 
 std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
@@ -159,6 +178,10 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     const std::wstring_view arg = argv[i];
     if (arg == L"--start-with-windows") {
       options.start_with_windows = true;
+      continue;
+    }
+    if (arg == L"--portable") {
+      options.portable = true;
       continue;
     }
     const wchar_t* next = i + 1 < argc ? argv[i + 1] : nullptr;
@@ -210,6 +233,19 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       const auto why = tray::RestartNeedNamed(ToUtf8(value));
       if (!why) return std::nullopt;
       options.restarted_for = *why;
+    } else if (arg == L"--updates") {
+      if (value == L"off" || value == L"check" || value == L"install") {
+        options.check_updates = value != L"off";
+        options.install_updates = value == L"install";
+      } else {
+        return std::nullopt;
+      }
+    } else if (arg == L"--latest") {
+      options.latest = update::ParseVersion(ToUtf8(value));
+      if (!options.latest) return std::nullopt;
+    } else if (arg == L"--updated") {
+      options.updated = update::ParseVersion(ToUtf8(value));
+      if (!options.updated) return std::nullopt;
     } else if (arg == L"--icons") {
       options.icons = fs::absolute(value);
     } else if (arg == L"--screenshot") {
@@ -381,7 +417,11 @@ void Press(wchar_t key) {
         } else if (key == L'p') {
           click(tray::kButtonOpenObs);
         } else if (key == L'k') {
-          click(tray::kCheckBoxId);
+          click(tray::kCheckStartWithWindows);
+        } else if (key == L'j') {
+          click(tray::kCheckForUpdates);
+        } else if (key == L'l') {
+          click(tray::kCheckInstallUpdates);
         } else if (key == L'h') {
           // Alt held down: the access keys show.
           SendMessageW(setup, WM_SYSKEYDOWN, VK_MENU, 1 << 29);
@@ -715,6 +755,34 @@ int Run(const Options& options) {
                       tray::RestartNeedName(why)));
     return Status(Ok{});
   };
+  // A made-up GitHub, and installers that are only a few bytes.
+  const update::Version current{KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
+  tray_options.update_settings.check = options.check_updates;
+  tray_options.update_settings.install = options.install_updates;
+  if (options.updated) {
+    tray_options.updated = true;
+    tray_options.update_settings.tried = options.updated;
+  }
+  tray_options.updates.latest = [latest = options.latest.value_or(current)](update::Cancel&) {
+    Print(std::format("GitHub would say the latest release is {}\n", latest.ToString()));
+    return Result<update::Version>(latest);
+  };
+  tray_options.updates.download = [](const update::Version& version, const fs::path& file, update::Cancel&) {
+    Print(std::format("{} would download {}\n", kDisplayName, update::InstallerUrl(version)));
+    return WriteText(file, "A made-up installer.");
+  };
+  tray_options.updates.verify = [](const fs::path& file) {
+    Print(std::format("{}'s signature would be checked\n", ToUtf8(file.filename())));
+    return Status(Ok{});
+  };
+  tray_options.updates.install = [](const fs::path& file) {
+    Print(std::format("{} would run, close {} and start the new one\n", ToUtf8(file.filename()), kDisplayName));
+    return Status(Ok{});
+  };
+  tray_options.updates.folder = fs::temp_directory_path() / std::format(L"knobs-tray-updates-{}", GetCurrentProcessId());
+  tray_options.updates.current = current;
+  tray_options.updates.can_install = !options.portable;
+  tray_options.updates.first_check = std::chrono::seconds(0);
   // The real OBS would open the mic.
   tray_options.open_obs = [](const fs::path& install_root) {
     Print(std::format("OBS would open from {}\n", ToUtf8(install_root)));
@@ -756,8 +824,9 @@ int Run(const Options& options) {
     }
     Print(std::format("[{:8.2f} s] notification: {}\n{:13}{}\n{:13}a click opens {}{}\n", seconds, notice->title,
                       "", notice->text, "",
-                      notice->page ? std::format("the first run's {} page", tray::PageName(*notice->page))
-                                   : std::string("the menu"),
+                      !notice->url.empty() ? notice->url
+                      : notice->page       ? std::format("the first run's {} page", tray::PageName(*notice->page))
+                                           : std::string("the menu"),
                       notice->sound ? "" : " (no sound)"));
     g_session->notice_shown = Clock::now();
     if (g_session->waiting_for_notice) TakeNotificationScreenshot();
@@ -779,6 +848,8 @@ int Run(const Options& options) {
   if (!options.screenshot && GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode)) SetTimer(nullptr, 0, 100, OnKeys);
   (*app)->Run();
   app->reset();
+  std::error_code ec;
+  fs::remove_all(fs::temp_directory_path() / std::format(L"knobs-tray-updates-{}", GetCurrentProcessId()), ec);
   g_session = nullptr;
   Print(session.failed ? "FAIL\n" : "PASS\n");
   return session.failed ? kExitFail : kExitPass;

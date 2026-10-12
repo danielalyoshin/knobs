@@ -9,6 +9,7 @@
 #include "audio/audio_devices.h"
 #include "core/backend.h"
 #include "core/state.h"
+#include "update/release.h"
 
 // The tray menu as data (docs/design.md, Status line and menu): what it says
 // and offers for a snapshot of the core. tray_app.cpp turns it into a native
@@ -42,6 +43,11 @@ enum MenuId : unsigned {
   kIdRestart,
   kIdTryAgain,
   kIdOtherObs,  // A line under the status: OBS open in another account.
+  // The update check (updates.h).
+  kIdGetUpdate,     // Opens a new version's page.
+  kIdInstallUpdate,  // Installs the new version downloaded.
+  kIdCheckForUpdates,
+  kIdInstallUpdates,
   kIdMicFirst = 100,
   kIdCableFirst = 200,
   kIdCableLast = 299,
@@ -95,7 +101,22 @@ bool IsVirtualCable(std::string_view name);
 // VoiceMeeter Output. Empty when it isn't known.
 std::string CableRecordingSide(std::string_view name);
 
-Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, bool start_with_windows);
+// The update check's part of the menu (updates.h).
+struct UpdateMenu {
+  // knobs has an update check, which the menu turns on and off.
+  bool offered = false;
+  bool check = false;
+  bool install = false;
+  // The installer installed this copy, so it can update itself.
+  bool can_install = false;
+  // A version newer than this one, to get from its page, or to install now
+  // once it's downloaded.
+  std::optional<update::Version> version;
+  bool install_now = false;
+};
+
+Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, bool start_with_windows,
+               const UpdateMenu& updates = {});
 
 // The menu item with `id`, anywhere in `items`, or null.
 const MenuItem* FindItem(const std::vector<MenuItem>& items, unsigned id);

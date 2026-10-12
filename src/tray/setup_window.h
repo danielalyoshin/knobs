@@ -39,15 +39,15 @@ class FirstRunHost {
   virtual bool Restart() = 0;
   // Starts OBS from its install (OpenObs).
   virtual Status StartObs(const std::filesystem::path& install_root) = 0;
-  // Done was clicked, with Start with Windows as `start_with_windows`.
-  virtual void FinishFirstRun(bool start_with_windows) = 0;
+  // Done was clicked, with the last page's check boxes as `finish`.
+  virtual void FinishFirstRun(const FinishChoices& finish) = 0;
   virtual void SaveFirstRun(const FirstRunProgress& progress) = 0;
 };
 
 // The window's class, which the dev tools find it by.
 inline constexpr wchar_t kSetupWindowClass[] = L"knobs.Setup";
-// Clicks what has this id, as the dev tools do: a button or door (a
-// FirstRunId), a choice, or the check box (kCheckBoxId), in wParam.
+// Clicks what has this id, as the dev tools do: a button, door, choice or
+// check box (a FirstRunId), in wParam.
 inline constexpr UINT kSetupClickMessage = WM_APP + 0x40;
 
 class SetupWindow final : private SetupUiaHost {
@@ -154,7 +154,7 @@ class SetupWindow final : private SetupUiaHost {
   // What's shown.
   PageView view_;
   int choice_ = 0;
-  bool checked_ = false;
+  CheckStates checks_;
   Scene scene_;
   // Goes up when a layout changes the scene's parts, so an activation posted
   // for one layout can't land on another's.

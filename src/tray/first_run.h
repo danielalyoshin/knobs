@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -78,7 +79,26 @@ enum FirstRunId : int {
   kButtonLookForObs,     // Drop the picked install folder and look for OBS.
   kButtonOwnObsSettings,  // Drop the picked settings folder for OBS's own.
   kChoiceFirst = 200,
+  // The last page's check boxes.
+  kCheckStartWithWindows = 300,
+  kCheckForUpdates,
+  kCheckInstallUpdates,
 };
+
+// The last page's check boxes: Start with Windows, then the update check
+// (docs/design.md, Updates).
+struct FinishChoices {
+  bool start_with_windows = false;
+  bool check_for_updates = false;
+  // Updating by itself, which needs the check.
+  bool install_updates = false;
+
+  friend bool operator==(const FinishChoices&, const FinishChoices&) = default;
+};
+
+// The check boxes as the user has them, by ID. One left out is as the page
+// has it.
+using CheckStates = std::map<int, bool>;
 
 // The stages of the mic's path, in the band across the top of every page:
 // the mic, OBS's filters, the virtual cable and the other apps.
@@ -122,6 +142,20 @@ struct PageWalkthrough {
   friend bool operator==(const PageWalkthrough&, const PageWalkthrough&) = default;
 };
 
+// A check box under the page's content.
+struct PageCheck {
+  int id = 0;
+  // Its access key marked as a button's.
+  std::string text;
+  bool checked = false;
+  bool enabled = true;
+  // Under the one before it, which it needs: off and disabled while that
+  // one is off.
+  bool needs_previous = false;
+
+  friend bool operator==(const PageCheck&, const PageCheck&) = default;
+};
+
 // A note on the warnings page.
 struct PageNote {
   bool warning = false;  // Else information.
@@ -152,10 +186,7 @@ struct PageView {
   int default_button = 0;
   std::vector<PageButton> choices;
   int default_choice = 0;
-  // A check box under the content, if there's text for one, with its
-  // access key as a button's.
-  std::string check;
-  bool checked = false;
+  std::vector<PageCheck> checks;
   // The page waits for something and moves on by itself, and `status` says
   // what for, beside the buttons.
   bool waiting = false;
@@ -178,8 +209,8 @@ struct FirstRunAction {
     kFinish,           // Done: close, and set Start with Windows.
   };
   Kind kind = Kind::kNone;
-  core::Settings settings;          // kApply.
-  bool start_with_windows = false;  // kFinish.
+  core::Settings settings;  // kApply.
+  FinishChoices finish;     // kFinish.
 };
 
 // One first run: the progress, and the pages visited, for Back. Snapshots
@@ -189,23 +220,25 @@ class FirstRun {
  public:
   // Starts from `progress`, at `page` if given (the dev tools open any page
   // with it). A page that doesn't apply to the state shows the page that
-  // does instead. `start_with_windows` is whether knobs starts with Windows
-  // now. The last page offers it checked on a first run, and as it is when
-  // one that was finished is opened again, so that Done changes nothing the
-  // user didn't.
+  // does instead. `now` is how the last page's choices are now. It offers
+  // Start with Windows checked on a first run, and as it is when one that
+  // was finished is opened again, so that Done changes nothing the user
+  // didn't, and the update check as it is: off until the user turns it on.
+  // Updating by itself is only offered if `can_install_updates`: the
+  // installer installed this copy.
   explicit FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page = std::nullopt,
-                    bool start_with_windows = false);
+                    FinishChoices now = {}, bool can_install_updates = false);
 
   const FirstRunProgress& progress() const { return progress_; }
 
   FirstRunPage Page(const core::Snapshot& snapshot) const;
   // The page for `snapshot`, with `choice` selected if the page offers it,
-  // and the check box as `checked` if it has one; 0 and nullopt mean the
-  // page's defaults.
-  PageView View(const core::Snapshot& snapshot, int choice = 0, std::optional<bool> checked = std::nullopt) const;
+  // and its check boxes as `checks` has them; 0 and none mean the page's
+  // defaults.
+  PageView View(const core::Snapshot& snapshot, int choice = 0, const CheckStates& checks = {}) const;
 
   // A button was clicked on the page View showed for `snapshot`.
-  FirstRunAction Click(int button, int choice, bool checked, const core::Snapshot& snapshot);
+  FirstRunAction Click(int button, int choice, const CheckStates& checks, const core::Snapshot& snapshot);
   // The core moved on from `before` to `after`: OBS closing on the second
   // door, or a cable appearing on the cable page, moves the first run on.
   FirstRunAction Changed(const core::Snapshot& before, const core::Snapshot& after);
@@ -215,8 +248,9 @@ class FirstRun {
   void Back(const core::Snapshot& snapshot);
 
   FirstRunProgress progress_;
-  // Start with Windows, as the last page offers it.
-  bool start_checked_ = true;
+  // The last page's check boxes, as it offers them.
+  FinishChoices finish_;
+  bool can_install_updates_ = false;
   // A page shown out of turn: one gone Back to, or asked for.
   std::optional<FirstRunPage> focus_;
   std::vector<FirstRunPage> history_;

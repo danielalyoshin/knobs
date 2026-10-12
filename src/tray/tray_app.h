@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "core/core.h"
 #include "core/state.h"
@@ -20,6 +22,9 @@
 #include "tray/menu.h"
 #include "tray/menu_theme.h"
 #include "tray/notices.h"
+#include "tray/updates.h"
+#include "update/github.h"
+#include "update/release.h"
 #include "util/result.h"
 
 // The tray icon and its menu (docs/design.md, The tray app). It runs the core
@@ -28,6 +33,30 @@
 // and the menu offers the fix for whatever needs the user. Notifications
 // (Notifier) say what changed, and a click on one opens its fix.
 namespace knobs::tray {
+
+// What the update check runs (docs/design.md, Updates), so that knobs-tray
+// can fake it. Without `latest`, knobs has no update check.
+struct UpdateHooks {
+  // Asks GitHub for the latest release. On a thread of its own, as is
+  // download, and `cancel` stops either.
+  std::function<Result<update::Version>(update::Cancel& cancel)> latest;
+  // Downloads `version`'s installer into `file`.
+  std::function<Status(const update::Version& version, const std::filesystem::path& file, update::Cancel& cancel)>
+      download;
+  // Checks an installer's signature (update::CheckReleaseSignature): once
+  // it's downloaded, and again before it runs. On the same thread.
+  std::function<Status(const std::filesystem::path& file)> verify;
+  // Starts an installer that updates this copy: it closes this copy and
+  // starts the new one with --updated.
+  std::function<Status(const std::filesystem::path& file)> install;
+  // Where installers are downloaded to.
+  std::filesystem::path folder;
+  update::Version current;  // This copy's version.
+  // How long after knobs starts the first check waits (Updater::Options).
+  std::chrono::system_clock::duration first_check = std::chrono::minutes(1);
+  // The installer installed this copy (Updater::Options::can_install).
+  bool can_install = false;
+};
 
 struct TrayOptions {
   HINSTANCE instance = nullptr;  // Holds the icon (IDI_KNOBS).
@@ -43,6 +72,7 @@ struct TrayOptions {
   std::filesystem::path settings_file;
   core::Settings settings;
   FirstRunProgress first_run;
+  UpdateSettings update_settings;
   // Opens the first run once the tray runs, unless it was finished before.
   bool open_first_run = false;
   // Start with Windows.
@@ -53,6 +83,9 @@ struct TrayOptions {
   std::function<Status(core::RestartNeed why)> restart;
   // Why the copy before this one restarted it, if it did.
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
+  UpdateHooks updates;
+  // An update's installer started this copy: say whether it updated.
+  bool updated = false;
   // Starts OBS from its install, for the first run. Default: OpenObs.
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
   std::filesystem::path log_folder;
@@ -134,6 +167,24 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void ToggleStartWithWindows();
   void FindObs();
   void OpenLogFolder();
+  void OpenUrl(const std::string& url);
+  // A line for knobs's log.
+  void Log(std::string line);
+
+  // The update check: does what's due, or sets the timer for when it is.
+  void RunUpdates();
+  // Clears out installers done with, and finds one downloaded before.
+  void PrepareUpdates();
+  // Starts a check, a download, or the check of an installer's signature
+  // before it runs, on a thread of its own: FinishUpdateJob hears how it
+  // went. `asked`: the user asked for the install, so it doesn't wait.
+  void StartUpdateJob(Updater::Job job, bool asked = false);
+  void FinishUpdateJob();
+  void SetUpdates(bool check, bool install);
+  // Stops the job running, and waits for it.
+  void StopUpdates();
+  std::filesystem::path InstallerFile(const update::Version& version) const;
+  UpdateMenu MenuUpdates() const;
   void ShowAbout();
   void ShowError(std::string_view text);
 
@@ -142,7 +193,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void Reimport() override;
   bool Restart() override;
   Status StartObs(const std::filesystem::path& install_root) override;
-  void FinishFirstRun(bool start_with_windows) override;
+  void FinishFirstRun(const FinishChoices& finish) override;
   void SaveFirstRun(const FirstRunProgress& progress) override;
 
   // A window of ours that's open (a dialog), to bring forward rather than
@@ -167,6 +218,13 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   SetupWindow* setup_window_ = nullptr;  // While it's open.
   Notifier notifier_;
   bool restart_tried_ = false;  // Since the core said it needs a restart.
+  // The update check, if there's one, and the settings it was loaded with
+  // otherwise.
+  std::optional<Updater> updater_;
+  UpdateSettings update_settings_;
+  struct UpdateWork;
+  std::shared_ptr<UpdateWork> update_work_;
+  std::thread update_thread_;
 
   std::mutex pending_mutex_;  // Guards pending_.
   std::optional<core::Snapshot> pending_;

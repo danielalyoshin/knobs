@@ -200,6 +200,36 @@ TEST(MenuListsTheDesignedItems) {
         "OBS in Alex's account may also send audio to your cable");
 }
 
+TEST(MenuOffersUpdates) {
+  // The check's switches, after Start with Windows. Updating by itself only
+  // in a copy that can, and only with the check.
+  UpdateMenu updates{.offered = true, .can_install = true};
+  Menu menu = BuildMenu(Running(), {}, false, updates);
+  CHECK(Texts(menu.items) ==
+        (std::vector<std::string>{"Mic/Aux › 4 filters › CABLE In 16ch", "-", "&Pause", "&Mic", "&Cable",
+                                  "Re-&import from OBS", "-", "Pause while &OBS is open", "Start with &Windows",
+                                  "Automatically check for &new versions", "Automatically up&date", "-", "&Setup…",
+                                  "Open &log folder", "&About", "-", "&Quit"}));
+  CHECK(!FindItem(menu.items, kIdCheckForUpdates)->checked && !FindItem(menu.items, kIdInstallUpdates)->enabled);
+  updates.check = true;
+  updates.install = true;
+  menu = BuildMenu(Running(), {}, false, updates);
+  CHECK(FindItem(menu.items, kIdCheckForUpdates)->checked && FindItem(menu.items, kIdInstallUpdates)->checked &&
+        FindItem(menu.items, kIdInstallUpdates)->enabled);
+  updates.can_install = false;
+  CHECK(!FindItem(BuildMenu(Running(), {}, false, updates).items, kIdInstallUpdates));
+
+  // A new version: to get from its page, or to install now once it's
+  // downloaded. It isn't the fix for anything, so it isn't bold.
+  updates.version = update::Version{0, 3, 0};
+  menu = BuildMenu(Running(), {}, false, updates);
+  CHECK(menu.items[1].id == kIdGetUpdate && menu.items[1].text == std::format("&Get {} 0.3.0…", kDisplayName) &&
+        !menu.items[1].bold);
+  updates.install_now = true;
+  menu = BuildMenu(Running(), {}, false, updates);
+  CHECK(menu.items[1].id == kIdInstallUpdate && menu.items[1].text == std::format("&Update to {} 0.3.0", kDisplayName));
+}
+
 TEST(MenuOffersTheFixInBold) {
   const auto fix = [](core::Snapshot snapshot) {
     const Menu menu = BuildMenu(snapshot, {}, false);
@@ -392,7 +422,8 @@ TEST(SettingsRoundTrip) {
   CHECK(ParseSettings(text) == saved);
 
   CHECK(ParseSettings("") == SavedSettings{});
-  CHECK(FormatSettings({}) == "[OBS]\nPauseWhileOpen=true\n\n[Audio]\n\n[Setup]\nDone=false\n");
+  CHECK(FormatSettings({}) == "[OBS]\nPauseWhileOpen=true\n\n[Audio]\n\n[Setup]\nDone=false\n\n[Updates]\n"
+                              "Check=false\nInstall=false\n");
   CHECK(ParseSettings(FormatSettings({})) == SavedSettings{});
   CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=0\n").core.pause_for_obs);
   CHECK(ParseSettings("[OBS]\nPauseWhileOpen=maybe\n").core.pause_for_obs);
@@ -402,12 +433,26 @@ TEST(SettingsRoundTrip) {
   // Finished, the first run keeps nothing else. Unfinished, it resumes only
   // at the first door's pages from the mic on.
   saved.first_run = {.done = true, .door = Door::kObsUser, .reached = FirstRunPage::kWarnings};
-  CHECK(FormatSettings(saved).ends_with("[Setup]\nDone=true\n"));
+  CHECK(FormatSettings(saved).ends_with("[Setup]\nDone=true\n\n[Updates]\nCheck=false\nInstall=false\n"));
   CHECK(ParseSettings(FormatSettings(saved)).first_run == FirstRunProgress{.done = true});
   CHECK((ParseSettings("[Setup]\nDoor=new\nPage=steps\n").first_run ==
          FirstRunProgress{.door = Door::kNewToObs, .reached = FirstRunPage::kMic}));
   CHECK(ParseSettings("[Setup]\nDoor=elsewhere\nPage=done\n").first_run ==
         FirstRunProgress{.reached = FirstRunPage::kDone});
+
+  // The update check, and what it found: off until it's turned on, and
+  // updating by itself only with the check.
+  saved.updates = {.check = true,
+                   .install = true,
+                   .checked = std::chrono::system_clock::time_point(std::chrono::seconds(1791763200)),
+                   .latest = update::Version{0, 3, 0},
+                   .tried = update::Version{0, 3, 0}};
+  CHECK(FormatSettings(saved).ends_with(
+      "[Updates]\nCheck=true\nInstall=true\nChecked=1791763200\nLatest=0.3.0\nTried=0.3.0\n"));
+  CHECK(ParseSettings(FormatSettings(saved)).updates == saved.updates);
+  CHECK(!ParseSettings("[Updates]\nCheck=false\nInstall=true\n").updates.install);
+  const UpdateSettings odd = ParseSettings("[Updates]\nChecked=soon\nLatest=v0.3\nTried=0.3.0-rc1\n").updates;
+  CHECK(!odd.checked && !odd.latest && !odd.tried);
 
   const fs::path folder = fs::temp_directory_path() / std::format(L"knobs-tests-{}-settings", GetCurrentProcessId());
   const fs::path file = folder / L"settings.ini";
@@ -461,6 +506,7 @@ TEST(StartWithWindowsUsesTheRunKey) {
   CHECK(SetStartWithWindows(entry, false).ok());
   CHECK(!StartsWithWindows(entry));
   CHECK(SetStartWithWindows(entry, false).ok());
+
   CHECK(RegDeleteTreeW(HKEY_CURRENT_USER, scratch.c_str()) == ERROR_SUCCESS);
 }
 

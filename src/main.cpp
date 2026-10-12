@@ -11,6 +11,9 @@
 //   --restarted-for <reason>
 //               Why: obs-updated or audio-changed. The new copy says so in a
 //               notification.
+//   --updated   Started by the installer of an update this copy's
+//               predecessor started: as --restart, and say in a notification
+//               whether it updated.
 
 #include <windows.h>
 #include <objbase.h>
@@ -25,6 +28,9 @@
 
 #include "app_info.h"
 #include "core/core.h"
+#include "update/github.h"
+#include "update/signature.h"
+#include "version.h"
 #include "core/obs_backend.h"
 #include "tray/autostart.h"
 #include "tray/notices.h"
@@ -40,6 +46,8 @@ using namespace std::chrono_literals;
 
 // How long a restarted copy waits for the old one to shut libobs down.
 constexpr std::chrono::milliseconds kRestartWait = 30s;
+// An installer bigger than this isn't one of knobs's.
+constexpr uint64_t kMaxInstallerBytes = 64 * 1024 * 1024;
 
 std::filesystem::path ExePath() {
   std::wstring path(MAX_PATH, L'\0');
@@ -70,7 +78,44 @@ Status StartCopy(const std::filesystem::path& exe, std::wstring_view arguments) 
   return Ok{};
 }
 
-int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restarted_for) {
+// Whether the installer installed the exe in `folder`: the folder its entry
+// in Windows' installed apps gives (kInstallerAppId). Then this copy can
+// update itself by running the next installer.
+bool InstalledByInstaller(const std::filesystem::path& folder) {
+  const std::wstring key =
+      std::format(L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}_is1", kInstallerAppId);
+  wchar_t location[MAX_PATH * 2] = {};
+  DWORD size = sizeof(location);
+  if (RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"InstallLocation", RRF_RT_REG_SZ, nullptr, location, &size) !=
+      ERROR_SUCCESS) {
+    return false;
+  }
+  std::error_code ec;
+  return std::filesystem::equivalent(folder, std::filesystem::path(location), ec);
+}
+
+// Starts an update's installer, with no window: it closes this copy, installs
+// over it, and starts the new copy with --updated, or this one again if it
+// fails (packaging/knobs.iss). Its log goes in knobs's log folder.
+Status StartInstaller(const std::filesystem::path& installer, const std::filesystem::path& logs) {
+  std::error_code ec;
+  std::filesystem::create_directories(logs, ec);
+  std::wstring command =
+      std::format(L"\"{}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /update=1 /LOG=\"{}\"", installer.native(),
+                  (logs / L"update.txt").native());
+  STARTUPINFOW startup = {sizeof(startup)};
+  PROCESS_INFORMATION process = {};
+  const std::wstring folder = installer.parent_path().native();
+  if (!CreateProcessW(installer.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, folder.c_str(),
+                      &startup, &process)) {
+    return Error{std::format("Couldn't start {}: {}", ToUtf8(installer.filename()), DescribeWinError(GetLastError()))};
+  }
+  CloseHandle(process.hThread);
+  CloseHandle(process.hProcess);
+  return Ok{};
+}
+
+int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restarted_for, bool updated) {
   const std::wstring window_class = std::format(L"{}.tray", kDisplayNameW);
   auto lock = tray::SingleInstance::Acquire(window_class, restart ? kRestartWait : 0ms);
   if (!lock) {
@@ -78,8 +123,9 @@ int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restar
     return 1;
   }
   if (!*lock) {
-    // Show where the running copy is, unless Windows started this one.
-    if (!startup) tray::ActivateTray(window_class);
+    // Show where the running copy is, unless Windows or an installer started
+    // this one.
+    if (!startup && !updated) tray::ActivateTray(window_class);
     return 0;
   }
   const auto dirs = GetAppDirs();
@@ -104,6 +150,22 @@ int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restar
     return StartCopy(exe, std::format(L"--restart --restarted-for {}", FromUtf8(tray::RestartNeedName(why))));
   };
   options.restarted_for = restarted_for;
+  // The update check (docs/design.md, Updates): only once the user turns it
+  // on, and updating by itself only in a copy the installer installed, not a
+  // portable one.
+  options.updates.latest = [](update::Cancel& cancel) { return update::FindLatestRelease(cancel); };
+  options.updates.download = [](const update::Version& version, const std::filesystem::path& file,
+                                update::Cancel& cancel) {
+    return update::Download(update::InstallerUrl(version), file, kMaxInstallerBytes, cancel);
+  };
+  options.updates.verify = [](const std::filesystem::path& file) { return update::CheckReleaseSignature(file); };
+  options.updates.install = [logs = dirs->Logs()](const std::filesystem::path& file) {
+    return StartInstaller(file, logs);
+  };
+  options.updates.folder = dirs->local / L"updates";
+  options.updates.current = {KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
+  options.updates.can_install = !dirs->portable && InstalledByInstaller(exe.parent_path());
+  options.updated = updated;
   options.start_core = [](core::Observer& observer, const core::Settings& settings) {
     core::ObsBackendOptions backend;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
@@ -129,6 +191,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
   bool startup = false;
   bool restart = false;
+  bool updated = false;
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
   int argc = 0;
   if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
@@ -136,6 +199,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       const std::wstring_view arg = argv[i];
       startup |= arg == L"--startup";
       restart |= arg == L"--restart";
+      updated |= arg == L"--updated";
       if (arg == L"--restarted-for" && i + 1 < argc) {
         restarted_for = tray::RestartNeedNamed(ToUtf8(argv[++i])).value_or(core::RestartNeed::kNone);
       }
@@ -149,7 +213,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     tray::ShowStartupError(std::format("Couldn't initialize COM (0x{:08X}).", static_cast<uint32_t>(com)));
     return 1;
   }
-  const int code = Run(instance, startup, restart, restarted_for);
+  // An update's new copy waits for the old one, as a restart's does.
+  const int code = Run(instance, startup, restart || updated, restarted_for, updated);
   CoUninitialize();
   return code;
 }
