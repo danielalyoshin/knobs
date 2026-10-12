@@ -100,6 +100,8 @@ struct TrayOptions {
   // Starts OBS from its install, for the first run. Default: OpenObs.
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
   std::filesystem::path log_folder;
+  // Writes a line to knobs's log. Default: the core's log, once it runs.
+  std::function<void(std::string_view line)> log;
   MenuTheme theme = MenuTheme::kSystem;
   // The setup window's zoom in place of Windows' text size, and the moment
   // its walkthroughs hold still at, for pictures (knobs-tray's --zoom and

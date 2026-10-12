@@ -119,6 +119,7 @@ Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import:
   if (host_) return Error{"libobs is already running."};
   runtime::HostOptions options;
   options.install = install;
+  options.log = options_.log;
   options.log_prefix = options_.log_prefix;
   options.verbose = options_.verbose;
   options.samples_per_sec = audio.sample_rate;
@@ -214,7 +215,11 @@ void ObsBackend::RestartMonitor() {
 }
 
 void ObsBackend::Log(std::string_view line) {
-  if (host_) host_->log().Write(LOG_INFO, line);
+  if (options_.log) {
+    options_.log->Write(LOG_INFO, line);
+  } else if (host_) {
+    host_->log().Write(LOG_INFO, line);
+  }
 }
 
 void ObsBackend::OnChainAudio(void* param, obs_source_t*, const audio_data* audio, bool) {

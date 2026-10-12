@@ -18,7 +18,11 @@
 namespace knobs::core {
 
 struct ObsBackendOptions {
-  // Names the log in %LocalAppData%\knobs\logs (runtime::HostOptions).
+  // The program's log, which the core's lines go to from the start, and
+  // libobs's once it starts. Without one, libobs's start opens a log named
+  // with log_prefix in %LocalAppData%\knobs\logs (runtime::HostOptions),
+  // and the core's lines before then are dropped.
+  std::shared_ptr<runtime::ObsLog> log;
   std::wstring log_prefix;
   // Also print the log to stderr, debug lines included.
   bool verbose = false;

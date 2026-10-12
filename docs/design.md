@@ -91,7 +91,7 @@ It doesn't load `obs-vst`, or `nv-filters`, where OBS 32 keeps NVIDIA's noise re
 
 ### The libobs session
 
-1. `base_set_log_handler()`, to knobs's log in `%LocalAppData%\knobs\logs`, so that startup is logged.
+1. `base_set_log_handler()`, to knobs's log in `%LocalAppData%\knobs\logs`, so that startup is logged. knobs.exe opens that log as it starts, before it looks for OBS, so its own lines are there with or without OBS, and libobs's join them.
 2. `obs_startup()` with knobs's own module config folder, `%AppData%\knobs\module-config`, never OBS's. It initializes COM as a single-threaded apartment on its thread, so `obs_shutdown()` must run on the same thread.
 3. `obs_reset_audio()` with the OBS profile's sample rate and channel layout.
 4. No `obs_reset_video()` (Audio without video).

@@ -759,7 +759,11 @@ void TrayApp::OpenUrl(const std::string& url) {
 }
 
 void TrayApp::Log(std::string line) {
-  if (core_) core_->Log(std::move(line));
+  if (options_.log) {
+    options_.log(line);
+  } else if (core_) {
+    core_->Log(std::move(line));
+  }
 }
 
 Status TrayApp::StartCore() {

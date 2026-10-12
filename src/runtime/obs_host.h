@@ -22,8 +22,11 @@ struct HostOptions {
   // The OBS install to use. Default: FindObsInstall().
   std::optional<std::filesystem::path> obs_dir;
   // Names this program's logs in %LocalAppData%\knobs\logs, e.g. L"harness ".
-  // Required: only logs with this prefix are pruned.
+  // Required without `log`: only logs with this prefix are pruned.
   std::wstring log_prefix;
+  // A log the program opened already, as knobs.exe does as it starts, which
+  // libobs's lines join. Default: a new one, named with log_prefix.
+  std::shared_ptr<ObsLog> log;
   size_t kept_logs = 20;
   // Also print the log to stderr, debug lines included.
   bool verbose = false;
@@ -35,7 +38,7 @@ struct HostOptions {
 };
 
 // libobs up and running: finds the OBS install, makes sure its runtime copy
-// is intact, opens a log, loads obs.dll from the copy and starts a session
+// is intact, opens a log or joins one, loads obs.dll from the copy and starts a session
 // with the two modules. Tears down in reverse. ObsSession's threading rule
 // applies: create and destroy the host on the same thread.
 class ObsHost {
@@ -63,7 +66,7 @@ class ObsHost {
   ObsInstall install_;
   RuntimeCopy copy_;
   // Declared in dependency order, so they're destroyed in reverse.
-  std::unique_ptr<ObsLog> log_;
+  std::shared_ptr<ObsLog> log_;
   std::unique_ptr<ObsRuntime> runtime_;
   std::unique_ptr<ObsSession> session_;
   bool log_attached_ = false;

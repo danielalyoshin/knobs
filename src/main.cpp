@@ -37,6 +37,7 @@
 #include "update/signature.h"
 #include "version.h"
 #include "core/obs_backend.h"
+#include "runtime/obs_log.h"
 #include "tray/autostart.h"
 #include "tray/notices.h"
 #include "tray/single_instance.h"
@@ -145,6 +146,15 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     return 1;
   }
   const std::filesystem::path exe = ExePath();
+  // knobs's own log, from the start: libobs's lines join it once OBS starts.
+  // knobs runs without one if it can't be opened.
+  std::shared_ptr<runtime::ObsLog> log;
+  if (auto opened = runtime::OpenNewLog(dirs->Logs(), std::format(L"{} ", kDisplayNameW), 20)) {
+    log = std::move(*opened);
+    log->Write(LOG_INFO, std::format("{} {} started{}{}{}{}", kDisplayName, KNOBS_VERSION, startup ? ", at sign-in" : "",
+                                     resume_setup ? ", after a restart setup asked for" : "",
+                                     restart ? ", to restart" : "", updated ? ", after an update" : ""));
+  }
   const tray::RunEntry run{std::wstring(kDisplayNameW), std::format(L"\"{}\" --startup", exe.native())};
 
   tray::TrayOptions options;
@@ -156,6 +166,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   options.open_first_run = !startup;
   options.resume_first_run = resume_setup;
   options.log_folder = dirs->Logs();
+  if (log) options.log = [log](std::string_view line) { log->Write(LOG_INFO, line); };
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };
   options.restart = [exe](core::RestartNeed why) {
@@ -185,8 +196,9 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   options.updates.current = {KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
   options.updates.can_install = !dirs->portable && InstalledByInstaller(exe.parent_path());
   options.updated = updated;
-  options.start_core = [](core::Observer& observer, const core::Settings& settings) {
+  options.start_core = [log](core::Observer& observer, const core::Settings& settings) {
     core::ObsBackendOptions backend;
+    backend.log = log;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
     backend.prune_runtime = true;
     core::CoreOptions core_options;

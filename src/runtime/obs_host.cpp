@@ -21,10 +21,14 @@ Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
   std::optional<RuntimeCopyLock> copy_lock(std::in_place);
   auto copy = EnsureRuntimeCopy(*install, dirs->RuntimeBase(), false);
   if (!copy) return Error{copy.error()};
-  auto log = OpenNewLog(dirs->Logs(), options.log_prefix, options.kept_logs);
-  if (!log) return Error{log.error()};
-  (*log)->set_echo(options.verbose);
-  (*log)->set_verbose(options.verbose);
+  std::shared_ptr<ObsLog> log = options.log;
+  if (!log) {
+    auto opened = OpenNewLog(dirs->Logs(), options.log_prefix, options.kept_logs);
+    if (!opened) return Error{opened.error()};
+    log = std::move(*opened);
+    log->set_echo(options.verbose);
+    log->set_verbose(options.verbose);
+  }
   auto runtime = ObsRuntime::Load(copy->root, install->version);
   copy_lock.reset();
   if (!runtime) return Error{runtime.error()};
@@ -33,7 +37,7 @@ Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
   host->dirs_ = *dirs;
   host->install_ = *install;
   host->copy_ = *copy;
-  host->log_ = std::move(*log);
+  host->log_ = std::move(log);
   host->runtime_ = std::move(*runtime);
   host->log_->Attach(host->api());
   host->log_attached_ = true;
