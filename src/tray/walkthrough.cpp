@@ -66,6 +66,65 @@ Walkthrough ObsFilters() {
   return walk;
 }
 
+// Places in Windows 11's Explorer and VB-Cable's setup at 200%, on a 2560 by
+// 1189 screen above the taskbar (src/tray/pictures/README.md).
+constexpr Walkthrough::Point kVbStart = {0, 1500, 800};
+constexpr float kZipX = 460, kZipY = 396;                // The driver pack in Downloads.
+constexpr float kExtractAllX = 728, kExtractAllY = 578;  // Extract All in its menu.
+constexpr float kExtractX = 1642, kExtractY = 1000;      // Extract, in the window that asks where.
+constexpr float kSetupX = 500, kSetupY = 726;            // VBCABLE_Setup_x64 in the extracted folder.
+constexpr float kRunAsAdminX = 673, kRunAsAdminY = 620;  // Run as administrator in its menu.
+constexpr float kInstallX = 1622, kInstallY = 908;       // Install Driver.
+
+// Installing VB-Cable (FirstRun's Cable page), from its driver pack in
+// Downloads: Extract All, Run as administrator, then Install Driver. Windows
+// asks for admin in between, on a desktop of its own that can't be
+// captured, so the setup's window just comes in.
+Walkthrough VbCableSetup() {
+  Walkthrough walk;
+  walk.screen = {2560, 1189};
+  walk.shots = {
+      {0, "vb-downloads", {0, 0, 2560, 1189}},
+      {2.6f, "vb-zip", {87, 156, 859, 646}},
+      {3.0f, "vb-zip-menu", {87, 156, 1098, 816}},
+      {4.9f, "vb-extract-all", {336, 325, 1101, 818}},
+      {5.45f, "vb-extract-window", {355, 338, 2012, 1189}},
+      {7.9f, "vb-extract", {1250, 725, 2015, 1189}},
+      {8.3f, "vb-folder", {132, 487, 2015, 1189}},
+      {10.6f, "vb-setup-file", {127, 486, 906, 974}},
+      {11.0f, "vb-setup-menu", {127, 381, 1044, 966}},
+      {12.9f, "vb-run-as-admin", {288, 380, 1046, 867}},
+      {13.45f, "vb-setup", {300, 380, 1995, 1148}, 0.3f},
+      {18.0f, "vb-downloads", {0, 0, 2560, 1189}, 0.3f},
+  };
+  walk.pointer = {
+      {0, kVbStart.x, kVbStart.y},
+      {1.4f, kVbStart.x, kVbStart.y},
+      {2.6f, kZipX, kZipY},
+      {4.2f, kZipX, kZipY},
+      {4.9f, kExtractAllX, kExtractAllY},
+      {6.6f, kExtractAllX, kExtractAllY},
+      {7.9f, kExtractX, kExtractY},
+      {9.5f, kExtractX, kExtractY},
+      {10.6f, kSetupX, kSetupY},
+      {12.2f, kSetupX, kSetupY},
+      {12.9f, kRunAsAdminX, kRunAsAdminY},
+      {14.6f, kRunAsAdminX, kRunAsAdminY},
+      {15.8f, kInstallX, kInstallY},
+      {18.3f, kInstallX, kInstallY},
+      {18.9f, kVbStart.x, kVbStart.y},
+  };
+  // In once, and it stays in, following the pointer.
+  walk.zoom = {{0, 0}, {1.4f, 0}, {2.6f, 0.42f}, {18.3f, 0.42f}, {18.9f, 0}};
+  walk.clicks = {2.85f, 5.3f, 8.15f, 10.85f, 13.3f, 16.05f};
+  walk.steps = {{0, 2}, {8.3f, 3}, {13.45f, 4}, {18.0f, 2}};
+  walk.length = 19.1f;
+  // Run as administrator, which is the one people miss.
+  walk.still = 12.95f;
+  walk.ground = D2D1::ColorF(0xe3e6ee);
+  return walk;
+}
+
 // Ease in and out, gently: at its fastest, half as fast again as its
 // average, so the camera never whips.
 float Ease(float x) {
@@ -106,7 +165,9 @@ float ScaleAt(const Walkthrough& walk, float time, float wide) {
 
 const Walkthrough* WalkthroughNamed(std::string_view name) {
   static const Walkthrough obs_filters = ObsFilters();
+  static const Walkthrough vb_cable_setup = VbCableSetup();
   if (name == "obs-filters") return &obs_filters;
+  if (name == "vb-cable-setup") return &vb_cable_setup;
   return nullptr;
 }
 

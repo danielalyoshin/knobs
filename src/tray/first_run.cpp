@@ -600,13 +600,15 @@ PageView Cable(const core::Snapshot& snapshot) {
     view.steps = {
         std::format("Download its driver pack from <a href=\"{}\"><code>vb-audio.com/Cable</code></a>.", kVbCableUrl),
         "Right-click the zip and choose <b>Extract All</b>.",
-        "In the extracted folder, right-click <code>VBCABLE_Setup_x64.exe</code> and choose <b>Run as "
-        "administrator</b>.",
+        "In the extracted folder, right-click <code>VBCABLE_Setup_x64.exe</code>, choose <b>Run as "
+        "administrator</b>, then <b>Yes</b>.",
         "Click <b>Install Driver</b>.",
         std::format("Restart Windows, then open {} again.", kDisplayName),
         "After the restart, open <b>Settings › System › Sound</b> and check that Output is still your speakers or "
         "headphones, not CABLE Input."};
-    view.picture = Picture{"vb-cable-setup", 4, "VB-Cable's setup window, with Install Driver"};
+    view.picture = Picture{"vb-cable-setup", 0,
+                           "A walkthrough in Windows: the driver pack extracted with Extract All, VBCABLE_Setup_x64 "
+                           "run as administrator, then Install Driver clicked in VB-Cable's setup"};
     view.waiting = true;
     view.status = std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName);
     view.buttons = {Button(kButtonBack, "&Back")};

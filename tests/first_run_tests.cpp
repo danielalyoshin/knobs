@@ -321,10 +321,11 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   CHECK(view.steps.size() == 6);
   CHECK(view.steps[0] == "Download its driver pack from <a href=\"https://vb-audio.com/Cable/\"><code>vb-audio.com/"
                          "Cable</code></a>.");
-  CHECK(Contains(view.steps[2], "right-click <code>VBCABLE_Setup_x64.exe</code> and choose <b>Run as administrator</b>"));
+  CHECK(Contains(view.steps[2], "right-click <code>VBCABLE_Setup_x64.exe</code>, choose <b>Run as administrator</b>, "
+                                "then <b>Yes</b>"));
   CHECK(view.steps[3] == "Click <b>Install Driver</b>.");
   CHECK(Contains(view.steps[5], "not CABLE Input."));
-  CHECK(view.picture && view.picture->name == "vb-cable-setup" && view.picture->step == 4);
+  CHECK(view.picture && view.picture->name == "vb-cable-setup" && view.picture->step == 0);
   CHECK(view.status == std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName));
   CHECK(view.stage == Stage::kCable);
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back"}));

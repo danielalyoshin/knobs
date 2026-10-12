@@ -9,3 +9,17 @@ OBS_MIXER_MENU RCDATA "obs-mixer-menu.png"
 OBS_MIXER_FILTERS RCDATA "obs-mixer-filters.png"
 OBS_FILTERS_WINDOW RCDATA "obs-filters-window.png"
 OBS_ADD_FILTER RCDATA "obs-add-filter.png"
+
+// The walkthrough of installing VB-Cable. Its setup's window is a JPEG: its
+// banner is a photo, which PNG keeps at twice the size.
+VB_DOWNLOADS RCDATA "vb-downloads.png"
+VB_ZIP RCDATA "vb-zip.png"
+VB_ZIP_MENU RCDATA "vb-zip-menu.png"
+VB_EXTRACT_ALL RCDATA "vb-extract-all.png"
+VB_EXTRACT_WINDOW RCDATA "vb-extract-window.png"
+VB_EXTRACT RCDATA "vb-extract.png"
+VB_FOLDER RCDATA "vb-folder.png"
+VB_SETUP_FILE RCDATA "vb-setup-file.png"
+VB_SETUP_MENU RCDATA "vb-setup-menu.png"
+VB_RUN_AS_ADMIN RCDATA "vb-run-as-admin.png"
+VB_SETUP RCDATA "vb-setup.jpg"
