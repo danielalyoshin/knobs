@@ -155,7 +155,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Pause while OBS is open | On by default. If you turn it off while OBS monitors your mic to the same cable, the cable gets your mic twice. |
 | Start with Windows | Starts knobs when you sign in. |
 | Automatically check for new versions | Once a day, asks GitHub which version is the latest. Off until you turn it on ([Privacy](#privacy)). |
-| Automatically update | Installs a new version by itself, when knobs isn't sending your mic anyway, and says so if it can't. Only for a copy the installer installed, and only with the check on. |
+| Automatically update | Installs a new version by itself, when knobs isn't sending your mic anyway or as it starts, and says so if it can't. If a day goes by without such a moment, a notification offers to update now. Only for a copy the installer installed, and only with the check on. |
 | Get knobs 0.3.0… | When a check found a newer version: opens its page, with what's new and the download. Once an update has downloaded, **Update to knobs 0.3.0** installs it now instead. |
 | Setup… | Opens the first run again. |
 | Open log folder | Opens knobs's logs. |

@@ -19,6 +19,12 @@ Notice Available(const update::Version& version) {
           .url = update::ReleasePageUrl(version)};
 }
 
+Notice Ready(const update::Version& version) {
+  return {.kind = Kind::kUpdateReady,
+          .title = std::format("{} {} is ready to install", kDisplayName, version.ToString()),
+          .text = std::format("Click to update now. Your mic stops for a few seconds while {} restarts.", kDisplayName)};
+}
+
 Notice NotUpdated(const update::Version& version) {
   return {.kind = Kind::kUpdateFailed,
           .title = std::format("{} couldn't update to {}", kDisplayName, version.ToString()),
@@ -81,6 +87,10 @@ std::optional<Updater::Clock::time_point> Updater::NextDeadline(Clock::time_poin
   if (Installs() && ready() && try_failed_ && *try_failed_ + options_.retry > now) {
     next = std::min(next, *try_failed_ + options_.retry);
   }
+  if (Installs() && ready() && ready_since_ && reminded_ != settings_.latest &&
+      *ready_since_ + options_.remind_after > now) {
+    next = std::min(next, *ready_since_ + options_.remind_after);
+  }
   return next;
 }
 
@@ -109,6 +119,7 @@ std::optional<Notice> Updater::DownloadDone(Clock::time_point now, Downloaded ou
       try_failed_.reset();
       failures_ = 0;
       ready_ = settings_.latest;
+      ready_since_ = now;
       return std::nullopt;
     case Downloaded::kFailed:
       return Failed(now);
@@ -138,9 +149,23 @@ std::optional<Notice> Updater::GiveUp() {
   return std::nullopt;
 }
 
+void Updater::Found() {
+  ready_ = settings_.latest;
+  ready_since_ = started_;
+}
+
 void Updater::Installing() {
   ready_.reset();
   settings_.tried = settings_.latest;
+}
+
+std::optional<Notice> Updater::Waiting(Clock::time_point now) {
+  if (!Installs() || !ready() || !ready_since_ || reminded_ == settings_.latest ||
+      now < *ready_since_ + options_.remind_after) {
+    return std::nullopt;
+  }
+  reminded_ = settings_.latest;
+  return Ready(*settings_.latest);
 }
 
 std::optional<Updater::Offer> Updater::offer() const {

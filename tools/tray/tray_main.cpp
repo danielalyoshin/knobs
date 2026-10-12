@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cwchar>
@@ -113,6 +114,11 @@ Options:
                          rejected. Default: ok.
   --recheck <how>        How the check again, just before an update runs,
                          turns out, the same ways. Default: as --signature.
+  --downloaded           Start with the latest release's installer downloaded
+                         before, as the next start after a download finds it.
+  --remind-after <s>     How long a downloaded update waits for a moment to
+                         install before a notification offers it. Default:
+                         a day.
   --portable             Run as a portable copy, which can't update itself.
   --updated <version>    Start as the copy an update to <version> started,
                          which says how the update went in a notification.
@@ -178,6 +184,8 @@ struct Options {
   update::SignatureCheck::Verdict signature = update::SignatureCheck::Verdict::kRelease;
   std::optional<update::SignatureCheck::Verdict> recheck;
   bool portable = false;
+  bool downloaded = false;
+  std::optional<std::chrono::seconds> remind_after;
   std::optional<update::Version> updated;
 };
 
@@ -191,6 +199,10 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     }
     if (arg == L"--portable") {
       options.portable = true;
+      continue;
+    }
+    if (arg == L"--downloaded") {
+      options.downloaded = true;
       continue;
     }
     const wchar_t* next = i + 1 < argc ? argv[i + 1] : nullptr;
@@ -252,6 +264,13 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     } else if (arg == L"--latest") {
       options.latest = update::ParseVersion(ToUtf8(value));
       if (!options.latest) return std::nullopt;
+    } else if (arg == L"--remind-after") {
+      int seconds = 0;
+      const std::string text = ToUtf8(value);
+      if (std::from_chars(text.data(), text.data() + text.size(), seconds).ec != std::errc() || seconds < 0) {
+        return std::nullopt;
+      }
+      options.remind_after = std::chrono::seconds(seconds);
     } else if (arg == L"--signature" || arg == L"--recheck") {
       using Verdict = update::SignatureCheck::Verdict;
       std::optional<Verdict> verdict;
@@ -829,6 +848,18 @@ int Run(const Options& options) {
   tray_options.updates.current = current;
   tray_options.updates.can_install = !options.portable;
   tray_options.updates.first_check = std::chrono::seconds(0);
+  if (options.remind_after) tray_options.updates.remind_after = *options.remind_after;
+  if (options.downloaded && options.latest) {
+    // As a check and a download before this start left them.
+    tray_options.update_settings.latest = options.latest;
+    tray_options.update_settings.checked = std::chrono::system_clock::now();
+    std::error_code ec;
+    fs::create_directories(tray_options.updates.folder, ec);
+    const fs::path file = tray_options.updates.folder / FromUtf8(update::InstallerName(*options.latest));
+    if (const Status written = WriteText(file, "A made-up installer."); written) {
+      Print(std::format("{} was downloaded before this start\n", ToUtf8(file.filename())));
+    }
+  }
   // The real OBS would open the mic.
   tray_options.open_obs = [](const fs::path& install_root) {
     Print(std::format("OBS would open from {}\n", ToUtf8(install_root)));

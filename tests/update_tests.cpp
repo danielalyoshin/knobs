@@ -289,6 +289,39 @@ TEST(UpdatesThatKeepFailingGiveUp) {
   CHECK(!updater.ready() && updater.Due(kStart + 3h, true) == Job::kNone);
 }
 
+TEST(UpdatesThatWaitADaySaySo) {
+  // Updating by itself waits for a moment knobs can restart. After a day
+  // without one, as for someone who never opens OBS, the user hears, once,
+  // and a click installs it.
+  Updater updater = Make({.check = true, .install = true});
+  updater.Checked(kStart + 1min, Version{0, 3, 0});
+  CHECK(!updater.DownloadDone(kStart + 2min, Downloaded::kDone));
+  CHECK(!updater.Waiting(kStart + 2min + 23h));
+  const std::optional<Notice> notice = updater.Waiting(kStart + 2min + 24h);
+  CHECK(notice && notice->kind == Notice::Kind::kUpdateReady);
+  CHECK(notice->title == std::format("{} 0.3.0 is ready to install", kDisplayName));
+  CHECK(Contains(notice->text, "Click to update now") && notice->url.empty() && !notice->page);
+  CHECK(!updater.Waiting(kStart + 72h));
+  // A newer version is said again, once it has waited a day.
+  updater.Checked(kStart + 49h, Version{0, 3, 1});
+  CHECK(!updater.DownloadDone(kStart + 49h, Downloaded::kDone));
+  CHECK(!updater.Waiting(kStart + 72h) && updater.Waiting(kStart + 73h));
+
+  // One downloaded before this start counts from the start.
+  updater = Make({.check = true, .install = true, .checked = kStart, .latest = Version{0, 3, 0}});
+  updater.Found();
+  CHECK(updater.NextDeadline(kStart + 1h) == kStart + 24h);
+  CHECK(!updater.Waiting(kStart + 23h) && updater.Waiting(kStart + 24h));
+  // Not with updating by itself off, or once it's installing.
+  updater = Make({.check = true, .install = true, .checked = kStart, .latest = Version{0, 3, 0}});
+  updater.Found();
+  updater.Set(true, false);
+  CHECK(!updater.Waiting(kStart + 25h));
+  updater.Set(true, true);
+  updater.Installing();
+  CHECK(!updater.Waiting(kStart + 25h));
+}
+
 TEST(UpdatedCopySaysHowItWent) {
   const std::optional<Notice> updated = UpdatedNotice({.tried = Version{0, 2, 0}}, kCurrent);
   CHECK(updated && updated->kind == Notice::Kind::kUpdated);

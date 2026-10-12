@@ -35,6 +35,7 @@ struct Notice {
     kUpdateAvailable,  // A new version is out (updates.h).
     kUpdated,          // This copy is the version an update installed.
     kUpdateFailed,     // An update didn't install by itself.
+    kUpdateReady,      // One that installs by itself has waited: a click installs it.
   };
 
   Kind kind = Kind::kChainChanged;

@@ -54,8 +54,11 @@ struct UpdateHooks {
   // Where installers are downloaded to.
   std::filesystem::path folder;
   update::Version current;  // This copy's version.
-  // How long after knobs starts the first check waits (Updater::Options).
+  // How long after knobs starts the first check waits, and how long an
+  // update waits for a moment to install before knobs says so
+  // (Updater::Options).
   std::chrono::system_clock::duration first_check = std::chrono::minutes(1);
+  std::chrono::system_clock::duration remind_after = std::chrono::hours(24);
   // The installer installed this copy (Updater::Options::can_install).
   bool can_install = false;
 };
@@ -184,6 +187,11 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // to the cable and the user hasn't paused it, which a new copy wouldn't
   // be, and nothing of knobs's is open.
   bool CanRestart() const;
+  // Starts the core, which sends the mic.
+  Status StartCore();
+  // Starts the core held back for an update at start (Create), once that's
+  // decided, or has taken too long. On a failure, says so and quits.
+  void ReleaseCore();
 
   // The update check: does what's due, or sets the timer for when it is.
   void RunUpdates();
@@ -247,6 +255,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   std::optional<update::Version> install_asked_;
   // An error to show once the code that hit it is done (kErrorMessage).
   std::string later_error_;
+  // The core waits for an update downloaded before to install, or not.
+  bool holding_core_ = false;
 
   std::mutex pending_mutex_;  // Guards pending_.
   std::optional<core::Snapshot> pending_;

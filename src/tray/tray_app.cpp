@@ -40,6 +40,10 @@ constexpr UINT kErrorMessage = WM_APP + 6;  // Show later_error_.
 constexpr UINT_PTR kNoticeTimer = 1;   // Notifier::NextDeadline.
 constexpr UINT_PTR kRestartTimer = 2;  // RestartByItself, while a window is open.
 constexpr UINT_PTR kUpdateTimer = 3;   // Updater::NextDeadline.
+constexpr UINT_PTR kCoreTimer = 4;     // ReleaseCore, if an update at start takes too long.
+// How long an update at start can hold back the mic: its installer's
+// signature is checked again first, which may wait on servers.
+constexpr UINT kCoreHoldMs = 5000;
 // The longest the update timer waits: a computer that sleeps doesn't count
 // the time asleep.
 constexpr long long kUpdateTimerMaxMs = 60 * 60 * 1000;
@@ -126,7 +130,8 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   if (opts.updates.latest) {
     app->updater_.emplace(Updater::Options{.current = opts.updates.current,
                                            .can_install = opts.updates.can_install,
-                                           .first = opts.updates.first_check},
+                                           .first = opts.updates.first_check,
+                                           .remind_after = opts.updates.remind_after},
                           app->update_settings_, Updater::Clock::now());
     app->PrepareUpdates();
   }
@@ -154,9 +159,15 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   ApplyMenuTheme(opts.theme);
   app->AddIcon();
 
-  auto core = opts.start_core(*app, app->settings_);
-  if (!core) return Error{core.error()};
-  app->core_ = std::move(*core);
+  // An update downloaded before installs now, before knobs sends the mic:
+  // once knobs runs, it waits for a moment the mic isn't sent anyway.
+  if (app->updater_ && app->updater_->Due(Updater::Clock::now(), app->CanRestart()) == Updater::Job::kInstall) {
+    app->holding_core_ = true;
+    app->StartUpdateJob(Updater::Job::kInstall);
+    SetTimer(app->window_, kCoreTimer, kCoreHoldMs, nullptr);
+  } else if (const Status started = app->StartCore(); !started) {
+    return Error{started.error()};
+  }
   if (!settings_error.empty()) {
     app->ShowError(std::format("Couldn't read the settings, so {} uses its defaults until they're changed.\n\n{}",
                                kDisplayName, settings_error));
@@ -297,6 +308,10 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (wparam == kRestartTimer) {
         KillTimer(window_, kRestartTimer);
         RestartByItself();
+        return 0;
+      }
+      if (wparam == kCoreTimer) {
+        ReleaseCore();
         return 0;
       }
       if (wparam != kNoticeTimer) break;
@@ -518,7 +533,9 @@ void TrayApp::Execute(unsigned id) {
 void TrayApp::OpenNotice() {
   const std::optional<Notice> notice = notifier_.shown();
   notifier_.Clicked();
-  if (notice && !notice->url.empty()) {
+  if (notice && notice->kind == Notice::Kind::kUpdateReady) {
+    InstallUpdate();
+  } else if (notice && !notice->url.empty()) {
     OpenUrl(notice->url);
   } else if (notice && notice->page) {
     ShowFirstRun(false, notice->page);
@@ -745,6 +762,23 @@ void TrayApp::Log(std::string line) {
   if (core_) core_->Log(std::move(line));
 }
 
+Status TrayApp::StartCore() {
+  auto core = options_.start_core(*this, settings_);
+  if (!core) return Error{core.error()};
+  core_ = std::move(*core);
+  return Ok{};
+}
+
+void TrayApp::ReleaseCore() {
+  if (!holding_core_ || quitting_) return;
+  holding_core_ = false;
+  KillTimer(window_, kCoreTimer);
+  if (const Status started = StartCore(); !started) {
+    ShowStartupError(started.error());
+    Quit();
+  }
+}
+
 bool TrayApp::CanRestart() const {
   return snapshot_.state != core::State::kRunning && !snapshot_.paused_by_user && !Quiet() && !in_menu_ &&
          !OpenDialog();
@@ -786,6 +820,7 @@ void TrayApp::RunUpdates() {
     }
   }
   const Updater::Clock::time_point now = Updater::Clock::now();
+  if (auto waiting = updater_->Waiting(now)) Notify(notifier_.Say(std::move(*waiting), Quiet()));
   if (const Updater::Job job = updater_->Due(now, CanRestart()); job != Updater::Job::kNone) {
     StartUpdateJob(job);
     return;
@@ -931,6 +966,8 @@ void TrayApp::FinishUpdateJob() {
   }
   Save();
   if (notice) Notify(notifier_.Say(std::move(*notice), Quiet()));
+  // An update at start that didn't install: knobs starts as usual.
+  ReleaseCore();
   if (!error.empty()) ShowError(error);
   RunUpdates();
 }

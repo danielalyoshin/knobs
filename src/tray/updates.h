@@ -55,6 +55,9 @@ class Updater {
     // as one whose installer GitHub doesn't have, isn't tried again by
     // itself: the user hears, and can get it from its page.
     int tries = 3;
+    // An update ready this long, with no moment to install by itself since,
+    // as for someone who never opens OBS, gets a notification to install it.
+    Clock::duration remind_after = std::chrono::hours(24);
   };
 
   enum class Job {
@@ -103,7 +106,7 @@ class Updater {
   std::optional<Notice> DownloadDone(Clock::time_point now, Downloaded outcome);
   // An installer for latest() was downloaded before: it can be installed,
   // once its signature is checked again.
-  void Found() { ready_ = settings_.latest; }
+  void Found();
   // The installer for latest() didn't pass the check of its signature just
   // before it ran. `lost`: it was changed, or is gone, and is downloaded
   // again; otherwise Windows couldn't finish the check, which is tried again
@@ -112,6 +115,10 @@ class Updater {
   // The installer for latest() is starting, which quits knobs. The copy it
   // starts sees settings().tried.
   void Installing();
+  // An update that installs by itself has been ready for
+  // Options::remind_after with no moment to install: says so, once a
+  // version, with a click that installs it now.
+  std::optional<Notice> Waiting(Clock::time_point now);
 
   // What the menu offers when a version newer than this one is out: to
   // install it now, once it's downloaded and installs by itself, else to
@@ -145,8 +152,11 @@ class Updater {
   // in a row.
   std::optional<Clock::time_point> try_failed_;
   int failures_ = 0;
-  // The version whose installer is downloaded and checked.
+  // The version whose installer is downloaded and checked, since when, and
+  // the one Waiting said so for.
   std::optional<update::Version> ready_;
+  std::optional<Clock::time_point> ready_since_;
+  std::optional<update::Version> reminded_;
 };
 
 // What the copy an update's installer started says (main.cpp's --updated):
