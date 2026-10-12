@@ -898,7 +898,10 @@ void TrayApp::FinishUpdateJob() {
         notice = updater_->NotVerified(now, lost);
         if (asked) {
           error = std::format("Couldn't update to {} {}. {}\n\n{}", kDisplayName, version.ToString(),
-                              lost ? std::format("Download it from {} instead.", update::ReleasePageUrl(version))
+                              // The menu offers its page then, as a link
+                              // here would be cut short.
+                              lost ? std::format("Get {} {}… in the menu opens its page, to download it yourself.",
+                                                 kDisplayName, version.ToString())
                                    : std::string("Try again later."),
                               work->verified.error);
           // The error says it.
