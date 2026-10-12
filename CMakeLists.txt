@@ -88,7 +88,7 @@ target_link_libraries(knobs_tray PUBLIC knobs_runtime
 # The tray app. The manifest asks for per-monitor DPI awareness (v2) and
 # Common Controls 6; the resource compiler finds the icon in assets/.
 add_executable(knobs WIN32 src/main.cpp src/tray/knobs.rc src/tray/knobs.manifest)
-target_include_directories(knobs PRIVATE assets)
+target_include_directories(knobs PRIVATE assets src/tray/pictures)
 target_link_libraries(knobs PRIVATE knobs_tray ole32 shell32)
 
 # Shared by the dev tools and their unit tests; not part of the app.
@@ -135,7 +135,7 @@ add_executable(knobs-tray
   tools/tray/knobs-tray.rc
   src/tray/knobs.manifest
 )
-target_include_directories(knobs-tray PRIVATE assets)
+target_include_directories(knobs-tray PRIVATE assets src/tray/pictures)
 target_link_libraries(knobs-tray PRIVATE knobs_tray_fake dwmapi ole32 windowscodecs)
 
 add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp tests/first_run_tests.cpp
