@@ -262,11 +262,14 @@ void CheckSourceState(const runtime::ObsApi& api, obs_data_t* source, const MicC
     for (size_t i = 0; i < silencers.size(); ++i) {
       states += std::format("{}{}", i == 0 ? "" : i + 1 == silencers.size() ? " and " : ", ", silencers[i]);
     }
-    // obs_source_t's enabled flag counts as muted (obs-source.c).
-    notes.push_back({.text = std::format("The mic is {} in OBS. libobs's monitor ignores mute, push-to-talk and "
-                                         "push-to-mute (OBS 32.2 and later), so the cable gets the mic either way, "
-                                         "from OBS and from {}.",
-                                         states, kDisplayName),
+    // obs_source_t's enabled flag counts as muted (obs-source.c). What to
+    // do instead: the apps that use the cable have their own.
+    std::string keys;
+    if (Bool(api, source, "push-to-talk", false)) keys = "push-to-talk";
+    if (Bool(api, source, "push-to-mute", false)) keys += keys.empty() ? "push-to-mute" : " and push-to-mute";
+    const std::string instead = keys.empty() ? "Mute it in each app that uses the cable instead."
+                                             : std::format("Set up {} in each app that uses the cable.", keys);
+    notes.push_back({.text = std::format("The mic is {} in OBS, which doesn't silence the cable. {}", states, instead),
                      .changes_expectations = true});
   }
   if (const int64_t sync = api.obs_data_get_int(source, "sync"); sync != 0) {

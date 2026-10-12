@@ -71,7 +71,7 @@ expect("${output}" "[--  ] pre-flight         Filter \"Gate\" is off in OBS, and
 expect("${output}" "[--  ] pre-flight         Filter \"Third-Party\" (some_plugin_filter) isn't one ")
 expect("${output}" " has, but it's off in OBS anyway.")
 expect("${output}" "[--  ] pre-flight         Filter \"Old VST\", a VST plugin, is off in OBS.")
-expect("${output}" "The mic is muted and on push-to-talk in OBS.")
+expect("${output}" "The mic is muted and on push-to-talk in OBS, which doesn't silence the cable. Set up push-to-talk in each app that uses the cable.")
 expect("${output}" "sync offset of 50 ms")
 expect("${output}" "OBS doesn't monitor this mic")
 # Both VST filters are gone, and the compressor with a sidechain is a Gain

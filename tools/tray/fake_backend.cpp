@@ -160,10 +160,8 @@ const std::vector<FakeScenario>& FakeScenarios() {
              VstWarning(),
              {false, "Filter \"Expander\" is off in OBS, and stays off."},
              {false,
-              std::format("The mic is on push-to-talk in OBS. libobs's monitor ignores mute, push-to-talk and "
-                          "push-to-mute (OBS 32.2 and later), so the cable gets the mic either way, from OBS and "
-                          "from {}.",
-                          kDisplayName),
+              "The mic is on push-to-talk in OBS, which doesn't silence the cable. Set up push-to-talk in each "
+              "app that uses the cable.",
               true}};
        }},
       {"new-user", "OBS opened once: Mic/Aux on the default device with no filters, no cable",
