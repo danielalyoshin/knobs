@@ -77,6 +77,7 @@ add_library(knobs_tray STATIC
   src/tray/setup_window.cpp
   src/tray/single_instance.cpp
   src/tray/tray_app.cpp
+  src/tray/walkthrough.cpp
 )
 target_include_directories(knobs_tray PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
 # The setup window draws itself with Direct2D and DirectWrite, decodes its
@@ -139,7 +140,7 @@ target_include_directories(knobs-tray PRIVATE assets src/tray/pictures)
 target_link_libraries(knobs-tray PRIVATE knobs_tray_fake dwmapi ole32 windowscodecs)
 
 add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp tests/first_run_tests.cpp
-                           tests/notices_tests.cpp)
+                           tests/notices_tests.cpp tests/walkthrough_tests.cpp)
 target_link_libraries(knobs-tests PRIVATE knobs_tray_fake delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)

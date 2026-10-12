@@ -90,6 +90,8 @@ Options:
   --theme <name>         system (Windows' mode), light or dark. Default: system.
   --zoom <n>             Draw the setup window n times as big, from 1 to 3, as
                          Windows' text size would, for sharper pictures.
+  --walk-at <seconds>    Hold a guide's walkthrough still at that moment, for
+                         pictures. Space or a click plays it on from there.
   --settings <file>      Read the settings from this file and save changes to it.
                          Without it, the first run counts as finished unless
                          --first-run is given.
@@ -135,6 +137,7 @@ struct Options {
   const FakeScenario* scenario = &FakeScenarios().front();
   tray::MenuTheme theme = tray::MenuTheme::kSystem;
   std::optional<float> zoom;
+  std::optional<float> walk_at;
   std::optional<fs::path> settings;
   bool start_with_windows = false;
   ImportArgs import_args;
@@ -186,6 +189,10 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       const float zoom = std::wcstof(std::wstring(value).c_str(), nullptr);
       if (zoom < 1 || zoom > 3) return std::nullopt;
       options.zoom = zoom;
+    } else if (arg == L"--walk-at") {
+      const float at = std::wcstof(std::wstring(value).c_str(), nullptr);
+      if (at < 0) return std::nullopt;
+      options.walk_at = at;
     } else if (arg == L"--settings") {
       options.settings = fs::absolute(value);
     } else if (arg == L"--first-run") {
@@ -692,6 +699,7 @@ int Run(const Options& options) {
   if (const auto dirs = GetAppDirs()) tray_options.log_folder = dirs->Logs();
   tray_options.theme = options.theme;
   tray_options.setup_zoom = options.zoom;
+  tray_options.setup_walk_at = options.walk_at;
   tray_options.starts_with_windows = [] { return g_session->start_with_windows; };
   tray_options.set_start_with_windows = [](bool on) {
     g_session->start_with_windows = on;

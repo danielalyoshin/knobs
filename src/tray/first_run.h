@@ -114,11 +114,14 @@ struct PageButton {
   friend bool operator==(const PageButton&, const PageButton&) = default;
 };
 
-// A screenshot beside a page's steps, showing one of them.
+// A screenshot beside a page's steps, showing one of them, or a walkthrough
+// of them (walkthrough.h).
 struct Picture {
-  std::string name;  // Its resource: "obs-filters", "vb-cable-setup".
-  int step = 0;      // The step it shows, from 1.
-  std::string alt;   // What it shows, for screen readers.
+  // A walkthrough's name ("obs-filters"), or a screenshot's resource
+  // ("vb-cable-setup").
+  std::string name;
+  int step = 0;     // The step a screenshot shows, from 1. A walkthrough shows its own.
+  std::string alt;  // What it shows, for screen readers.
 
   friend bool operator==(const Picture&, const Picture&) = default;
 };

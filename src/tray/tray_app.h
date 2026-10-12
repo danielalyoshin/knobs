@@ -57,9 +57,11 @@ struct TrayOptions {
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
   std::filesystem::path log_folder;
   MenuTheme theme = MenuTheme::kSystem;
-  // The setup window's zoom in place of Windows' text size, for pictures
-  // (knobs-tray's --zoom).
+  // The setup window's zoom in place of Windows' text size, and the moment
+  // its walkthroughs hold still at, for pictures (knobs-tray's --zoom and
+  // --walk-at).
   std::optional<float> setup_zoom;
+  std::optional<float> setup_walk_at;
   // Hears each snapshot on the tray's thread, after the tray has.
   std::function<void(const core::Snapshot& snapshot)> on_snapshot;
   // Hears each notification as it's shown, and nullopt as one is taken

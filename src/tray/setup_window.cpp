@@ -32,6 +32,7 @@ constexpr UINT_PTR kRenderTimer = 1;  // Catches a render put off by a button's 
 // wParam is the element, lParam the layout's generation.
 constexpr UINT kActivateMessage = WM_APP + 0x41;
 constexpr UINT_PTR kMotionTimer = 2;
+constexpr UINT_PTR kWalkTimer = 3;  // A walkthrough's frames.
 constexpr UINT kRenderMs = 200;
 constexpr UINT kFrameMs = 16;
 // The motion (docs/design.md, The setup window): 320 ms for structure,
@@ -89,19 +90,20 @@ bool IsWebLink(std::string_view url) { return url.starts_with("https://") || url
 
 bool IsControl(Role role) {
   return role == Role::kButton || role == Role::kDoor || role == Role::kRadio || role == Role::kCheckBox ||
-         role == Role::kLink;
+         role == Role::kToggle || role == Role::kLink;
 }
 
 }  // namespace
 
 SetupWindow::SetupWindow(FirstRunHost& host, HINSTANCE instance, FirstRun first_run, MenuTheme theme,
-                         std::optional<float> zoom)
+                         std::optional<float> zoom, std::optional<float> walk_at)
     : host_(host),
       instance_(instance),
       first_run_(std::move(first_run)),
       saved_(first_run_.progress()),
       theme_(theme),
-      zoom_asked_(zoom) {
+      zoom_asked_(zoom),
+      walk_at_(walk_at) {
   icon_large_ = LoadAppIcon(instance_, LIM_LARGE);
   icon_small_ = LoadAppIcon(instance_, LIM_SMALL);
   uia_ = std::make_unique<SetupUia>(static_cast<SetupUiaHost&>(*this));
@@ -221,6 +223,8 @@ bool SetupWindow::Create() {
 
 void SetupWindow::ApplyTheme() {
   animate_ = AnimationsOn();
+  // Turned off, they stop the walkthrough too: it can be played again.
+  if (!animate_) SetWalkPlaying(false);
   palette_ = MakeSetupPalette(CurrentSetupMode(theme_));
   if (!window_) return;
   const BOOL dark = palette_.mode == SetupMode::kDark;
@@ -273,6 +277,8 @@ void SetupWindow::Paint(const RECT& dirty) {
   SystemParametersInfoW(SPI_GETKEYBOARDCUES, 0, &always, 0);
   shown_.show_access_keys = always || show_access_keys_;
   shown_.scroll = scroll_;
+  shown_.walk_time = walk_time_;
+  shown_.walk_playing = walk_playing_;
   target_->BeginDraw();
   // Only what needs it: the waiting dot asks for no more than its own box.
   const float scale = Scale();
@@ -432,6 +438,7 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     case WM_TIMER:
       if (wparam == kRenderTimer && render_due_ && !in_button_) Render();
       if (wparam == kMotionTimer) Step();
+      if (wparam == kWalkTimer) WalkStep();
       return 0;
     case WM_CLOSE:
       // The close button, Esc and Alt+F4: knobs stays in the tray, and the
@@ -441,6 +448,7 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     case WM_DESTROY:
       KillTimer(window_, kRenderTimer);
       KillTimer(window_, kMotionTimer);
+      KillTimer(window_, kWalkTimer);
       uia_->Detach();
       target_.Reset();
       painter_.Reset();
@@ -532,6 +540,7 @@ void SetupWindow::ShowView(PageView view) {
       scene_.status >= 0 ? scene_.elements[static_cast<size_t>(scene_.status)].name : L"";
   const bool first = scene_.elements.empty();
   const auto parts_before = Parts(scene_);
+  const Walkthrough* walk_before = scene_.walkthrough;
   view_ = std::move(view);
   choice_ = view_.default_choice;
   if (!view_.check.empty()) checked_ = view_.checked;
@@ -563,6 +572,7 @@ void SetupWindow::ShowView(PageView view) {
     }
   }
   StartMotion(first, new_page);
+  if (new_page || scene_.walkthrough != walk_before) StartWalk();
   uia_->SceneChanged(new_page, rebuilt, FromUtf8(view_.instruction));
   if (GetFocus() == window_) uia_->FocusChanged(focus_);
   if (scene_.status >= 0 && scene_.elements[static_cast<size_t>(scene_.status)].name != status_before) {
@@ -576,6 +586,7 @@ void SetupWindow::Layout() {
     if (ID2D1Bitmap* bitmap = Picture(std::string(name))) return bitmap->GetPixelSize();
     return std::nullopt;
   });
+  if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = walk_playing_;
 }
 
 void SetupWindow::Activate(int index) {
@@ -606,6 +617,9 @@ void SetupWindow::Activate(int index) {
       for (size_t i = 0; i < scene_.elements.size(); ++i) {
         if (scene_.elements[i].role == Role::kCheckBox) uia_->Toggled(static_cast<int>(i), !checked_);
       }
+      break;
+    case Role::kToggle:
+      SetWalkPlaying(!walk_playing_);
       break;
     case Role::kLink:
       if (IsWebLink(element.url)) {
@@ -864,6 +878,59 @@ void SetupWindow::StartMotion(bool first, bool new_page) {
   moving_ = true;
   SetTimer(window_, kMotionTimer, kFrameMs, nullptr);
   Step();
+}
+
+void SetupWindow::StartWalk() {
+  if (window_) KillTimer(window_, kWalkTimer);
+  walk_playing_ = false;
+  if (!scene_.walkthrough) return;
+  // Held for a picture, or still with Windows' animations off, until played.
+  walk_time_ = walk_at_ ? *walk_at_ : animate_ ? 0 : scene_.walkthrough->still;
+  if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = false;
+  if (animate_ && !walk_at_) SetWalkPlaying(true);
+}
+
+void SetupWindow::SetWalkPlaying(bool playing) {
+  if (!scene_.walkthrough || playing == walk_playing_) return;
+  walk_playing_ = playing;
+  if (scene_.walk_toggle >= 0) {
+    scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = playing;
+    uia_->Toggled(scene_.walk_toggle, !playing);
+  }
+  if (!window_) return;
+  if (playing) {
+    walk_tick_ = Clock::now();
+    SetTimer(window_, kWalkTimer, kFrameMs, nullptr);
+  } else {
+    KillTimer(window_, kWalkTimer);
+  }
+  Redraw();
+}
+
+void SetupWindow::WalkStep() {
+  const Clock::time_point now = Clock::now();
+  // A long gap, such as a dialog's, doesn't skip it on.
+  const float elapsed = std::min(std::chrono::duration<float>(now - walk_tick_).count(), 0.1f);
+  walk_tick_ = now;
+  if (!scene_.walkthrough || !walk_playing_ || !window_ || IsIconic(window_)) return;
+  const int before = ShownStep(scene_, walk_time_);
+  walk_time_ = std::fmod(walk_time_ + elapsed, scene_.walkthrough->length);
+  if (moving_ || ShownStep(scene_, walk_time_) != before) {
+    // The step lights up in the list too.
+    Redraw();
+    return;
+  }
+  // Only the frame moves: only the part of it the panel shows is drawn again.
+  const D2D1_RECT_F& frame = scene_.walk;
+  const float left = std::max(frame.left, scene_.panel.left + 1);
+  const float right = std::min(frame.right, scene_.panel.right - 1);
+  const float top = std::max(frame.top - scroll_, scene_.panel.top + 1);
+  const float bottom = std::min(frame.bottom - scroll_, scene_.panel.bottom - 1);
+  if (right <= left || bottom <= top) return;
+  const float scale = Scale();
+  const RECT dirty = {static_cast<LONG>(std::floor((left - 1) * scale)), static_cast<LONG>(std::floor((top - 1) * scale)),
+                      static_cast<LONG>(std::ceil((right + 1) * scale)), static_cast<LONG>(std::ceil((bottom + 1) * scale))};
+  InvalidateRect(window_, &dirty, FALSE);
 }
 
 void SetupWindow::Step() {

@@ -12,7 +12,7 @@
 IDI_KNOBS ICON "knobs.ico"
 
 // The setup's screenshots, in src\tray\pictures, found the same way.
-OBS_FILTERS RCDATA "obs-filters.png"
+#include "pictures.rc2"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH, 0

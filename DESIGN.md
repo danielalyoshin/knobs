@@ -173,7 +173,7 @@ knobs's own UI is one window, the setup window, and it is about one thing: where
 
 It is calm and dense in the way a settings window is: a fixed 760 × 520 DIP client area, one panel, one heading per page, plain sentences in the product's voice, and nothing decorative. Colour other than graphite appears only as state marks, and those are the tray icon's badges, drawn the same way. Light and dark follow Windows' app mode; high contrast drops the palette entirely and uses the user's colours.
 
-Motion is structural and short: the wire inks and the caret slides as the signal reaches a stage, a page fades in, and a waiting page's dot breathes. With Windows' animations off, nothing moves.
+Motion is structural and short: the wire inks and the caret slides as the signal reaches a stage, a page fades in, and a waiting page's dot breathes. The one long motion is a guide's walkthrough, which shows rather than decorates, and pauses at a click. With Windows' animations off, nothing moves until the user plays a walkthrough.
 
 **Key Characteristics:**
 - The path is always on screen: a band of four stages, each an icon on a 1px wire, with its name and what knobs knows of it.
@@ -246,7 +246,7 @@ A fixed client area of 760 × 520 DIPs in three bands, the same on every page:
 - **The panel** (24–736 × 118–452): the gutter is 24 DIPs from the window's sides. Its content starts 24 DIPs in from the panel's outside edge, so it lines up with the band's first icon, 20 from the top and 17 from the bottom. It scrolls when its content doesn't fit, with a hairline at the cut edge as the only sign.
 - **The foot** (468–500): the note and any waiting status on the left from x 24, the buttons on the right ending at x 736, 8 DIPs apart, centred on the 32 DIP button height.
 
-Vertical rhythm inside the panel: heading, then 6 to a lead paragraph and 12 between paragraphs; 20 before doors, 16 before choices or notes, 14 before steps, 18 before the check box. Doors stack 8 apart, notes 12, steps 5. The guide's picture column, when a screenshot exists, takes 212 DIPs (264 for wide images) at the right with a 28 DIP gap, and sits level with the step it shows.
+Vertical rhythm inside the panel: heading, then 6 to a lead paragraph and 12 between paragraphs; 20 before doors, 16 before choices or notes, 14 before steps, 18 before the check box. Doors stack 8 apart, notes 12, steps 5. The guide's picture column takes 300 by 188 DIPs for a walkthrough, at the top of the steps, or 212 DIPs for a screenshot (264 for wide ones), level with the step it shows, at the right with a 28 DIP gap.
 
 The window scales as a whole: it opens on the pointer's monitor at that monitor's DPI, multiplied by Windows' text size (1 to 2.25), stepping down by 0.05 until it fits the work area. There are no breakpoints and no reflow.
 
@@ -310,7 +310,7 @@ The chain as it will run: Sunken fill, Hairline border, 4px. The mic and the cab
 Four stages on a wire. A stage's icon and name are ink when it is the page's stage, Graphite 2 once known, Graphite 3 while unknown. The wire is ink from a set stage to the next one that is set or that the page is about, Graphite 3 elsewhere. As the signal reaches a stage the wire inks along over 320 ms on the site's curve (cubic-bezier(0.2, 0, 0, 1)) and the caret slides under the new stage in step.
 
 ### Guide (signature)
-Numbered steps with the number in Graphite 3 at Numeral size, text in Body. Beside them, a picture column: a screenshot framed at 4px with a Hairline Strong border, level with the step it shows; that step's number and the picture's top-left corner both wear a 20 DIP ink disc, the corner one ringed with 2 DIPs of Surface. Without a screenshot the steps take the panel's full width. The column is built; the screenshots themselves (OBS's Filters window, VB-Cable's setup) are pending, so the guides currently show full-width steps.
+Numbered steps with the number in Graphite 3 at Numeral size, text in Body. Beside them, a picture column framed at 4px with a Hairline Strong border: a walkthrough, or a screenshot level with the step it shows. The step shown has its number on a 20 DIP ink disc, and so has the picture's top-left corner, ringed with 2 DIPs of Surface; in a walkthrough both move on as it does. A walkthrough is real screenshots of OBS at twice its size, with a camera that follows a drawn Windows arrow pointer (white, with a black edge, as big as Windows' own at the app's size) that clicks with a white ring spreading 20 DIPs and fading. Its play and pause sit on a 26 DIP disc of #111317 at 72% (92% on hover) in the frame's bottom-right corner, white bars or a white triangle; the whole frame is the toggle, and its focus ring is the frame's. Where the camera sees past the screen's edge, the frame shows #111317. Without a picture the steps take the panel's full width; VB-Cable's setup has none yet.
 
 ### Notes and waiting
 Notes are body text 28 DIPs in, each led by a 16 DIP mark: the amber triangle for a warning, the graphite "i" disc for information. A page that waits shows a 7 DIP Graphite 3 dot in the foot, breathing between 35% and 100% opacity over 1.6 s, beside the status in Body Small.

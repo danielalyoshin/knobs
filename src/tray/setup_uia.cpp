@@ -36,6 +36,7 @@ long ControlType(Role role) {
       return UIA_HyperlinkControlTypeId;
     case Role::kDoor:
     case Role::kButton:
+    case Role::kToggle:
       return UIA_ButtonControlTypeId;
     case Role::kChoiceGroup:
       return UIA_GroupControlTypeId;
@@ -55,6 +56,8 @@ long ControlType(Role role) {
 }
 
 bool Invokable(Role role) { return role == Role::kLink || role == Role::kDoor || role == Role::kButton; }
+
+bool Toggles(Role role) { return role == Role::kCheckBox || role == Role::kToggle; }
 
 void SetString(VARIANT* value, const std::wstring& text) {
   if (text.empty()) return;
@@ -103,7 +106,7 @@ class Provider final : public IRawElementProviderSimple,
       *out = static_cast<IRawElementProviderFragmentRoot*>(this);
     } else if (iid == __uuidof(IInvokeProvider) && element && Invokable(element->role)) {
       *out = static_cast<IInvokeProvider*>(this);
-    } else if (iid == __uuidof(IToggleProvider) && element && element->role == Role::kCheckBox) {
+    } else if (iid == __uuidof(IToggleProvider) && element && Toggles(element->role)) {
       *out = static_cast<IToggleProvider*>(this);
     } else if (iid == __uuidof(ISelectionItemProvider) && element && element->role == Role::kRadio) {
       *out = static_cast<ISelectionItemProvider*>(this);
@@ -132,7 +135,7 @@ class Provider final : public IRawElementProviderSimple,
     if (index_ == kRoot) return S_OK;
     if (!element) return UIA_E_ELEMENTNOTAVAILABLE;
     if ((pattern == UIA_InvokePatternId && Invokable(element->role)) ||
-        (pattern == UIA_TogglePatternId && element->role == Role::kCheckBox) ||
+        (pattern == UIA_TogglePatternId && Toggles(element->role)) ||
         (pattern == UIA_SelectionItemPatternId && element->role == Role::kRadio)) {
       *out = static_cast<IRawElementProviderSimple*>(this);
       AddRef();

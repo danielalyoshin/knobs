@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// The setup's screenshots (README.md), which knobs.rc and knobs-tray.rc both
+// take in. A picture's name in the walkthroughs, "obs-main", is its
+// resource's, OBS_MAIN.
+
+// The walkthrough of setting up a mic in OBS (walkthrough.cpp).
+OBS_MAIN RCDATA "obs-main.png"
+OBS_MIXER_MENU RCDATA "obs-mixer-menu.png"
+OBS_MIXER_FILTERS RCDATA "obs-mixer-filters.png"
+OBS_FILTERS_WINDOW RCDATA "obs-filters-window.png"
+OBS_ADD_FILTER RCDATA "obs-add-filter.png"

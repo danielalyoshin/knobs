@@ -579,7 +579,7 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
              "Under Audio Filters, click <b>+</b> and add filters as needed.",
              "Click each filter and adjust it by ear, starting from OBS's defaults.",
              std::format("Close OBS. {} then reads your filters and carries on here.", kDisplayName)}));
-  CHECK(view.picture && view.picture->name == "obs-filters" && view.picture->step == 3);
+  CHECK(view.picture && view.picture->name == "obs-filters" && view.picture->step == 0);
   CHECK(Contains(view.footer, std::format("<a href=\"{}\">", kSetupGuideUrl)));
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open OBS", "Next"}));
   CHECK(FindButton(view, kButtonOpenObs)->enabled && !FindButton(view, kButtonNext)->enabled);

@@ -52,10 +52,11 @@ inline constexpr UINT kSetupClickMessage = WM_APP + 0x40;
 
 class SetupWindow final : private SetupUiaHost {
  public:
-  // `theme` is the tray's: kSystem follows Windows' app mode. `zoom`, for
-  // the dev tools' pictures, takes the place of Windows' text size.
+  // `theme` is the tray's: kSystem follows Windows' app mode. For the dev
+  // tools' pictures, `zoom` takes the place of Windows' text size, and
+  // `walk_at` holds a walkthrough still at that moment, in seconds.
   SetupWindow(FirstRunHost& host, HINSTANCE instance, FirstRun first_run, MenuTheme theme,
-              std::optional<float> zoom = std::nullopt);
+              std::optional<float> zoom = std::nullopt, std::optional<float> walk_at = std::nullopt);
   ~SetupWindow() override;
   SetupWindow(const SetupWindow&) = delete;
   SetupWindow& operator=(const SetupWindow&) = delete;
@@ -111,6 +112,11 @@ class SetupWindow final : private SetupUiaHost {
   // Motion.
   void StartMotion(bool first, bool new_page);
   void Step();
+  // A page's walkthrough: from the start, playing unless Windows' animations
+  // are off; a frame of it; and play or pause.
+  void StartWalk();
+  void WalkStep();
+  void SetWalkPlaying(bool playing);
 
   ID2D1Bitmap* Picture(const std::string& name);
 
@@ -131,6 +137,7 @@ class SetupWindow final : private SetupUiaHost {
   FirstRunProgress saved_;
   MenuTheme theme_;
   std::optional<float> zoom_asked_;
+  std::optional<float> walk_at_;
   HWND window_ = nullptr;
   HICON icon_large_ = nullptr;
   HICON icon_small_ = nullptr;
@@ -184,6 +191,9 @@ class SetupWindow final : private SetupUiaHost {
   std::array<float, kStageCount - 1> wire_from_{}, wire_to_{};
   float arrive_ = 1;
   SceneState shown_;
+  float walk_time_ = 0;  // Seconds into the page's walkthrough.
+  bool walk_playing_ = false;
+  Clock::time_point walk_tick_;
 
   std::unique_ptr<SetupUia> uia_;
 };

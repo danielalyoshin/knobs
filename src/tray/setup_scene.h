@@ -14,6 +14,7 @@
 #include "tray/first_run.h"
 #include "tray/setup_graphics.h"
 #include "tray/setup_theme.h"
+#include "tray/walkthrough.h"
 
 // The setup window's page, laid out and drawn (docs/design.md, The setup
 // window): the band with the mic's path, the panel with the page, and the
@@ -26,6 +27,10 @@ inline constexpr float kSetupHeight = 520;
 
 // The check box's id, beside the buttons' and choices' (FirstRunId).
 inline constexpr int kCheckBoxId = 300;
+// The walkthrough's play and pause.
+inline constexpr int kWalkToggleId = 301;
+// The frame a guide's walkthrough plays in.
+inline constexpr D2D1_SIZE_F kWalkFrame = {300, 188};
 
 // What a part of the page is, for the keyboard, the mouse and screen
 // readers.
@@ -45,6 +50,7 @@ enum class Role {
   kNote,
   kChain,
   kCheckBox,
+  kToggle,  // A toggle button: the walkthrough's play and pause.
   kStatus,  // What a waiting page waits for.
   kButton,
 };
@@ -89,8 +95,10 @@ struct Item {
     kRule,     // A hairline along the rect's top.
     kIcon,     // `icon`, scaled to the rect, in `ink`.
     kMark,     // A badge, the rect's width across.
-    kDisc,     // An ink disc with `text` on it, centred on its ink.
+    kNumeral,  // Step `step`'s number: on an ink disc while that step is shown.
+    kShownDisc,  // The number of the step shown, on an ink disc.
     kPicture,  // A screenshot, framed.
+    kWalkthrough,  // The scene's walkthrough, framed.
     kDot,      // The waiting dot.
   };
   Kind kind = Kind::kText;
@@ -104,6 +112,7 @@ struct Item {
   // kSet, kWarning or kBlocked, or kKnown for information.
   StageState mark = StageState::kSet;
   bool ring = false;  // A disc with a ring of the panel around it.
+  int step = 0;       // A numeral's.
   std::string picture;
   bool in_panel = false;
 };
@@ -127,7 +136,15 @@ struct Scene {
   int heading = -1;
   int status = -1;
   bool waiting = false;
-  D2D1_RECT_F dot{};  // The waiting dot, the one part that moves by itself.
+  D2D1_RECT_F dot{};  // The waiting dot, which moves by itself.
+  // The step a guide's screenshot shows, or 0: a walkthrough shows its own.
+  int pictured = 0;
+  // The steps' numbers for their discs, by step.
+  std::vector<ComPtr<IDWriteTextLayout>> digits;
+  // A guide's walkthrough, its frame in the panel, and its play and pause.
+  const Walkthrough* walkthrough = nullptr;
+  D2D1_RECT_F walk{};
+  int walk_toggle = -1;
 
   float MaxScroll() const;
   // The control at `point` (client DIPs), or -1.
@@ -159,7 +176,15 @@ struct SceneState {
   std::array<float, kStageCount - 1> wire{};
   float arrive = 1;
   float pulse = 1;
+  // How far into its walkthrough the page is, in seconds, and whether it's
+  // playing.
+  float walk_time = 0;
+  bool walk_playing = false;
 };
+
+// The step the scene shows at that moment: its walkthrough's, or its
+// screenshot's.
+int ShownStep(const Scene& scene, float walk_time);
 
 class ScenePainter {
  public:

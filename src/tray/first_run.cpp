@@ -402,7 +402,9 @@ PageView Steps(const core::Snapshot& snapshot) {
   view.steps = {open, filters, "Under Audio Filters, click <b>+</b> and add filters as needed.",
                 "Click each filter and adjust it by ear, starting from OBS's defaults.",
                 std::format("Close OBS. {} then reads your filters and carries on here.", kDisplayName)};
-  view.picture = Picture{"obs-filters", 3, "OBS's Filters window, with + under Audio Filters"};
+  view.picture = Picture{"obs-filters", 0,
+                         "A walkthrough in OBS: Mic/Aux clicked in the Audio Mixer, Filters chosen from its menu, then "
+                         "+ clicked under Audio Filters"};
   view.footer = std::format("<a href=\"{}\">The setup guide</a> has more on each step.", kSetupGuideUrl);
   if (snapshot.obs_running) {
     view.waiting = true;

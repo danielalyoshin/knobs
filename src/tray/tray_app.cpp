@@ -529,7 +529,7 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
   }
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
   SetupWindow dialog(*this, options_.instance, FirstRun(progress, page, starts), options_.theme,
-                     options_.setup_zoom);
+                     options_.setup_zoom, options_.setup_walk_at);
   setup_window_ = &dialog;
   dialog.Show();
   setup_window_ = nullptr;
