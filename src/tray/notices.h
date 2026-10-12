@@ -97,6 +97,8 @@ class Notifier {
     // What an update did, said as the restart is, by the copy it started
     // (UpdatedNotice).
     std::optional<Notice> updated;
+    // Notices held while quiet show one at a time, this far apart.
+    Clock::duration held_apart = std::chrono::seconds(8);
   };
 
   struct Update {
@@ -146,8 +148,10 @@ class Notifier {
   void Show(Notice notice, bool quiet, Update& update);
   // Takes down the notification showing if it's a `kind`.
   void Hide(Notice::Kind kind, Update& update);
-  // Shows what Say held back, unless something else shows.
-  void ShowHeld(bool quiet, Update& update);
+  // Holds a notice while quiet: one of its kind replaces it.
+  void Hold(Notice notice);
+  // Shows the first of what was held, unless something else shows.
+  void ShowHeld(bool quiet, Clock::time_point now, Update& update);
 
   Options options_;
   core::Snapshot snapshot_;
@@ -165,8 +169,11 @@ class Notifier {
   std::vector<core::OtherObs> other_obs_;
   runtime::ObsVersion obs_version_;
   std::optional<Notice> shown_;
-  // What Say got while quiet: the latest.
-  std::optional<Notice> held_;
+  // What Say got while quiet, and the update's notice: the latest of each
+  // kind, in turn.
+  std::vector<Notice> held_;
+  // When the next of held_ may show.
+  std::optional<Clock::time_point> held_after_;
 };
 
 }  // namespace knobs::tray

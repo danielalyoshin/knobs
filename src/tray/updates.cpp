@@ -39,6 +39,7 @@ Updater::Updater(Options options, UpdateSettings settings, Clock::time_point sta
   // A check "after" now was saved before the clock was set back: it counts
   // as now.
   if (settings_.checked && *settings_.checked > started_) settings_.checked = started_;
+  if (settings_.latest) latest_since_ = started_;
 }
 
 void Updater::Set(bool check, bool install) {
@@ -87,9 +88,10 @@ std::optional<Updater::Clock::time_point> Updater::NextDeadline(Clock::time_poin
   if (Installs() && ready() && try_failed_ && *try_failed_ + options_.retry > now) {
     next = std::min(next, *try_failed_ + options_.retry);
   }
-  if (Installs() && ready() && ready_since_ && reminded_ != settings_.latest &&
-      *ready_since_ + options_.remind_after > now) {
-    next = std::min(next, *ready_since_ + options_.remind_after);
+  // Waiting's notification.
+  const std::optional<Clock::time_point> since = ready() ? ready_since_ : latest_since_;
+  if (Installs() && since && reminded_ != settings_.latest && *since + options_.remind_after > now) {
+    next = std::min(next, *since + options_.remind_after);
   }
   return next;
 }
@@ -106,6 +108,7 @@ std::optional<Notice> Updater::Checked(Clock::time_point now, std::optional<upda
     ready_.reset();
     try_failed_.reset();
     failures_ = 0;
+    latest_since_ = now;
   }
   settings_.latest = latest;
   // An update that installs by itself says so once it has, or if it can't.
@@ -117,12 +120,13 @@ std::optional<Notice> Updater::DownloadDone(Clock::time_point now, Downloaded ou
   switch (outcome) {
     case Downloaded::kDone:
       try_failed_.reset();
-      failures_ = 0;
       ready_ = settings_.latest;
       ready_since_ = now;
       return std::nullopt;
     case Downloaded::kFailed:
-      return Failed(now);
+      return Failed(now, false);
+    case Downloaded::kUnusable:
+      return Failed(now, true);
     case Downloaded::kRejected:
       return GiveUp();
   }
@@ -131,12 +135,12 @@ std::optional<Notice> Updater::DownloadDone(Clock::time_point now, Downloaded ou
 
 std::optional<Notice> Updater::NotVerified(Clock::time_point now, bool lost) {
   if (lost) ready_.reset();
-  return Failed(now);
+  return Failed(now, lost);
 }
 
-std::optional<Notice> Updater::Failed(Clock::time_point now) {
+std::optional<Notice> Updater::Failed(Clock::time_point now, bool counts) {
   try_failed_ = now;
-  if (++failures_ < options_.tries) return std::nullopt;
+  if (!counts || ++failures_ < options_.tries) return std::nullopt;
   return GiveUp();
 }
 
@@ -160,12 +164,12 @@ void Updater::Installing() {
 }
 
 std::optional<Notice> Updater::Waiting(Clock::time_point now) {
-  if (!Installs() || !ready() || !ready_since_ || reminded_ == settings_.latest ||
-      now < *ready_since_ + options_.remind_after) {
+  const std::optional<Clock::time_point> since = ready() ? ready_since_ : latest_since_;
+  if (!Installs() || !since || reminded_ == settings_.latest || now < *since + options_.remind_after) {
     return std::nullopt;
   }
   reminded_ = settings_.latest;
-  return Ready(*settings_.latest);
+  return ready() ? Ready(*settings_.latest) : Available(*settings_.latest);
 }
 
 std::optional<Updater::Offer> Updater::offer() const {

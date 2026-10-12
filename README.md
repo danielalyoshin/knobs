@@ -66,7 +66,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 
 | Requirement | Supported |
 |:---|:---|
-| Windows | 64-bit |
+| Windows | 10, version 1803 or later, or 11. 64-bit. |
 | OBS Studio | 32.2 to 33.x, tested on 32.2.2 and 33.0.0-rc1. knobs finds an install from OBS's installer by itself; for a Steam or portable OBS, you choose its folder. |
 | Virtual cable | [VB-Cable](https://vb-audio.com/Cable/), which knobs's installer can install, or another one: knobs recognizes VB-Audio's cables (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. |
 | Mic filters | OBS's built-in audio filters: Noise Suppression (RNNoise or Speex), Noise Gate, Expander, Upward Compressor, Compressor, Limiter, Gain, 3-Band Equalizer and Invert Polarity. [Known limits](#known-limits) has the exceptions. |

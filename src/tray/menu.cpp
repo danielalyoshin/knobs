@@ -279,6 +279,7 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
     items.push_back(std::move(other));
   }
   if (updates.version) {
+    menu.update = updates.version;
     const std::string version = updates.version->ToString();
     items.push_back(updates.install_now
                         ? Command(kIdInstallUpdate, std::format("&Update to {} {}", kDisplayName, version))

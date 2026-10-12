@@ -822,7 +822,10 @@ int Run(const Options& options) {
   };
   tray_options.updates.download = [](const update::Version& version, const fs::path& file, update::Cancel&) {
     Print(std::format("{} would download {}\n", kDisplayName, update::InstallerUrl(version)));
-    return WriteText(file, "A made-up installer.");
+    if (const Status written = WriteText(file, "A made-up installer."); !written) {
+      return update::DownloadResult{.error = written.error()};
+    }
+    return update::DownloadResult{.outcome = update::DownloadResult::Outcome::kDone};
   };
   tray_options.updates.verify = [download = options.signature,
                                  recheck = options.recheck.value_or(options.signature)](const fs::path& file) {
@@ -927,7 +930,7 @@ int Run(const Options& options) {
   WaitToSettle();
   DWORD mode = 0;
   if (!options.screenshot && GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode)) SetTimer(nullptr, 0, 100, OnKeys);
-  (*app)->Run();
+  if (const Status ran = (*app)->Run(); !ran) Check(false, "tray", ran.error());
   app->reset();
   std::error_code ec;
   fs::remove_all(fs::temp_directory_path() / std::format(L"knobs-tray-updates-{}", GetCurrentProcessId()), ec);

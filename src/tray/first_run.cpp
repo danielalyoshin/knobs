@@ -78,12 +78,14 @@ std::vector<audio::AudioDevice> Cables(const std::vector<audio::AudioDevice>& de
 std::vector<audio::AudioDevice> VirtualCables(const core::Snapshot& snapshot) { return Cables(snapshot.outputs); }
 
 // Why there's no cable, when there isn't one: one is turned off in Windows,
-// or VB-Cable is installed and waits for Windows to restart, or there's none.
+// or VB-Cable was installed since Windows started and waits for a restart, or
+// there's none. VB-Cable installed before then, with no devices, is as none:
+// installing it again brings them back.
 enum class NoCable { kOff, kRestart, kNone };
 
 NoCable WhyNoCable(const core::Snapshot& snapshot) {
   if (!Cables(snapshot.disabled_outputs).empty()) return NoCable::kOff;
-  if (snapshot.vb_cable_installed) return NoCable::kRestart;
+  if (snapshot.vb_cable_pending) return NoCable::kRestart;
   return NoCable::kNone;
 }
 

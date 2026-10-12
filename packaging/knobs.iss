@@ -53,7 +53,8 @@ DisableReadyPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0
+; Windows 10 1803, the first with tar, which unzips VB-Cable's pack.
+MinVersion=10.0.17134
 OutputDir={#OutputDir}
 OutputBaseFilename={#AppName}-{#AppVersion}-setup
 SetupIconFile=..\assets\knobs.ico
@@ -256,11 +257,9 @@ begin
   end;
   if CableInstalled() then
     Exit;
+  // knobs opens after the restart once its files are in (ssPostInstall).
   if VbCableDriverInstalled() then
-  begin
-    VbCableNeedsRestart := True;
-    ResumeAfterRestart();
-  end
+    VbCableNeedsRestart := True
   else
     SuppressibleMsgBox('VB-CABLE wasn''t installed. When {#AppName} starts, it shows how to install it, step by step.',
                        mbInformation, MB_OK, IDOK);
@@ -279,6 +278,9 @@ begin
   // before ssPostInstall.
   if (CurStep = ssInstall) and WizardIsTaskSelected('vbcable') then
     InstallVbCable();
+  // Not before: if Setup fails or is cancelled, nothing would open.
+  if (CurStep = ssPostInstall) and VbCableNeedsRestart then
+    ResumeAfterRestart();
   // A restart that waits for later skips the Start check box, so knobs starts
   // now, and again after the restart.
   if (CurStep = ssDone) and VbCableNeedsRestart and not WizardForm.YesRadio.Checked then

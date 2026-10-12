@@ -51,12 +51,15 @@ class Updater {
     // the network may not be up yet. An install doesn't wait: knobs can
     // restart then, before it sends the mic.
     Clock::duration first = std::chrono::minutes(1);
-    // A version whose download or install fails this many times in a row,
-    // as one whose installer GitHub doesn't have, isn't tried again by
-    // itself: the user hears, and can get it from its page.
+    // A version whose download or install fails this many times in a way
+    // trying again won't help, as one whose installer GitHub doesn't have,
+    // or one changed after it downloaded, isn't tried again by itself: the
+    // user hears, and can get it from its page. No network, or a signature
+    // Windows can't finish checking, is only tried again later.
     int tries = 3;
-    // An update ready this long, with no moment to install by itself since,
-    // as for someone who never opens OBS, gets a notification to install it.
+    // An update that installs by itself and has waited this long, with no
+    // moment to install, as for someone who never opens OBS, or without
+    // downloading, as with no network, gets a notification.
     Clock::duration remind_after = std::chrono::hours(24);
   };
 
@@ -70,9 +73,12 @@ class Updater {
   // How a download went.
   enum class Downloaded {
     kDone,  // Downloaded, and signed as knobs's releases are.
-    // It didn't download, as with no network, or Windows couldn't finish
-    // checking its signature: tried again later.
+    // It didn't download, as with no network or a server error, or Windows
+    // couldn't finish checking its signature: tried again later.
     kFailed,
+    // GitHub doesn't have it, or it's too big to be an installer: tried
+    // again later, up to Options::tries times.
+    kUnusable,
     kRejected,  // It downloaded, but isn't signed as knobs's releases are.
   };
 
@@ -109,16 +115,19 @@ class Updater {
   void Found();
   // The installer for latest() didn't pass the check of its signature just
   // before it ran. `lost`: it was changed, or is gone, and is downloaded
-  // again; otherwise Windows couldn't finish the check, which is tried again
-  // later. Returns what to say about it.
+  // again, which counts toward Options::tries; otherwise Windows couldn't
+  // finish the check, which is tried again later. Returns what to say.
   std::optional<Notice> NotVerified(Clock::time_point now, bool lost);
   // The installer for latest() is starting, which quits knobs. The copy it
   // starts sees settings().tried.
   void Installing();
-  // An update that installs by itself has been ready for
-  // Options::remind_after with no moment to install: says so, once a
-  // version, with a click that installs it now.
+  // An update that installs by itself has waited Options::remind_after:
+  // ready, with no moment to install, it says so, with a click that
+  // installs it now; not downloaded yet, it says the version is out. Once a
+  // version.
   std::optional<Notice> Waiting(Clock::time_point now);
+  // The version Waiting last said so for.
+  const std::optional<update::Version>& reminded() const { return reminded_; }
 
   // What the menu offers when a version newer than this one is out: to
   // install it now, once it's downloaded and installs by itself, else to
@@ -138,8 +147,8 @@ class Updater {
   Clock::time_point NextCheck() const;
   Clock::time_point NextDownload() const;
   // A download or an install of latest() failed: it's tried again later,
-  // up to Options::tries times.
-  std::optional<Notice> Failed(Clock::time_point now);
+  // and if `counts`, up to Options::tries times.
+  std::optional<Notice> Failed(Clock::time_point now, bool counts);
   // latest() isn't tried again by itself.
   std::optional<Notice> GiveUp();
 
@@ -157,6 +166,8 @@ class Updater {
   std::optional<update::Version> ready_;
   std::optional<Clock::time_point> ready_since_;
   std::optional<update::Version> reminded_;
+  // When latest() was first known, this run.
+  std::optional<Clock::time_point> latest_since_;
 };
 
 // What the copy an update's installer started says (main.cpp's --updated):

@@ -255,24 +255,41 @@ TEST(UpdatesWaitForTheNetworkAfterSignIn) {
 }
 
 TEST(UpdatesThatKeepFailingGiveUp) {
-  // A download that fails three times in a row, as for a release whose
-  // installer GitHub doesn't have, isn't tried again by itself: the user
-  // hears, once, and can get it from its page.
+  // A download that fails three times in a way trying again won't help, as
+  // for a release whose installer GitHub doesn't have, isn't tried again by
+  // itself: the user hears, once, and can get it from its page.
   Updater updater = Make({.check = true, .install = true});
   updater.Checked(kStart + 1min, Version{0, 3, 0});
-  CHECK(!updater.DownloadDone(kStart + 2min, Downloaded::kFailed));
-  CHECK(!updater.DownloadDone(kStart + 62min, Downloaded::kFailed));
-  const std::optional<Notice> notice = updater.DownloadDone(kStart + 122min, Downloaded::kFailed);
+  CHECK(!updater.DownloadDone(kStart + 2min, Downloaded::kUnusable));
+  CHECK(!updater.DownloadDone(kStart + 62min, Downloaded::kUnusable));
+  const std::optional<Notice> notice = updater.DownloadDone(kStart + 122min, Downloaded::kUnusable);
   CHECK(notice && notice->kind == Notice::Kind::kUpdateFailed && notice->url == update::ReleasePageUrl({0, 3, 0}));
   CHECK(updater.settings().tried == (Version{0, 3, 0}) && !updater.installable());
   CHECK(updater.Due(kStart + 5h, true) == Job::kNone && updater.offer() == (Updater::Offer{{0, 3, 0}, false}));
   // A newer one is tried afresh.
   CHECK(!updater.Checked(kStart + 25h, Version{0, 3, 1}));
   CHECK(updater.Due(kStart + 25h, true) == Job::kDownload);
-  CHECK(!updater.DownloadDone(kStart + 25h, Downloaded::kFailed));
+  CHECK(!updater.DownloadDone(kStart + 25h, Downloaded::kUnusable));
   CHECK(!updater.DownloadDone(kStart + 26h, Downloaded::kDone));
-  // Done, the count starts over.
-  CHECK(!updater.NotVerified(kStart + 27h, false) && !updater.NotVerified(kStart + 28h, false));
+  // An installer changed after it downloaded counts too: it's downloaded
+  // again.
+  CHECK(!updater.NotVerified(kStart + 27h, true) && !updater.ready());
+  CHECK(updater.Due(kStart + 28h, true) == Job::kDownload);
+  CHECK(!updater.DownloadDone(kStart + 28h, Downloaded::kDone));
+  CHECK(updater.NotVerified(kStart + 29h, true)->kind == Notice::Kind::kUpdateFailed);
+  CHECK(updater.settings().tried == (Version{0, 3, 1}));
+
+  // No network, or a server error, is only tried again an hour later,
+  // however often: a laptop offline for a day still updates once it's back.
+  updater = Make({.check = true, .install = true});
+  updater.Checked(kStart + 1min, Version{0, 3, 0});
+  for (int i = 0; i < 12; ++i) {
+    const Clock::time_point tried = kStart + 2min + i * 1h;
+    CHECK(updater.Due(tried, true) == Job::kDownload);
+    CHECK(!updater.DownloadDone(tried, Downloaded::kFailed));
+    CHECK(updater.Due(tried + 59min, true) == Job::kNone);
+  }
+  CHECK(!updater.settings().tried && updater.installable() == (Version{0, 3, 0}));
 
   // An installer Windows couldn't finish checking, as offline at sign-in, is
   // kept, and checked again an hour later, then only when knobs can restart.
@@ -284,9 +301,9 @@ TEST(UpdatesThatKeepFailingGiveUp) {
   CHECK(updater.Due(kStart + 59min, true) == Job::kNone && updater.NextDeadline(kStart + 59min) == kStart + 1h);
   CHECK(updater.Due(kStart + 1h, false) == Job::kNone && updater.NextDeadline(kStart + 1h) == kStart - 1h + 24h);
   CHECK(updater.Due(kStart + 1h, true) == Job::kInstall);
-  CHECK(!updater.NotVerified(kStart + 1h, false));
-  CHECK(updater.NotVerified(kStart + 2h, false)->kind == Notice::Kind::kUpdateFailed);
-  CHECK(!updater.ready() && updater.Due(kStart + 3h, true) == Job::kNone);
+  // However often.
+  CHECK(!updater.NotVerified(kStart + 1h, false) && !updater.NotVerified(kStart + 2h, false));
+  CHECK(updater.ready() && updater.Due(kStart + 3h, true) == Job::kInstall);
 }
 
 TEST(UpdatesThatWaitADaySaySo) {
@@ -320,6 +337,17 @@ TEST(UpdatesThatWaitADaySaySo) {
   updater.Set(true, true);
   updater.Installing();
   CHECK(!updater.Waiting(kStart + 25h));
+
+  // One that hasn't downloaded in a day, as with no network, says the
+  // version is out, with its page.
+  updater = Make({.check = true, .install = true});
+  updater.Checked(kStart + 1min, Version{0, 3, 0});
+  CHECK(!updater.DownloadDone(kStart + 2min, Downloaded::kFailed));
+  CHECK(!updater.Waiting(kStart + 23h));
+  const std::optional<Notice> out = updater.Waiting(kStart + 1min + 24h);
+  CHECK(out && out->kind == Notice::Kind::kUpdateAvailable && out->url == update::ReleasePageUrl({0, 3, 0}));
+  CHECK(updater.reminded() == (Version{0, 3, 0}));
+  CHECK(!updater.DownloadDone(kStart + 30h, Downloaded::kDone) && !updater.Waiting(kStart + 60h));
 }
 
 TEST(UpdatedCopySaysHowItWent) {
@@ -354,6 +382,23 @@ TEST(UpdatedCopySaysHowItWent) {
   Notifier first_run({.updated = updated});
   CHECK(!first_run.Changed(running, true, Notifier::Clock::now()).show);
   CHECK(first_run.Changed(running, false, Notifier::Clock::now()).show == updated);
+
+  // Both wait, and show in turn: one of a kind, the latest.
+  const Notifier::Clock::time_point now = Notifier::Clock::now();
+  Notifier both({.updated = updated});
+  CHECK(!both.Changed(running, true, now).show);
+  const Notice out = {.kind = Notice::Kind::kUpdateAvailable, .title = "0.3.0 is out"};
+  const Notice newer = {.kind = Notice::Kind::kUpdateAvailable, .title = "0.3.1 is out"};
+  CHECK(!both.Say(out, true).show && !both.Say(newer, true).show && !both.Say(*failed, true).show);
+  CHECK(!both.Tick(true, now + 1min).show && !both.NextDeadline());
+  CHECK(both.Tick(false, now + 2min).show == updated);
+  CHECK(both.NextDeadline() == now + 2min + 8s);
+  CHECK(!both.Tick(false, now + 2min + 7s).show);
+  CHECK(both.Tick(false, now + 2min + 8s).show == newer);
+  // Quiet again, past its time, it waits with no deadline.
+  CHECK(!both.Tick(true, now + 3min).show && !both.NextDeadline());
+  CHECK(both.Tick(false, now + 4min).show == failed);
+  CHECK(!both.Tick(false, now + 5min).show);
 }
 
 }  // namespace

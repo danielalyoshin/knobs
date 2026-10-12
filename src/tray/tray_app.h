@@ -43,7 +43,8 @@ struct UpdateHooks {
   // download, and `cancel` stops either.
   std::function<Result<update::Version>(update::Cancel& cancel)> latest;
   // Downloads `version`'s installer into `file`.
-  std::function<Status(const update::Version& version, const std::filesystem::path& file, update::Cancel& cancel)>
+  std::function<update::DownloadResult(const update::Version& version, const std::filesystem::path& file,
+                                       update::Cancel& cancel)>
       download;
   // Checks an installer's signature (update::CheckReleaseSignature): once
   // it's downloaded, and again before it runs. On the same thread.
@@ -127,8 +128,10 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   TrayApp(const TrayApp&) = delete;
   TrayApp& operator=(const TrayApp&) = delete;
 
-  // Pumps messages until Quit. Returns the exit code.
-  int Run();
+  // Pumps messages until Quit. An Error if knobs quit by itself because its
+  // core couldn't start once an update at start had held it back: what
+  // Create returns otherwise.
+  Status Run();
   // Stops the core, removes the icon and ends Run.
   void Quit();
 
@@ -192,22 +195,29 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // Starts the core, which sends the mic.
   Status StartCore();
   // Starts the core held back for an update at start (Create), once that's
-  // decided, or has taken too long. On a failure, says so and quits.
+  // decided, or has taken too long. On a failure, quits, and Run returns it.
   void ReleaseCore();
+  // Whether the update check is built in: knobs-tray's tests may leave it
+  // out (UpdateHooks).
+  bool HasUpdateCheck() const { return static_cast<bool>(options_.updates.latest); }
 
   // The update check: does what's due, or sets the timer for when it is.
   void RunUpdates();
   // Clears out installers done with, and finds one downloaded before.
   void PrepareUpdates();
+  // Removes every installer but the one for the version that's installable,
+  // in a copy that installs updates. Returns whether that one is there.
+  bool TidyUpdates();
   // Starts a check, a download, or the check of an installer's signature
   // before it runs, on a thread of its own: FinishUpdateJob hears how it
   // went. `asked`: the user asked for the install, so it doesn't wait.
   void StartUpdateJob(Updater::Job job, bool asked = false);
   void FinishUpdateJob();
   void SetUpdates(bool check, bool install);
-  // Update to the version offered, as the menu asked: now, or once the job
-  // running is done.
-  void InstallUpdate();
+  // Updates to `asked`, the version the menu or a notification offered: now,
+  // or once the job running is done. If it's no longer offered, says why.
+  void InstallUpdate(const update::Version& asked);
+  void NotOffered(const update::Version& asked);
   // Stops the job running, and waits a moment for it.
   void StopUpdates();
   std::filesystem::path InstallerFile(const update::Version& version) const;
@@ -239,6 +249,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   bool running_ = false;  // In Run.
   bool in_menu_ = false;
   bool quitting_ = false;
+  // Why knobs quit by itself, for Run to return.
+  std::string failed_;
   core::Settings settings_;
   FirstRunProgress first_run_;
   core::Snapshot snapshot_;
@@ -246,10 +258,9 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   SetupWindow* setup_window_ = nullptr;  // While it's open.
   Notifier notifier_;
   bool restart_tried_ = false;  // Since the core said it needs a restart.
-  // The update check, if there's one, and the settings it was loaded with
-  // otherwise.
-  std::optional<Updater> updater_;
-  UpdateSettings update_settings_;
+  // The update check's plan, and its settings, which are kept even without
+  // the check (HasUpdateCheck).
+  Updater updater_;
   struct UpdateWork;
   std::shared_ptr<UpdateWork> update_work_;
   std::thread update_thread_;

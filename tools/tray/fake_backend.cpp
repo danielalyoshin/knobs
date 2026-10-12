@@ -160,7 +160,7 @@ const std::vector<FakeScenario>& FakeScenarios() {
        [](FakeWorld& world, FakeScript&) {
          MonitorToDefault(world);
          NoCable(world);
-         world.devices.vb_cable_installed = true;
+         world.devices.vb_cable_pending = true;
        }},
       {"not-a-cable", "the OBS profile monitors to headphones",
        [](FakeWorld& world, FakeScript&) {

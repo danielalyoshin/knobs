@@ -20,9 +20,9 @@ struct Endpoints {
   std::vector<AudioDevice> outputs;  // Playback.
   // Playback devices turned off in Windows' Sound settings.
   std::vector<AudioDevice> disabled_outputs;
-  // VB-Cable's driver is installed: it's among Windows' installed apps. Its
-  // devices may still wait for Windows to restart.
-  bool vb_cable_installed = false;
+  // VB-Cable's driver was installed since Windows last started: it's among
+  // Windows' installed apps, and its devices may wait for a restart.
+  bool vb_cable_pending = false;
   // The default communications recording device, which win-wasapi records from
   // for a mic set to "default" (docs/design.md, Mic candidates). Empty if
   // there's none.
@@ -38,7 +38,8 @@ Endpoints ListEndpoints();
 // Hears from Windows whenever an audio endpoint is added, removed, enabled,
 // disabled, plugged in or unplugged, or a default device changes
 // (IMMNotificationClient). Property changes, which some drivers send all the
-// time, are left out.
+// time, are left out. Also whenever Windows' installed apps change, as when
+// VB-Cable's driver installs (Endpoints::vb_cable_pending).
 class DeviceWatch {
  public:
   // `on_change` runs on a thread of Windows' audio service, possibly several

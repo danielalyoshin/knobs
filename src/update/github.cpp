@@ -114,11 +114,15 @@ Status Exchange(const wchar_t* verb, std::string_view url, bool follow_redirects
 }  // namespace
 
 void Cancel::Stop() {
-  std::lock_guard lock(mutex_);
-  stopped_ = true;
-  // The request first, then its connection and session.
-  for (auto it = handles_.rbegin(); it != handles_.rend(); ++it) WinHttpCloseHandle(*it);
-  handles_.clear();
+  std::vector<void*> handles;
+  {
+    std::lock_guard lock(mutex_);
+    stopped_ = true;
+    handles.swap(handles_);
+  }
+  // Outside the lock, which the request's thread needs to unwind: the
+  // request first, then its connection and session.
+  for (auto it = handles.rbegin(); it != handles.rend(); ++it) WinHttpCloseHandle(*it);
 }
 
 bool Cancel::stopped() const {
@@ -166,9 +170,14 @@ Result<Version> FindLatestRelease(Cancel& cancel) {
   return *latest;
 }
 
-Status Download(std::string_view url, const std::filesystem::path& file, uint64_t max_bytes, Cancel& cancel) {
-  return Exchange(L"GET", url, true, cancel, [&](HINTERNET request, DWORD status) {
-    if (status != HTTP_STATUS_OK) return Status(Error{std::format("GitHub answered {} for {}.", status, url)});
+DownloadResult Download(std::string_view url, const std::filesystem::path& file, uint64_t max_bytes, Cancel& cancel) {
+  // Trying again won't help.
+  bool unusable = false;
+  const Status got = Exchange(L"GET", url, true, cancel, [&](HINTERNET request, DWORD status) {
+    if (status != HTTP_STATUS_OK) {
+      unusable = status == HTTP_STATUS_NOT_FOUND || status == HTTP_STATUS_GONE;
+      return Status(Error{std::format("GitHub answered {} for {}.", status, url)});
+    }
     const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
                                    nullptr);
     if (out == INVALID_HANDLE_VALUE) {
@@ -186,6 +195,7 @@ Status Download(std::string_view url, const std::filesystem::path& file, uint64_
       if (read == 0) break;
       total += read;
       if (total > max_bytes) {
+        unusable = true;
         error = Error{std::format("{} is bigger than {} MB, which is too big for an installer.", url,
                                   max_bytes / (1024 * 1024))};
         break;
@@ -203,6 +213,9 @@ Status Download(std::string_view url, const std::filesystem::path& file, uint64_
     }
     return Status(Ok{});
   });
+  if (got) return {.outcome = DownloadResult::Outcome::kDone};
+  return {.outcome = unusable ? DownloadResult::Outcome::kUnusable : DownloadResult::Outcome::kFailed,
+          .error = got.error()};
 }
 
 }  // namespace knobs::update

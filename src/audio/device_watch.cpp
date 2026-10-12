@@ -5,9 +5,11 @@
 #include <mmdeviceapi.h>
 #include <wrl/client.h>
 
+#include <cstdint>
 #include <format>
 #include <iterator>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 #include "util/win_strings.h"
@@ -67,28 +69,48 @@ std::vector<AudioDevice> Devices(IMMDeviceEnumerator* enumerator, EDataFlow flow
   return devices;
 }
 
-// Whether VB-Cable's setup has installed its driver: it adds itself to
+constexpr wchar_t kUninstallKey[] = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+
+uint64_t Ticks(const FILETIME& time) {
+  return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+}
+
+// Whether VB-Cable's setup has installed its driver since Windows last
+// started, when its devices may wait for a restart. It adds itself to
 // Windows' installed apps as "VBCABLE, The Virtual Audio Cable", in the
-// 64-bit registry, which every user can read.
-bool VbCableInstalled() {
+// 64-bit registry, which every user can read. Installed before, a restart
+// won't bring its devices back.
+bool VbCablePending() {
   HKEY uninstall = nullptr;
-  if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", 0,
-                    KEY_READ | KEY_WOW64_64KEY, &uninstall) != ERROR_SUCCESS) {
+  if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kUninstallKey, 0, KEY_READ | KEY_WOW64_64KEY, &uninstall) != ERROR_SUCCESS) {
     return false;
   }
-  bool found = false;
+  FILETIME now = {};
+  GetSystemTimeAsFileTime(&now);
+  // In FILETIME's 100 ns.
+  const uint64_t started = Ticks(now) - GetTickCount64() * 10'000;
+  bool pending = false;
   wchar_t name[256];
-  for (DWORD i = 0; !found; ++i) {
+  for (DWORD i = 0; !pending; ++i) {
     DWORD length = static_cast<DWORD>(std::size(name));
     if (RegEnumKeyExW(uninstall, i, name, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
     wchar_t display[256] = {};
     DWORD size = sizeof(display);
-    if (RegGetValueW(uninstall, name, L"DisplayName", RRF_RT_REG_SZ, nullptr, display, &size) == ERROR_SUCCESS) {
-      found = AsciiLower(ToUtf8(std::wstring_view(display))).starts_with("vbcable");
+    if (RegGetValueW(uninstall, name, L"DisplayName", RRF_RT_REG_SZ, nullptr, display, &size) != ERROR_SUCCESS ||
+        !AsciiLower(ToUtf8(std::wstring_view(display))).starts_with("vbcable")) {
+      continue;
     }
+    HKEY entry = nullptr;
+    if (RegOpenKeyExW(uninstall, name, 0, KEY_READ, &entry) != ERROR_SUCCESS) continue;
+    FILETIME written = {};
+    if (RegQueryInfoKeyW(entry, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                         nullptr, &written) == ERROR_SUCCESS) {
+      pending = Ticks(written) > started;
+    }
+    RegCloseKey(entry);
   }
   RegCloseKey(uninstall);
-  return found;
+  return pending;
 }
 
 // Forwards every notification to a callback, until disconnected. Windows
@@ -144,7 +166,31 @@ class NotificationClient final : public IMMNotificationClient {
 struct DeviceWatch::State {
   ComPtr<IMMDeviceEnumerator> enumerator;
   NotificationClient* client = nullptr;  // One reference, ours.
+  // Installed apps changing, for VB-Cable's driver, whose devices may not
+  // appear until a restart (VbCablePending).
+  HKEY uninstall = nullptr;
+  HANDLE changed = nullptr;
+  HANDLE stop = nullptr;
+  std::thread apps;
 };
+
+namespace {
+
+// Calls `on_change` whenever an installed app is added or changed, until
+// `stop` is set.
+void WatchInstalledApps(HKEY uninstall, HANDLE changed, HANDLE stop, const std::function<void()>& on_change) {
+  for (;;) {
+    if (RegNotifyChangeKeyValue(uninstall, TRUE, REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET, changed, TRUE) !=
+        ERROR_SUCCESS) {
+      return;
+    }
+    const HANDLE handles[] = {stop, changed};
+    if (WaitForMultipleObjects(2, handles, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) return;
+    on_change();
+  }
+}
+
+}  // namespace
 
 Endpoints ListEndpoints() {
   Endpoints endpoints;
@@ -153,7 +199,7 @@ Endpoints ListEndpoints() {
   endpoints.mics = Devices(enumerator.Get(), eCapture, DEVICE_STATE_ACTIVE);
   endpoints.outputs = Devices(enumerator.Get(), eRender, DEVICE_STATE_ACTIVE);
   endpoints.disabled_outputs = Devices(enumerator.Get(), eRender, DEVICE_STATE_DISABLED);
-  endpoints.vb_cable_installed = VbCableInstalled();
+  endpoints.vb_cable_pending = VbCablePending();
   ComPtr<IMMDevice> default_mic;
   if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, eCommunications, &default_mic))) {
     endpoints.default_mic = DeviceId(default_mic.Get());
@@ -165,11 +211,21 @@ Result<std::unique_ptr<DeviceWatch>> DeviceWatch::Start(std::function<void()> on
   auto state = std::make_unique<State>();
   state->enumerator = CreateEnumerator();
   if (!state->enumerator) return Error{"Couldn't reach Windows' list of audio devices."};
-  state->client = new NotificationClient(std::move(on_change));
+  state->client = new NotificationClient(on_change);
   const HRESULT hr = state->enumerator->RegisterEndpointNotificationCallback(state->client);
   if (FAILED(hr)) {
     state->client->Release();
     return Error{std::format("Couldn't listen for audio devices coming and going (0x{:08X}).", static_cast<uint32_t>(hr))};
+  }
+  // Without it, VB-Cable installed by hand while knobs runs is only seen
+  // with the next change of devices.
+  if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kUninstallKey, 0, KEY_NOTIFY | KEY_WOW64_64KEY, &state->uninstall) ==
+      ERROR_SUCCESS) {
+    state->changed = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    state->stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (state->changed && state->stop) {
+      state->apps = std::thread(WatchInstalledApps, state->uninstall, state->changed, state->stop, std::move(on_change));
+    }
   }
   return std::unique_ptr<DeviceWatch>(new DeviceWatch(std::move(state)));
 }
@@ -181,6 +237,13 @@ DeviceWatch::~DeviceWatch() {
   // A notification already running finishes first: Disconnect waits for it.
   state_->client->Disconnect();
   state_->client->Release();
+  if (state_->apps.joinable()) {
+    SetEvent(state_->stop);
+    state_->apps.join();
+  }
+  if (state_->stop) CloseHandle(state_->stop);
+  if (state_->changed) CloseHandle(state_->changed);
+  if (state_->uninstall) RegCloseKey(state_->uninstall);
 }
 
 }  // namespace knobs::audio

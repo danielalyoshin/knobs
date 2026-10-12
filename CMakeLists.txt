@@ -46,6 +46,7 @@ add_library(knobs_runtime STATIC
   src/util/app_dirs.cpp
   src/util/json.cpp
   src/util/pick_folder.cpp
+  src/util/process.cpp
   src/util/text_file.cpp
   src/util/win_strings.cpp
 )
@@ -63,7 +64,7 @@ add_library(knobs_update STATIC
   src/update/signature.cpp
 )
 target_include_directories(knobs_update PUBLIC src)
-target_link_libraries(knobs_update PUBLIC knobs_options PRIVATE winhttp wintrust crypt32)
+target_link_libraries(knobs_update PUBLIC knobs_options PRIVATE knobs_runtime winhttp wintrust crypt32)
 
 # The project's version, for the code and knobs.exe's version resource.
 configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)

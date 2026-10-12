@@ -43,6 +43,7 @@
 #include "tray/single_instance.h"
 #include "tray/tray_app.h"
 #include "util/app_dirs.h"
+#include "util/process.h"
 #include "util/win_strings.h"
 
 namespace {
@@ -67,18 +68,11 @@ std::filesystem::path ExePath() {
 }
 
 Status StartCopy(const std::filesystem::path& exe, std::wstring_view arguments) {
-  std::wstring command = std::format(L"\"{}\" {}", exe.native(), arguments);
-  STARTUPINFOW startup = {sizeof(startup)};
-  PROCESS_INFORMATION process = {};
   // In the exe's folder: libobs has moved this process's working directory
   // into its runtime copy.
-  const std::wstring folder = exe.parent_path().native();
-  if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, folder.c_str(), &startup,
-                      &process)) {
-    return Error{std::format("Couldn't start {} again: {}", kDisplayName, DescribeWinError(GetLastError()))};
+  if (const Status started = StartProcess(exe, arguments, exe.parent_path()); !started) {
+    return Error{std::format("Couldn't start {} again: {}", kDisplayName, started.error())};
   }
-  CloseHandle(process.hThread);
-  CloseHandle(process.hProcess);
   return Ok{};
 }
 
@@ -104,18 +98,11 @@ bool InstalledByInstaller(const std::filesystem::path& folder) {
 Status StartInstaller(const std::filesystem::path& installer, const std::filesystem::path& logs) {
   std::error_code ec;
   std::filesystem::create_directories(logs, ec);
-  std::wstring command =
-      std::format(L"\"{}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /update=1 /LOG=\"{}\"", installer.native(),
-                  (logs / L"update.txt").native());
-  STARTUPINFOW startup = {sizeof(startup)};
-  PROCESS_INFORMATION process = {};
-  const std::wstring folder = installer.parent_path().native();
-  if (!CreateProcessW(installer.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, folder.c_str(),
-                      &startup, &process)) {
-    return Error{std::format("Couldn't start {}: {}", ToUtf8(installer.filename()), DescribeWinError(GetLastError()))};
+  const std::wstring arguments =
+      std::format(L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /update=1 /LOG=\"{}\"", (logs / L"update.txt").native());
+  if (const Status started = StartProcess(installer, arguments, installer.parent_path()); !started) {
+    return Error{std::format("Couldn't start {}: {}", ToUtf8(installer.filename()), started.error())};
   }
-  CloseHandle(process.hThread);
-  CloseHandle(process.hProcess);
   return Ok{};
 }
 
@@ -211,7 +198,11 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     tray::ShowStartupError(app.error());
     return 1;
   }
-  return (*app)->Run();
+  if (const Status ran = (*app)->Run(); !ran) {
+    tray::ShowStartupError(ran.error());
+    return 1;
+  }
+  return 0;
 }
 
 }  // namespace

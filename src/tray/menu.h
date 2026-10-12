@@ -72,6 +72,8 @@ struct Menu {
   // device for Settings::cable.
   std::vector<std::string> mics;
   std::vector<audio::AudioDevice> cables;
+  // The version Get… and Update to are for, as the menu showed it.
+  std::optional<update::Version> update;
 };
 
 // The single line that says what knobs is doing, in the chain's short form:

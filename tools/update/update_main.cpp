@@ -119,11 +119,13 @@ int wmain(int argc, wchar_t** argv) {
     std::error_code ec;
     fs::create_directories(options->out, ec);
     const std::string url = update::InstallerUrl(*options->download);
-    const Status got = update::Download(url, file, update::kMaxInstallerBytes, cancel);
+    const update::DownloadResult got = update::Download(url, file, update::kMaxInstallerBytes, cancel);
     Check(got.ok(), "download",
-          got ? std::format("{} ({:.1f} MB)", ToUtf8(file), fs::file_size(file, ec) / (1024.0 * 1024.0))
-              : got.error());
-    if (got) Signature(file);
+          got.ok() ? std::format("{} ({:.1f} MB)", ToUtf8(file), fs::file_size(file, ec) / (1024.0 * 1024.0))
+          : got.outcome == update::DownloadResult::Outcome::kUnusable
+              ? got.error + " Trying again won't help."
+              : got.error);
+    if (got.ok()) Signature(file);
   }
   if (options->verify) Signature(*options->verify);
   Print(AnyFailed() ? "FAIL\n" : "PASS\n");

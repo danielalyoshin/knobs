@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -44,8 +45,25 @@ Result<Version> FindLatestRelease(Cancel& cancel);
 // The most an installer of knobs's can be: Download stops beyond it.
 inline constexpr uint64_t kMaxInstallerBytes = 64 * 1024 * 1024;
 
+// How a download went.
+struct DownloadResult {
+  enum class Outcome {
+    kDone,
+    // No network, an answer such as a server error, or it was stopped: it
+    // may work later.
+    kFailed,
+    // GitHub doesn't have it, or it's bigger than an installer can be.
+    kUnusable,
+  };
+
+  Outcome outcome = Outcome::kFailed;
+  std::string error;  // Why it didn't download, as a sentence.
+
+  bool ok() const { return outcome == Outcome::kDone; }
+};
+
 // Downloads `url` into `file`, following redirects, as long as it's no bigger
 // than `max_bytes`. Only HTTPS.
-Status Download(std::string_view url, const std::filesystem::path& file, uint64_t max_bytes, Cancel& cancel);
+DownloadResult Download(std::string_view url, const std::filesystem::path& file, uint64_t max_bytes, Cancel& cancel);
 
 }  // namespace knobs::update

@@ -376,7 +376,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   // What an update did waits for the first run, as Say's notices do.
   if (first && !update.show && options_.updated) {
     if (quiet) {
-      held_ = options_.updated;
+      Hold(*options_.updated);
     } else {
       Show(*options_.updated, quiet, update);
     }
@@ -384,7 +384,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   // OBS in another session, unless something above was said: that says more
   // about the mic, and the menu says this too.
   if (other_opened && !update.show) Show(OtherObs(snapshot), quiet, update);
-  ShowHeld(quiet, update);
+  ShowHeld(quiet, now, update);
   if (!snapshot.obs.root.empty()) obs_version_ = snapshot.obs.version;
   return update;
 }
@@ -392,7 +392,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
 Notifier::Update Notifier::Say(Notice notice, bool quiet) {
   Update update;
   if (quiet) {
-    held_ = std::move(notice);
+    Hold(std::move(notice));
   } else {
     Show(std::move(notice), quiet, update);
   }
@@ -407,7 +407,7 @@ Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   }
   Due(mic_, Kind::kMicMissing, quiet, now, update);
   Due(cable_, Kind::kCableMissing, quiet, now, update);
-  ShowHeld(quiet, update);
+  ShowHeld(quiet, now, update);
   return update;
 }
 
@@ -421,6 +421,7 @@ std::optional<Notifier::Clock::time_point> Notifier::NextDeadline() const {
   if (cable_ && !cable_->due && snapshot_.state == State::kCableMissing) {
     consider(cable_->since + options_.device_grace);
   }
+  if (!held_.empty() && held_after_) consider(*held_after_);
   return next;
 }
 
@@ -474,10 +475,18 @@ void Notifier::Show(Notice notice, bool quiet, Update& update) {
   update.hide = false;
 }
 
-void Notifier::ShowHeld(bool quiet, Update& update) {
-  if (quiet || !held_ || update.show) return;
-  Show(std::move(*held_), quiet, update);
-  held_.reset();
+void Notifier::Hold(Notice notice) {
+  std::erase_if(held_, [&notice](const Notice& old) { return old.kind == notice.kind; });
+  held_.push_back(std::move(notice));
+}
+
+void Notifier::ShowHeld(bool quiet, Clock::time_point now, Update& update) {
+  // Past, it's no deadline: while quiet, the timer would keep firing.
+  if (held_after_ && now >= *held_after_) held_after_.reset();
+  if (quiet || held_.empty() || update.show || held_after_) return;
+  Show(std::move(held_.front()), quiet, update);
+  held_.erase(held_.begin());
+  held_after_ = now + options_.held_apart;
 }
 
 void Notifier::Hide(Notice::Kind kind, Update& update) {

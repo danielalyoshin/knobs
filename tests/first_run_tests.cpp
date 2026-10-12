@@ -381,7 +381,7 @@ TEST(CableThatsOffOrWaitsForARestart) {
   // VB-Cable is installed, but its devices wait for Windows to restart, as
   // they may after its setup or the installer's: knobs opens again after it.
   core::Snapshot restart = none;
-  restart.vb_cable_installed = true;
+  restart.vb_cable_pending = true;
   first_run = ObsUser(restart);
   view = first_run.View(restart);
   CHECK(view.page == Page::kCable && view.waiting);
