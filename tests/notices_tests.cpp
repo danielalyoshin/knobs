@@ -716,9 +716,8 @@ TEST(NoticesSayWhatStopsKnobs) {
     world.config.audio.monitoring_device_id = "default";
   });
   CHECK(notice.title == "No cable chosen" && notice.page == FirstRunPage::kCable);
-  CHECK(notice.text == std::format("OBS now monitors to its default device, usually speakers, so {} stopped. Click "
-                                    "to choose a cable.",
-                                    kDisplayName));
+  CHECK(notice.text ==
+        std::format("{} needs a virtual cable to send your mic to, so it stopped. Click to choose one.", kDisplayName));
   notice = after([](FakeWorld& world) {
     world.config = tools::DefaultWorld().config;
     world.config_error = "OBS's settings are gone.";

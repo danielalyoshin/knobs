@@ -165,8 +165,8 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
         case SetupNeed::kCable:
           notice.page = FirstRunPage::kCable;
           notice.title = "No cable chosen";
-          notice.text = std::format("OBS now monitors to its default device, usually speakers, so {} stopped. "
-                                    "Click to choose a cable.",
+          // The fix, not OBS's setting: a cable chosen in knobs ends it.
+          notice.text = std::format("{} needs a virtual cable to send your mic to, so it stopped. Click to choose one.",
                                     kDisplayName);
           return notice;
         case SetupNeed::kNone:

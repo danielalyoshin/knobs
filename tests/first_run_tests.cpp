@@ -293,7 +293,7 @@ TEST(CableWhenOBSMonitorsToTheDefaultDevice) {
   FirstRun first_run = ObsUser(snapshot);
   const PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kCable && !view.waiting);
-  CHECK(Contains(view.content, "default playback device, which is usually your speakers"));
+  CHECK(Contains(view.content, "doesn't send it where OBS monitors it, your default playback device"));
   CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch"}));
   CHECK(view.default_choice == kChoiceFirst);
   const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);

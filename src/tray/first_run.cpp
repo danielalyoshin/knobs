@@ -675,8 +675,11 @@ PageView Cable(const core::Snapshot& snapshot) {
   }
   view.instruction = std::format("Where should {} send your mic?", kDisplayName);
   if (snapshot.state == State::kNeedsSetup && snapshot.setup == SetupNeed::kCable) {
-    view.content = "OBS monitors your mic to its default playback device, which is usually your speakers. Choose "
-                   "a virtual cable instead.";
+    // knobs follows OBS's monitoring device until a cable is chosen here,
+    // but not to the default device.
+    view.content = std::format("Choose the virtual cable {0} sends your mic to. {0} doesn't send it where OBS monitors "
+                               "it, your default playback device, which is usually your speakers.",
+                               kDisplayName);
   } else if (snapshot.state == State::kCableMissing) {
     view.content =
         std::format("{} isn't connected. Choose another cable.", EscapeMarkup(ShortDeviceName(sends_to.name)));
