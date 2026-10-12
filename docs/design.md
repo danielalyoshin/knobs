@@ -58,6 +58,7 @@ flowchart TB
 - **Live chain** (`src/audio/`): `LiveChain` loads the mic through OBS's loader and monitors it to the cable. `DeviceWatch` hears audio devices come and go.
 - **Always-on core** (`src/core/`): `Controller` decides what runs, `Core` runs it and libobs on one thread, and `ObsWatch` tells whether OBS is running.
 - **Tray app** (`src/tray/`, with `src/main.cpp` as the entry point): the icon, menu, first run and notifications, each built as data from a snapshot of the core so that unit tests cover every state.
+- **Update check** (`src/update/`, run by the tray): off until the user turns it on. It asks GitHub for the latest release, and can download its installer, check its signature and run it (Updates).
 
 The dev tools in `tools/` run each layer on its own, from `knobs-smoke` (the runtime) to `knobs-tray` (the tray on a fake core).
 
@@ -213,11 +214,12 @@ The tray app shows the core's state and sends it commands. The menu and notifica
 
 The status line names the state and the chain in short form, such as `Mic/Aux › 4 filters › CABLE In 16ch` or `Mic missing: …`, counting only the filters that run. The icon's tooltip repeats it, and the first run and notifications give the chain in full.
 
-The menu is native (`TrackPopupMenuEx`): the status line, Pause/Resume, Mic ▸, Cable ▸, Re-import from OBS, Pause while OBS is open, Start with Windows, Setup…, Open log folder, About and Quit.
+The menu is native (`TrackPopupMenuEx`): the status line, Pause/Resume, Mic ▸, Cable ▸, Re-import from OBS, Pause while OBS is open, Start with Windows, Automatically check for new versions, Automatically update, Setup…, Open log folder, About and Quit.
 
 - When something needs the user, the item after the status line is the fix, in bold, such as Choose a cable….
 - Mic ▸ and Cable ▸ start with "Same as OBS" when OBS has one mic or monitors to a cable. Any other pick is knobs's own and survives re-imports.
 - Cables are recognized by name: VB-Audio's (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. A VB-Audio cable's recording side follows from its name, so CABLE In 16ch records from CABLE Output.
+- When a check has found a newer version, the item after the status lines offers it: Get knobs 0.3.0… opens its page, or once an update has downloaded, Update to knobs 0.3.0 installs it now (Updates).
 - Menus follow the taskbar's dark mode, through uxtheme's `SetPreferredAppMode`.
 
 Windows keeps a user's programs running when another user signs in, and the cable mixes every program's audio. So when OBS runs in another Windows account, knobs says under the status line that it may also send audio to the cable, and runs on.
@@ -226,9 +228,9 @@ Windows keeps a user's programs running when another user signs in, and the cabl
 
 The first run shows its pages in the setup window (below). It offers two doors, "I set up my mic in OBS" and "I'm new to OBS", each noting what knobs found, and the one that fits is the default.
 
-- The first door asks only what it needs: anything that blocks the rest, such as OBS not found, then which mic, when there are several, which cable, when OBS doesn't monitor to a connected one, and the warnings that change what to expect. With no cable installed, it shows how to install VB-Cable, step by step, and moves on when one appears.
+- The first door asks only what it needs: anything that blocks the rest, such as OBS not found, then which mic, when there are several, which cable, when OBS doesn't monitor to a connected one, and the warnings that change what to expect. With no cable installed, it shows how to install VB-Cable, step by step, and moves on when one appears. With a cable that's turned off in Windows' Sound settings, it says how to turn it on, and opens the settings. With VB-Cable installed but none of its devices there, it says to restart Windows, and has Windows open knobs again after the restart, with `--resume-setup` in HKCU's RunOnce key, as the installer does (The installer and VB-Cable).
 - The second door lists five steps in OBS, in OBS's own words, which are the same in 32.2.2 and 33.0, and suggests no filters or settings, since OBS is the editor. When OBS closes with filters on the mic, the first run carries on with the first door.
-- The last page shows the chain, which device other apps should use and where the tray icon is, with Start with Windows checked.
+- The last page shows the chain, which device other apps should use and where the tray icon is, with Start with Windows checked. It also asks whether knobs should automatically check for new versions, and automatically update when one is out, which is only offered in a copy the installer installed and needs the check. Both are off until the user turns them on.
 
 A choice takes effect when the core's next snapshot carries it, and the page waits for that. knobs reopens an unfinished first run where it stopped, but not when Windows starts it at sign-in.
 
@@ -257,7 +259,7 @@ flowchart TB
 
 ### Notifications and badges
 
-Notifications are `Shell_NotifyIcon` balloons that say what happened, then what knobs does or what to do, and a click opens the fix. They cover a mic or cable missing for 5 s (so a power cycle stays quiet), a chain that stopped sending audio, a chain changed in OBS, a filter knobs can't run, an OBS update, OBS open in another Windows account, and any other problem that stops knobs. A normal start gets none, and neither does OBS opening and closing without changes. Problems found at start do, since a knobs started at sign-in would otherwise stop silently. A problem's notification is taken down when the problem ends.
+Notifications are `Shell_NotifyIcon` balloons that say what happened, then what knobs does or what to do, and a click opens the fix. They cover a mic or cable missing for 5 s (so a power cycle stays quiet), a chain that stopped sending audio, a chain changed in OBS, a filter knobs can't run, an OBS update, OBS open in another Windows account, and any other problem that stops knobs. With the update check on, they also say when a new version is out and when knobs updated itself, or couldn't, and a click opens the version's page. A normal start gets none, and neither does OBS opening and closing without changes. Problems found at start do, since a knobs started at sign-in would otherwise stop silently. A problem's notification is taken down when the problem ends.
 
 Do Not Disturb hides notifications, so the icon shows the state too: a pause badge while paused, and a "!" badge while the cable gets no mic for a reason worth a notification. The badges are discs in the logo's colors, a white "!" on red (`#E5484D`) and white bars on graphite (`#4A4C52`), drawn at run time at 7/16 of the icon's size, with whole-pixel strokes so they stay crisp.
 
@@ -267,11 +269,27 @@ A restart the core needs, for an OBS update or a new audio format, happens at on
 
 Settings live in `%AppData%\knobs\settings.ini`, written whole through a temporary file. Pause isn't saved, so knobs runs after a cold boot. A picked OBS install or settings folder that stops working stays picked: knobs shows the error and offers the way back, but changes nothing by itself.
 
-Start with Windows is a value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that starts `knobs.exe --startup`. One copy runs per Windows session, holding the mutex `Local\knobs.tray`, and starting another opens the running one's menu.
+Start with Windows is a value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` that starts `knobs.exe --startup`. One copy runs per Windows session, holding the mutex `Local\knobs.tray`, and starting another opens the running one's menu, unless Windows or an installer started it.
 
 ### Portable mode
 
-A `portable_mode.txt` file beside `knobs.exe`, as with OBS, makes knobs keep all of its state, the runtime copy included, in a `data` folder beside the exe (`AppDirs`). It still reads OBS's settings from `%AppData%`. The portable zip ships with the file, and the installer installs for the current user only, with no admin rights.
+A `portable_mode.txt` file beside `knobs.exe`, as with OBS, makes knobs keep all of its state, the runtime copy included, in a `data` folder beside the exe (`AppDirs`). It still reads OBS's settings from `%AppData%`. The portable zip ships with the file, and the installer installs for the current user only, with no admin rights. A portable copy gets the update check, but not updating by itself, since it has no installer: it says where to get the new version.
+
+### Updates
+
+knobs makes no network connection until the user turns on the update check, on the first run's last page or in the menu. `Updater` (`src/tray/updates.h`) decides what's due, with no threads or clock of its own, as the controller does, so the unit tests run it on made-up times. The tray runs what it asks for on a thread of its own, which closes its WinHTTP handles to stop at once when knobs quits.
+
+- **The check** asks GitHub for `github.com/danielalyoshin/knobs/releases/latest` with redirects off, and reads the version from where it redirects, `…/releases/tag/v0.3.0`: one request, with no API, no token and nothing about the PC. GitHub's latest release is never a draft or a pre-release. The first check waits a minute after knobs starts, since the network may not be up at sign-in, then they come once a day, and an hour after one that got no answer. The settings file keeps when the last one was answered and what it found, so a restart doesn't check again, and a version is news only once: a notification, and the menu's item, which opens the version's page.
+- **Updating by itself** is only for a copy the installer installed: one whose folder is the `InstallLocation` of the installer's entry in HKCU's Uninstall key. It downloads the release's installer, as release.yml names it, into `%LocalAppData%\knobs\updates`, and checks its signature before keeping it, and again before it runs (`CheckReleaseSignature`). The signature must be one Windows trusts, revocation included, by a certificate whose common name is Daniel Alyoshin, chaining to Microsoft Identity Verification Root Certificate Authority 2020, with the extended key usage Azure Artifact Signing gives every certificate of this identity validation. Its certificates last three days, so no one certificate can be pinned, but that usage is the same on all of them, as in the v0.1.1 and v0.2.0 installers. A download that isn't signed so is never run, and the user hears that the update didn't happen.
+- **Installing** restarts knobs, so it waits for a moment when knobs isn't sending the mic anyway: while OBS is open, the mic or cable is missing, or a problem stops knobs, or when knobs next starts with it downloaded. Not while the user has paused it, which a new copy wouldn't be, nor while the menu, the setup window or a dialog is open. The menu's Update to knobs 0.3.0 installs it at once. knobs runs the installer very silent with `/update=1`, and quits. The installer closes any copy left, installs, and starts knobs again with `--updated` as it ends, whether the update worked or not, and the new copy says which. A version that was tried isn't tried again by itself.
+
+`knobs-update` runs each part on its own, against GitHub: the check, a download with its signature check, and the signature check of any file.
+
+### The installer and VB-Cable
+
+With no virtual cable on the PC, the installer offers to install VB-Cable, VB-Audio's donationware cable, as a task that's checked. A virtual cable is recognized as the tray recognizes one, from Windows' list of playback devices in the registry, on or turned off. The installer carries VB-Audio's driver pack unchanged, which `package.ps1` downloads and checks against a fixed SHA-256, unzips it with Windows' own `tar`, and runs VB-Audio's own setup in its window, so the user sees it's VB-Audio's software: Windows asks to let it install its driver, and the user clicks Install Driver. VB-Audio allows this, as long as the user can tell VB-Cable is theirs, donationware, from www.vb-cable.com, which the tasks page and `NOTICE.txt` say. An update, or any other silent install, never runs it.
+
+VB-Audio's setup says to restart Windows, but its devices don't wait for one: in Windows Sandbox, CABLE Input, CABLE In 16ch and CABLE Output were active within 5 s of the setup closing. So the installer waits up to 15 s for a cable, and then starts knobs as usual, whose first run finds it. If VB-Cable's driver is installed but no cable appears, it asks to restart Windows, and has knobs open after it to carry on, with a RunOnce entry; if the user restarts later, knobs starts now, and its first run says to restart. If the user declined Windows' prompt, or closed the setup without installing, it says VB-Cable wasn't installed, and knobs's first run shows how to install it by hand. Uninstalling knobs leaves VB-Cable, which other apps may use. The portable zip doesn't carry it.
 
 ## Compatibility
 

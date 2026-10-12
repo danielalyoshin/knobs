@@ -35,12 +35,12 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 
 ## Capabilities and Constraints
 
-- Built: loading libobs from a private copy of the OBS install, importing the mic and its filters, the live path into the cable, the comparison with OBS, and the tray app with its first run, notifications and icon badges. Released on GitHub; open work is tracked in GitHub issues.
+- Built: loading libobs from a private copy of the OBS install, importing the mic and its filters, the live path into the cable, the comparison with OBS, the tray app with its first run, notifications and icon badges, and an update check that's off until the user turns it on. Released on GitHub; open work is tracked in GitHub issues.
 - No custom DSP and no "improvements". No filter editing in v1, since users tune in OBS. No VST filters in v1. Windows only in v1.
 - Plain Win32 UI with no UI framework. A small exe that ships no libobs. Target: under 1% CPU and a small memory footprint.
 - Terms: mic, filter chain, virtual cable (or cable), OBS profile, scene collection, monitoring device.
 - The tray menu, first run and tray icon are designed in docs/design.md (The tray app).
-- Distribution: an installer (for the current user, no admin rights) and a portable zip that keeps its data beside the exe, from GitHub releases. Releases are signed with Azure Artifact Signing. SmartScreen may still warn on first run until a new release has built up reputation.
+- Distribution: an installer (for the current user, no admin rights) and a portable zip that keeps its data beside the exe, from GitHub releases. With no virtual cable on the PC, the installer offers VB-Cable, running VB-Audio's own setup. Installed copies can update themselves, once the user turns that on. Releases are signed with Azure Artifact Signing. SmartScreen may still warn on first run until a new release has built up reputation.
 
 ## Brand Commitments
 

@@ -68,7 +68,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 |:---|:---|
 | Windows | 64-bit |
 | OBS Studio | 32.2 to 33.x, tested on 32.2.2 and 33.0.0-rc1. knobs finds an install from OBS's installer by itself; for a Steam or portable OBS, you choose its folder. |
-| Virtual cable | [VB-Cable](https://vb-audio.com/Cable/), or another one: knobs recognizes VB-Audio's cables (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. |
+| Virtual cable | [VB-Cable](https://vb-audio.com/Cable/), which knobs's installer can install, or another one: knobs recognizes VB-Audio's cables (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. |
 | Mic filters | OBS's built-in audio filters: Noise Suppression (RNNoise or Speex), Noise Gate, Expander, Upward Compressor, Compressor, Limiter, Gain, 3-Band Equalizer and Invert Polarity. [Known limits](#known-limits) has the exceptions. |
 
 ## Setup
@@ -76,7 +76,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 ### 1. Install OBS and a virtual cable
 
 - [OBS Studio](https://obsproject.com/download) 32.2 or 33.
-- [VB-Cable](https://vb-audio.com/Cable/). Restart Windows after installing it.
+- A virtual cable such as [VB-Cable](https://vb-audio.com/Cable/). knobs's installer can install VB-Cable for you (step 3), so you can leave it until then.
 
 ### 2. Tune your mic in OBS
 
@@ -117,7 +117,7 @@ OBS's [Filters Guide](https://obsproject.com/kb/filters-guide) has more on each.
 
 Download knobs from the [latest release](https://github.com/danielalyoshin/knobs/releases/latest). There are two ways to run it:
 
-- **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end.
+- **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end. With no virtual cable on your PC, it offers to install VB-Cable, VB-Audio's virtual cable: VB-Audio's own setup opens, Windows asks to let it install its driver, and you click **Install Driver**. If Windows has to restart before the cable appears, the installer asks, and knobs opens again after the restart.
 - **The portable zip**, `knobs-<version>-portable.zip`. Unzip it anywhere and run `knobs.exe`. It keeps its settings and its data in a `data` folder beside the exe, and nothing in your user folders.
 
 knobs is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows SmartScreen may still warn about a new release until enough people have run it. Choose **More info**, then **Run anyway**.
@@ -125,10 +125,10 @@ knobs is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows Smar
 The first run checks what it found in OBS and asks only what it needs to:
 
 - **Which mic**, if OBS has several.
-- **Which cable**, if OBS doesn't monitor the mic to one. With no cable installed, it links to VB-Cable and waits for one.
+- **Which cable**, if OBS doesn't monitor the mic to one. With no cable installed, it shows how to install VB-Cable, step by step, and carries on when one appears. It also says when a cable is turned off in Windows' Sound settings, or waits for Windows to restart.
 - **Filters it can't run**, if there are any. [Known limits](#known-limits) lists them.
 
-If you choose **I'm new to OBS**, it shows the steps above instead, and carries on by itself when you close OBS. The last page shows your chain, with **Start with Windows** checked.
+If you choose **I'm new to OBS**, it shows the steps above instead, and carries on by itself when you close OBS. The last page shows your chain, with **Start with Windows** checked, and asks whether knobs should check for new versions, and update itself when there's one. Both are off until you turn them on.
 
 knobs then lives in the tray. Windows 11 hides new tray icons, so click **^** (Show hidden icons) on the taskbar to find the knob.
 
@@ -154,19 +154,24 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Re-import from OBS | Reads OBS's settings now, rather than when OBS next closes. |
 | Pause while OBS is open | On by default. If you turn it off while OBS monitors your mic to the same cable, the cable gets your mic twice. |
 | Start with Windows | Starts knobs when you sign in. |
+| Automatically check for new versions | Once a day, asks GitHub which version is the latest. Off until you turn it on ([Privacy](#privacy)). |
+| Automatically update | Installs a new version by itself, when knobs isn't sending your mic anyway. Only for a copy the installer installed. |
+| Get knobs 0.3.0… | When a check found a newer version: opens its page, with what's new and the download. Once an update has downloaded, **Update to knobs 0.3.0** installs it now instead. |
 | Setup… | Opens the first run again. |
 | Open log folder | Opens knobs's logs. |
 
-**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, and when OBS was updated. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
+**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, when OBS was updated, and, with the update check on, when a new version of knobs is out or knobs has updated itself. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
 
 **knobs keeps its files** in two folders, and never writes to OBS's settings or its install. A portable copy keeps both in the `data` folder beside its `knobs.exe` instead.
 
 | Folder | Holds |
 |:---|:---|
 | `%AppData%\knobs` | `settings.ini`: your choices in the menu and the first run |
-| `%LocalAppData%\knobs` | The private copy of OBS's files (about 54 MB) and the logs |
+| `%LocalAppData%\knobs` | The private copy of OBS's files (about 54 MB), the logs, and an update's installer while it waits to install |
 
-**To uninstall,** use **Settings › Apps › Installed apps** in Windows. Uninstalling quits knobs, turns off Start with Windows, and removes the copy of OBS's files and the logs. It then asks whether to delete your settings too. For a portable copy, turn off **Start with Windows** in its menu, quit it, and delete its folder.
+**To update,** install the new version over the old one, or turn on **Automatically update**. A portable copy says when a new version is out, with the update check on, and you unzip the new one in its place.
+
+**To uninstall,** use **Settings › Apps › Installed apps** in Windows. Uninstalling quits knobs, turns off Start with Windows, and removes the copy of OBS's files and the logs. It then asks whether to delete your settings too. VB-Cable stays installed, since other apps may use it: it's in Installed apps as **VBCABLE, The Virtual Audio Cable**. For a portable copy, turn off **Start with Windows** in its menu, quit it, and delete its folder.
 
 ## Known limits
 
@@ -181,7 +186,9 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 
 ## Privacy
 
-knobs collects nothing and sends nothing. It has no telemetry, no account and no update check, and it makes no network connections: the links in its first run open in your browser when you click them. Your mic's audio goes from the mic, through OBS's filters, to the virtual cable, and stays on your PC.
+knobs collects nothing and has no telemetry and no account. It makes no network connections unless you turn on its update check: the links in its first run open in your browser when you click them, and the installer carries VB-Cable rather than downloading it. Your mic's audio goes from the mic, through OBS's filters, to the virtual cable, and stays on your PC.
+
+**The update check** is off until you turn it on, on the setup's last page or in the tray menu. Then, once a day, knobs asks GitHub for `github.com/danielalyoshin/knobs/releases/latest`, which redirects to the latest release, and reads only which version that is. It sends nothing about you or your PC, though GitHub sees your IP address, as any website does. If you also turn on **Automatically update**, knobs downloads the new version's installer from that release on GitHub, checks that it's signed by Daniel Alyoshin as every release is, and runs it. Windows may ask Microsoft whether the installer's certificate was revoked, as it can for any signed program.
 
 knobs keeps its settings and logs on your PC, in the folders under [Using knobs](#using-knobs). The log names your audio devices, your OBS mic and its filters, and folders on your PC, which can include your Windows user name. Look it over before you attach it to an issue.
 
@@ -203,7 +210,7 @@ The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\
 
 ### Packaging
 
-`packaging\package.ps1` packages the Release build as the installer and the portable zip, with their checksums, in `build\package\`. The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php).
+`packaging\package.ps1` packages the Release build as the installer and the portable zip, with their checksums, in `build\package\`. The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php), and carries VB-Audio's VB-Cable driver pack, which the script downloads from vb-audio.com the first time and checks against a fixed SHA-256.
 
 [CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 33.0.0-rc1 and again against an unzipped 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)), signed with [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) (`packaging\sign.ps1`).
 
@@ -220,8 +227,9 @@ Each one takes `--help`, and none of them changes OBS's settings.
 | `knobs-core` | Runs the tray app's core without the tray, printing each change of state |
 | `knobs-tray` | Shows every menu state, first-run page and notification, on a fake core |
 | `knobs-live` | Runs the live path into a cable, and measures latency and device clocks |
+| `knobs-update` | Asks GitHub for the latest release, downloads an installer, and checks its signature, as the update check does |
 
-Most of them open no audio device. `knobs-smoke --capture-seconds` opens the mic, and `knobs-core --live` the mic and the cable. `knobs-live` opens the cable, and the mic only with `--run`, `--measure-mic` or `--measure-drift --mic`.
+Most of them open no audio device. `knobs-smoke --capture-seconds` opens the mic, and `knobs-core --live` the mic and the cable. `knobs-live` opens the cable, and the mic only with `--run`, `--measure-mic` or `--measure-drift --mic`. Only `knobs-update` uses the network.
 
 ### Layout
 
@@ -231,7 +239,8 @@ Most of them open no audio device. `knobs-smoke --capture-seconds` opens the mic
 | `src/import` | Reading OBS's settings, finding the mics, and the pre-flight checks |
 | `src/audio` | Audio devices and the live chain |
 | `src/core` | The always-on core: following OBS and the devices, and rebuilding the chain |
-| `src/tray` | The tray app: menu, first run, notifications and settings |
+| `src/tray` | The tray app: menu, first run, notifications, settings and the update check's plan |
+| `src/update` | The update check's requests to GitHub, and the check of an installer's signature |
 | `tools/` | The dev tools |
 | `packaging/` | The installer's script, the files that ship in each package, and the script that builds both |
 | `docs/` | The design, and the evidence behind it |
@@ -259,6 +268,8 @@ If knobs sounds different from OBS, include the output of `knobs-import` and the
 ## License
 
 knobs's code is licensed under **GPL-2.0-or-later**, the same as libobs. See [LICENSE](LICENSE). `third_party/libobs` holds headers from obs-studio under their own GPL-2.0-or-later notices. knobs ships no OBS binaries: it runs the OBS you installed.
+
+The installer can install VB-Cable, VB-Audio's virtual cable, from [www.vb-cable.com](https://vb-cable.com). It carries VB-Audio's driver pack unchanged and runs VB-Audio's own setup, as [VB-Audio's licensing](https://vb-audio.com/Services/licensing.htm) allows. VB-Cable isn't covered by the GPL. VB-Cable is donationware: all participations are welcome.
 
 The knobs name and logo are trademarks of Daniel Alyoshin. The logo files in [`assets/`](assets/) aren't under the GPL: you can share them unmodified and use them to refer to knobs, and a fork that you distribute needs its own name and icon. [TRADEMARKS.md](TRADEMARKS.md) has the details.
 
