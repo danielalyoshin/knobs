@@ -78,6 +78,7 @@ enum FirstRunId : int {
   kButtonKeepDevice,     // Go on with a playback device that isn't a cable.
   kButtonLookForObs,     // Drop the picked install folder and look for OBS.
   kButtonOwnObsSettings,  // Drop the picked settings folder for OBS's own.
+  kButtonOpenSoundSettings,  // Windows' list of sound devices, to turn a cable on.
   kChoiceFirst = 200,
   // The last page's check boxes.
   kCheckStartWithWindows = 300,
@@ -191,6 +192,9 @@ struct PageView {
   // what for, beside the buttons.
   bool waiting = false;
   std::string status;
+  // It waits for Windows to restart: knobs opens again after the restart, to
+  // carry on (FirstRunHost::ResumeAfterRestart).
+  bool resume_after_restart = false;
 
   friend bool operator==(const PageView&, const PageView&) = default;
 };
@@ -206,6 +210,7 @@ struct FirstRunAction {
     kChooseObs,        // Ask for OBS's install folder (Settings::obs_dir).
     kChooseObsSettings,  // Ask for OBS's settings folder (Settings::obs_config).
     kRestart,          // Restart knobs.
+    kOpenSoundSettings,  // Open Windows' list of sound devices.
     kFinish,           // Done: close, and set Start with Windows.
   };
   Kind kind = Kind::kNone;

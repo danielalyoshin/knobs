@@ -150,6 +150,18 @@ const std::vector<FakeScenario>& FakeScenarios() {
          MonitorToDefault(world);
          NoCable(world);
        }},
+      {"cable-off", "CABLE Input is turned off in Windows, and OBS monitors to the default device",
+       [](FakeWorld& world, FakeScript&) {
+         MonitorToDefault(world);
+         NoCable(world);
+         world.devices.disabled_outputs = {{kCableInputName, kCableInputId}};
+       }},
+      {"cable-restart", "VB-Cable is installed, but its devices wait for Windows to restart",
+       [](FakeWorld& world, FakeScript&) {
+         MonitorToDefault(world);
+         NoCable(world);
+         world.devices.vb_cable_installed = true;
+       }},
       {"not-a-cable", "the OBS profile monitors to headphones",
        [](FakeWorld& world, FakeScript&) {
          world.config.audio.monitoring_device_id = kHeadphonesId;
@@ -212,6 +224,8 @@ void ToggleCables(FakeWorld& world) {
   });
   if (cables.empty()) {
     world.devices.outputs.insert(world.devices.outputs.end(), world.spare_cables.begin(), world.spare_cables.end());
+    // Turned on, or started by a restart.
+    world.devices.disabled_outputs.clear();
   } else {
     world.spare_cables = std::move(cables);
   }

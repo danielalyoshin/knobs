@@ -13,10 +13,16 @@
 // involved, so knobs can tell what's connected before libobs runs.
 namespace knobs::audio {
 
-// The endpoints that are active (enabled and connected). Opens none of them.
+// The endpoints that are active (enabled and connected), and what tells why a
+// virtual cable isn't. Opens none of them.
 struct Endpoints {
   std::vector<AudioDevice> mics;     // Recording.
   std::vector<AudioDevice> outputs;  // Playback.
+  // Playback devices turned off in Windows' Sound settings.
+  std::vector<AudioDevice> disabled_outputs;
+  // VB-Cable's driver is installed: it's among Windows' installed apps. Its
+  // devices may still wait for Windows to restart.
+  bool vb_cable_installed = false;
   // The default communications recording device, which win-wasapi records from
   // for a mic set to "default" (docs/design.md, Mic candidates). Empty if
   // there's none.

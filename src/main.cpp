@@ -7,6 +7,10 @@
 //   --startup   Started by Windows at sign-in (the Run entry). If a copy is
 //               already running, quit without a word. Doesn't open the first
 //               run.
+//   --resume-setup
+//               Started by Windows at sign-in after a restart the first run
+//               or the installer asked for (a RunOnce entry): as --startup,
+//               but an unfinished first run opens.
 //   --restart   Started by a copy that's quitting to restart: wait for it.
 //   --restarted-for <reason>
 //               Why: obs-updated or audio-changed. The new copy says so in a
@@ -115,7 +119,8 @@ Status StartInstaller(const std::filesystem::path& installer, const std::filesys
   return Ok{};
 }
 
-int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restarted_for, bool updated) {
+int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core::RestartNeed restarted_for,
+        bool updated) {
   const std::wstring window_class = std::format(L"{}.tray", kDisplayNameW);
   auto lock = tray::SingleInstance::Acquire(window_class, restart ? kRestartWait : 0ms);
   if (!lock) {
@@ -125,7 +130,7 @@ int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restar
   if (!*lock) {
     // Show where the running copy is, unless Windows or an installer started
     // this one.
-    if (!startup && !updated) tray::ActivateTray(window_class);
+    if (!startup && !resume_setup && !updated) tray::ActivateTray(window_class);
     return 0;
   }
   const auto dirs = GetAppDirs();
@@ -140,8 +145,9 @@ int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restar
   options.instance = instance;
   options.window_class = window_class;
   options.settings_file = dirs->roaming / L"settings.ini";
-  // An unfinished first run comes back, but not at sign-in.
-  options.open_first_run = !startup;
+  // An unfinished first run comes back, but not at sign-in, unless it asked
+  // for a restart.
+  options.open_first_run = !startup || resume_setup;
   options.log_folder = dirs->Logs();
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };
@@ -150,6 +156,11 @@ int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restar
     return StartCopy(exe, std::format(L"--restart --restarted-for {}", FromUtf8(tray::RestartNeedName(why))));
   };
   options.restarted_for = restarted_for;
+  options.resume_after_restart = [exe] {
+    return tray::RunOnceAtNextSignIn({.name = std::wstring(kDisplayNameW),
+                                      .command = std::format(L"\"{}\" --resume-setup", exe.native()),
+                                      .run_key = std::wstring(tray::kRunOnceKey)});
+  };
   // The update check (docs/design.md, Updates): only once the user turns it
   // on, and updating by itself only in a copy the installer installed, not a
   // portable one.
@@ -190,6 +201,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   // ObsRuntime::Load.
   SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
   bool startup = false;
+  bool resume_setup = false;
   bool restart = false;
   bool updated = false;
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
@@ -198,6 +210,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     for (int i = 1; i < argc; ++i) {
       const std::wstring_view arg = argv[i];
       startup |= arg == L"--startup";
+      resume_setup |= arg == L"--resume-setup";
       restart |= arg == L"--restart";
       updated |= arg == L"--updated";
       if (arg == L"--restarted-for" && i + 1 < argc) {
@@ -214,7 +227,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     return 1;
   }
   // An update's new copy waits for the old one, as a restart's does.
-  const int code = Run(instance, startup, restart || updated, restarted_for, updated);
+  const int code = Run(instance, startup, resume_setup, restart || updated, restarted_for, updated);
   CoUninitialize();
   return code;
 }

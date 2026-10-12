@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include <format>
+#include <iterator>
 #include <mutex>
 #include <utility>
 
@@ -48,10 +49,11 @@ std::string FriendlyName(IMMDevice* device) {
   return name;
 }
 
-std::vector<AudioDevice> ActiveDevices(IMMDeviceEnumerator* enumerator, EDataFlow flow) {
+// The endpoints in `states`, such as DEVICE_STATE_ACTIVE.
+std::vector<AudioDevice> Devices(IMMDeviceEnumerator* enumerator, EDataFlow flow, DWORD states) {
   std::vector<AudioDevice> devices;
   ComPtr<IMMDeviceCollection> collection;
-  if (FAILED(enumerator->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection))) return devices;
+  if (FAILED(enumerator->EnumAudioEndpoints(flow, states, &collection))) return devices;
   UINT count = 0;
   collection->GetCount(&count);
   for (UINT i = 0; i < count; ++i) {
@@ -63,6 +65,30 @@ std::vector<AudioDevice> ActiveDevices(IMMDeviceEnumerator* enumerator, EDataFlo
     devices.push_back({name.empty() ? id : std::move(name), std::move(id)});
   }
   return devices;
+}
+
+// Whether VB-Cable's setup has installed its driver: it adds itself to
+// Windows' installed apps as "VBCABLE, The Virtual Audio Cable", in the
+// 64-bit registry, which every user can read.
+bool VbCableInstalled() {
+  HKEY uninstall = nullptr;
+  if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", 0,
+                    KEY_READ | KEY_WOW64_64KEY, &uninstall) != ERROR_SUCCESS) {
+    return false;
+  }
+  bool found = false;
+  wchar_t name[256];
+  for (DWORD i = 0; !found; ++i) {
+    DWORD length = static_cast<DWORD>(std::size(name));
+    if (RegEnumKeyExW(uninstall, i, name, &length, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+    wchar_t display[256] = {};
+    DWORD size = sizeof(display);
+    if (RegGetValueW(uninstall, name, L"DisplayName", RRF_RT_REG_SZ, nullptr, display, &size) == ERROR_SUCCESS) {
+      found = AsciiLower(ToUtf8(std::wstring_view(display))).starts_with("vbcable");
+    }
+  }
+  RegCloseKey(uninstall);
+  return found;
 }
 
 // Forwards every notification to a callback, until disconnected. Windows
@@ -124,8 +150,10 @@ Endpoints ListEndpoints() {
   Endpoints endpoints;
   const ComPtr<IMMDeviceEnumerator> enumerator = CreateEnumerator();
   if (!enumerator) return endpoints;
-  endpoints.mics = ActiveDevices(enumerator.Get(), eCapture);
-  endpoints.outputs = ActiveDevices(enumerator.Get(), eRender);
+  endpoints.mics = Devices(enumerator.Get(), eCapture, DEVICE_STATE_ACTIVE);
+  endpoints.outputs = Devices(enumerator.Get(), eRender, DEVICE_STATE_ACTIVE);
+  endpoints.disabled_outputs = Devices(enumerator.Get(), eRender, DEVICE_STATE_DISABLED);
+  endpoints.vb_cable_installed = VbCableInstalled();
   ComPtr<IMMDevice> default_mic;
   if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, eCommunications, &default_mic))) {
     endpoints.default_mic = DeviceId(default_mic.Get());

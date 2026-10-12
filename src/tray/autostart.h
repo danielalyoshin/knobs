@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 #include "util/result.h"
 
@@ -27,5 +28,14 @@ bool StartsWithWindows(const RunEntry& entry);
 // switch for it, since asking for it in knobs is as explicit as turning it
 // on there; turning it off deletes both.
 Status SetStartWithWindows(const RunEntry& entry, bool on);
+
+// HKCU's RunOnce key: Windows runs its values once, at the next sign-in, and
+// deletes them as it does.
+inline constexpr std::wstring_view kRunOnceKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
+
+// Has Windows run `entry.command` once, at the next sign-in: a value under
+// `entry.run_key`, which is kRunOnceKey but in tests. The installer writes the
+// same one when it asks for a restart.
+Status RunOnceAtNextSignIn(const RunEntry& entry);
 
 }  // namespace knobs::tray

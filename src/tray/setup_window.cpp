@@ -547,7 +547,10 @@ void SetupWindow::ShowView(PageView view) {
   const bool first = scene_.elements.empty();
   const auto parts_before = Parts(scene_);
   const Walkthrough* walk_before = scene_.walkthrough;
+  const bool resumed = view_.resume_after_restart;
   view_ = std::move(view);
+  // Also when the cable page turns to waiting for a restart.
+  if (view_.resume_after_restart && (new_page || !resumed)) host_.ResumeAfterRestart();
   choice_ = view_.default_choice;
   checks_.clear();
   for (const PageCheck& check : view_.checks) checks_[check.id] = check.checked;
@@ -672,6 +675,12 @@ void SetupWindow::Click(int id) {
         core::Settings settings = snapshot.settings;
         settings.obs_config = import::SettingsFolderFor(*folder);
         Apply(settings);
+      }
+      break;
+    case FirstRunAction::Kind::kOpenSoundSettings:
+      if (reinterpret_cast<INT_PTR>(ShellExecuteW(window_, L"open", L"ms-settings:sound-devices", nullptr, nullptr,
+                                                  SW_SHOWNORMAL)) <= 32) {
+        ShowError("Couldn't open Windows' Sound settings. Open Settings, then System, then Sound.");
       }
       break;
     case FirstRunAction::Kind::kRestart:

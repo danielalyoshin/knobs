@@ -78,6 +78,9 @@ struct TrayOptions {
   // Start with Windows.
   std::function<bool()> starts_with_windows;
   std::function<Status(bool on)> set_start_with_windows;
+  // Has Windows open knobs at the next sign-in, to carry on with the first
+  // run after a restart it asked for.
+  std::function<Status()> resume_after_restart;
   // Starts a new copy, which waits for this one to quit, and says why. The
   // tray restarts by itself when the core needs it to follow OBS.
   std::function<Status(core::RestartNeed why)> restart;
@@ -195,6 +198,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   Status StartObs(const std::filesystem::path& install_root) override;
   void FinishFirstRun(const FinishChoices& finish) override;
   void SaveFirstRun(const FirstRunProgress& progress) override;
+  void ResumeAfterRestart() override;
 
   // A window of ours that's open (a dialog), to bring forward rather than
   // open the menu over it.

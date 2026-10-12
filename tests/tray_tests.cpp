@@ -507,6 +507,17 @@ TEST(StartWithWindowsUsesTheRunKey) {
   CHECK(!StartsWithWindows(entry));
   CHECK(SetStartWithWindows(entry, false).ok());
 
+  // Once, at the next sign-in, after a restart the first run asked for.
+  RunEntry once = entry;
+  once.command = L"\"C:\\Program Files\\knobs\\knobs.exe\" --resume-setup";
+  once.run_key = scratch + L"\\RunOnce";
+  CHECK(RunOnceAtNextSignIn(once).ok());
+  wchar_t command[MAX_PATH] = {};
+  DWORD size = sizeof(command);
+  CHECK(RegGetValueW(HKEY_CURRENT_USER, once.run_key.c_str(), once.name.c_str(), RRF_RT_REG_SZ, nullptr, command,
+                     &size) == ERROR_SUCCESS &&
+        once.command == command);
+  CHECK(std::wstring_view(kRunOnceKey) == L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce");
   CHECK(RegDeleteTreeW(HKEY_CURRENT_USER, scratch.c_str()) == ERROR_SUCCESS);
 }
 

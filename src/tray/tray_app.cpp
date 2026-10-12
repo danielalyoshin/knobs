@@ -631,6 +631,11 @@ void TrayApp::SaveFirstRun(const FirstRunProgress& progress) {
   Save();
 }
 
+void TrayApp::ResumeAfterRestart() {
+  if (!options_.resume_after_restart) return;
+  if (const Status set = options_.resume_after_restart(); !set) Log(set.error());
+}
+
 void TrayApp::Save() {
   if (options_.settings_file.empty()) return;
   const UpdateSettings& updates = updater_ ? updater_->settings() : update_settings_;

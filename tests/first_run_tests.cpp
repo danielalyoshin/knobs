@@ -351,6 +351,57 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   CHECK(first_run.Page(two) == Page::kCable && !first_run.View(two).waiting);
 }
 
+TEST(CableThatsOffOrWaitsForARestart) {
+  core::Snapshot none = Running();
+  none.state = State::kNeedsSetup;
+  none.setup = SetupNeed::kCable;
+  none.chain->cable.clear();
+  none.obs_cable = {"", "default"};
+  none.outputs = {{kSpeakers, kSpeakersId}};
+
+  // Installed, but turned off in Windows' Sound settings: how to turn it on.
+  core::Snapshot off = none;
+  off.disabled_outputs = {{kSpeakers, kSpeakersId}, {kCableInput, kCableInputId}};
+  FirstRun first_run = ObsUser(off);
+  PageView view = first_run.View(off);
+  CHECK(view.page == Page::kCable && view.waiting && view.instruction == "Turn on your virtual cable");
+  CHECK(view.content == "CABLE Input is installed, but it's turned off in Windows' Sound settings.");
+  CHECK(view.steps.size() == 3 && Contains(view.steps[1], "<b>CABLE Input</b>"));
+  CHECK(!view.walkthrough && !view.resume_after_restart);
+  CHECK(view.default_button == kButtonOpenSoundSettings);
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open Sound settings"}));
+  CHECK(first_run.Click(kButtonOpenSoundSettings, 0, {}, off).kind == Kind::kOpenSoundSettings);
+  CHECK(view.stages[static_cast<size_t>(Stage::kCable)].value == "CABLE Input\nTurned off");
+  // Turned on, it's the cable.
+  core::Snapshot on = off;
+  on.disabled_outputs = {{kSpeakers, kSpeakersId}};
+  on.outputs.push_back({kCableInput, kCableInputId});
+  CHECK(first_run.Changed(off, on).settings.cable == kCableInputId);
+
+  // VB-Cable is installed, but its devices wait for Windows to restart, as
+  // they may after its setup or the installer's: knobs opens again after it.
+  core::Snapshot restart = none;
+  restart.vb_cable_installed = true;
+  first_run = ObsUser(restart);
+  view = first_run.View(restart);
+  CHECK(view.page == Page::kCable && view.waiting);
+  CHECK(view.instruction == "Restart Windows to finish installing VB-Cable");
+  CHECK(Contains(view.content, std::format("{} opens again after the restart", kDisplayName)));
+  CHECK(view.resume_after_restart && view.steps.empty());
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back"}));
+  CHECK(view.stages[static_cast<size_t>(Stage::kCable)].value == "VB-Cable\nWaits for a restart");
+  core::Snapshot started = restart;
+  started.outputs.push_back({kCableInput, kCableInputId});
+  CHECK(first_run.Changed(restart, started).settings.cable == kCableInputId);
+
+  // A device to keep is still offered.
+  core::Snapshot keep = restart;
+  keep.obs_cable = {kHeadphones, kHeadphonesId};
+  keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
+  keep.state = State::kRunning;
+  CHECK(Texts(ObsUser(keep).View(keep).buttons) == (std::vector<std::string>{"Back", "Keep Headphones"}));
+}
+
 TEST(LastPageAsksAboutUpdates) {
   // Both off until the user turns them on, and updating by itself only in
   // a copy the installer installed.

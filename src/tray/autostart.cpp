@@ -61,4 +61,15 @@ Status SetStartWithWindows(const RunEntry& entry, bool on) {
   return Ok{};
 }
 
+Status RunOnceAtNextSignIn(const RunEntry& entry) {
+  const LSTATUS status =
+      RegSetKeyValueW(HKEY_CURRENT_USER, entry.run_key.c_str(), entry.name.c_str(), REG_SZ, entry.command.c_str(),
+                      static_cast<DWORD>((entry.command.size() + 1) * sizeof(wchar_t)));
+  if (status != ERROR_SUCCESS) {
+    return Error{std::format("Couldn't add the entry for the next sign-in to the registry: {}",
+                             DescribeWinError(status))};
+  }
+  return Ok{};
+}
+
 }  // namespace knobs::tray

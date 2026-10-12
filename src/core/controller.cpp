@@ -316,6 +316,8 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   next.chain_revision = chain_revision_;
   next.obs_cable = {profile_cable_name_, profile_cable_id_};
   next.outputs = devices_.outputs;
+  next.disabled_outputs = devices_.disabled_outputs;
+  next.vb_cable_installed = devices_.vb_cable_installed;
   next.inputs = devices_.mics;
   next.default_input = devices_.default_mic;
   next.obs = obs_install_;

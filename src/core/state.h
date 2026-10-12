@@ -156,6 +156,11 @@ struct Snapshot {
   audio::AudioDevice obs_cable;
   // The playback devices that are connected, to pick a cable from.
   std::vector<audio::AudioDevice> outputs;
+  // Those turned off in Windows' Sound settings, and whether VB-Cable is
+  // installed, which tell why there's no cable when there isn't
+  // (audio::Endpoints).
+  std::vector<audio::AudioDevice> disabled_outputs;
+  bool vb_cable_installed = false;
   // The recording devices that are connected, and the default communications
   // device's ID, which a mic set to "default" records from (docs/design.md, Mic
   // candidates).

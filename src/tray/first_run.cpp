@@ -67,12 +67,24 @@ audio::AudioDevice SendsTo(const core::Snapshot& snapshot) {
   return device;
 }
 
-std::vector<audio::AudioDevice> VirtualCables(const core::Snapshot& snapshot) {
+std::vector<audio::AudioDevice> Cables(const std::vector<audio::AudioDevice>& devices) {
   std::vector<audio::AudioDevice> cables;
-  for (const audio::AudioDevice& device : snapshot.outputs) {
+  for (const audio::AudioDevice& device : devices) {
     if (IsVirtualCable(device.name)) cables.push_back(device);
   }
   return cables;
+}
+
+std::vector<audio::AudioDevice> VirtualCables(const core::Snapshot& snapshot) { return Cables(snapshot.outputs); }
+
+// Why there's no cable, when there isn't one: one is turned off in Windows,
+// or VB-Cable is installed and waits for Windows to restart, or there's none.
+enum class NoCable { kOff, kRestart, kNone };
+
+NoCable WhyNoCable(const core::Snapshot& snapshot) {
+  if (!Cables(snapshot.disabled_outputs).empty()) return NoCable::kOff;
+  if (snapshot.vb_cable_installed) return NoCable::kRestart;
+  return NoCable::kNone;
 }
 
 // The core can't run without a cable being chosen or connected.
@@ -228,7 +240,17 @@ StageView CableStage(const core::Snapshot& snapshot) {
   const std::string name = EscapeMarkup(ShortDeviceName(sends_to.name));
   if (snapshot.state == State::kCableMissing) return {StageState::kBlocked, name + "\nNot connected"};
   if (NeedsCable(snapshot)) {
-    return {StageState::kUnknown, VirtualCables(snapshot).empty() ? "No cable yet" : "Not chosen yet"};
+    if (!VirtualCables(snapshot).empty()) return {StageState::kUnknown, "Not chosen yet"};
+    switch (WhyNoCable(snapshot)) {
+      case NoCable::kOff:
+        return {StageState::kUnknown,
+                EscapeMarkup(ShortDeviceName(Cables(snapshot.disabled_outputs).front().name)) + "\nTurned off"};
+      case NoCable::kRestart:
+        return {StageState::kUnknown, "VB-Cable\nWaits for a restart"};
+      case NoCable::kNone:
+        break;
+    }
+    return {StageState::kUnknown, "No cable yet"};
   }
   if (sends_to.id.empty()) return {StageState::kUnknown, "Not read yet"};
   if (SameId(sends_to.id, kDefaultDevice)) return {StageState::kUnknown, "Not chosen yet"};
@@ -593,6 +615,42 @@ PageView Cable(const core::Snapshot& snapshot) {
   PageView view;
   const audio::AudioDevice sends_to = SendsTo(snapshot);
   const std::vector<audio::AudioDevice> choices = CableChoices(snapshot);
+  const auto keep = [&view, &choices] {
+    if (!choices.empty()) {
+      view.buttons.push_back(
+          Button(kButtonKeepDevice, std::format("&Keep {}", EscapeAccessKey(ShortDeviceName(choices[0].name)))));
+    }
+  };
+  if (VirtualCables(snapshot).empty() && WhyNoCable(snapshot) == NoCable::kOff) {
+    // Turned off in Sound settings, which says "Allow" for a device that's
+    // off, in All sound devices (ms-settings:sound-devices).
+    const std::string name = EscapeMarkup(ShortDeviceName(Cables(snapshot.disabled_outputs).front().name));
+    view.instruction = "Turn on your virtual cable";
+    view.content = std::format("{} is installed, but it's turned off in Windows' Sound settings.", name);
+    view.steps = {"Click <b>Open Sound settings</b>, below.",
+                  std::format("Under Output devices, choose <b>{}</b>.", name),
+                  "Next to Audio, click <b>Allow</b>."};
+    view.waiting = true;
+    view.status = std::format("Waiting for a virtual cable. {} moves on as soon as one is on.", kDisplayName);
+    view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonOpenSoundSettings, "&Open Sound settings")};
+    keep();
+    view.default_button = kButtonOpenSoundSettings;
+    return view;
+  }
+  if (VirtualCables(snapshot).empty() && WhyNoCable(snapshot) == NoCable::kRestart) {
+    // VB-Cable's setup says to restart, and on some PCs its devices only
+    // appear after one.
+    view.instruction = "Restart Windows to finish installing VB-Cable";
+    view.content = std::format("VB-Cable is installed, but Windows hasn't added its devices yet. Restart Windows, "
+                               "and {} opens again after the restart to carry on here.",
+                               kDisplayName);
+    view.waiting = true;
+    view.status = std::format("Waiting for VB-Cable. {} moves on as soon as it appears.", kDisplayName);
+    view.resume_after_restart = true;
+    view.buttons = {Button(kButtonBack, "&Back")};
+    keep();
+    return view;
+  }
   if (VirtualCables(snapshot).empty()) {
     view.instruction = "Install a virtual cable";
     view.content = "There's no virtual cable on this PC yet. To install VB-Cable:";
@@ -612,9 +670,7 @@ PageView Cable(const core::Snapshot& snapshot) {
     view.waiting = true;
     view.status = std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName);
     view.buttons = {Button(kButtonBack, "&Back")};
-    if (!choices.empty()) {
-      view.buttons.push_back(Button(kButtonKeepDevice, std::format("&Keep {}", EscapeAccessKey(ShortDeviceName(choices[0].name)))));
-    }
+    keep();
     return view;
   }
   view.instruction = std::format("Where should {} send your mic?", kDisplayName);
@@ -884,6 +940,8 @@ FirstRunAction FirstRun::Click(int button, int choice, const CheckStates& checks
       return {.kind = FirstRunAction::Kind::kReimport};
     case kButtonRestart:
       return {.kind = FirstRunAction::Kind::kRestart};
+    case kButtonOpenSoundSettings:
+      return {.kind = FirstRunAction::Kind::kOpenSoundSettings};
     case kButtonSkipFilters:
       Leave(page);
       progress_.reached = std::max(progress_.reached, Page::kCable);

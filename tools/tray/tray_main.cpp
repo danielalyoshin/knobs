@@ -755,6 +755,10 @@ int Run(const Options& options) {
                       tray::RestartNeedName(why)));
     return Status(Ok{});
   };
+  tray_options.resume_after_restart = [] {
+    Print(std::format("{} would open again at the next sign-in, to carry on with the first run\n", kDisplayName));
+    return Status(Ok{});
+  };
   // A made-up GitHub, and installers that are only a few bytes.
   const update::Version current{KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
   tray_options.update_settings.check = options.check_updates;
