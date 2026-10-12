@@ -11,6 +11,7 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "app_info.h"
@@ -42,7 +43,11 @@ std::string DescribeTrust(LONG status) {
     case CERT_E_REVOKED:
       return "its certificate was revoked";
     case CERT_E_REVOCATION_FAILURE:
+    case CRYPT_E_REVOCATION_OFFLINE:
       return "Windows couldn't check whether its certificate was revoked";
+    case HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION):
+    case HRESULT_FROM_WIN32(ERROR_LOCK_VIOLATION):
+      return "another program is using it";
     case CERT_E_UNTRUSTEDROOT:
     case CERT_E_CHAINING:
       return "its certificate doesn't come from an authority Windows trusts";
@@ -50,6 +55,21 @@ std::string DescribeTrust(LONG status) {
       return "its certificate expired, and it has no time stamp from when it was signed";
     default:
       return std::format("Windows doesn't trust its signature: {}", DescribeWinError(static_cast<unsigned long>(status)));
+  }
+}
+
+// Whether the check may pass later: Windows couldn't reach the servers that
+// say whether a certificate was revoked, or another program, such as an
+// antivirus scanning it, has the file open.
+bool MayPassLater(LONG status) {
+  switch (static_cast<HRESULT>(status)) {
+    case CERT_E_REVOCATION_FAILURE:
+    case CRYPT_E_REVOCATION_OFFLINE:
+    case HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION):
+    case HRESULT_FROM_WIN32(ERROR_LOCK_VIOLATION):
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -83,40 +103,50 @@ bool IsRoot(PCCERT_CONTEXT certificate) {
 
 }  // namespace
 
-Status CheckReleaseSignature(const std::filesystem::path& file) {
+SignatureCheck CheckReleaseSignature(const std::filesystem::path& file, Revocation revocation) {
   WINTRUST_FILE_INFO file_info = {sizeof(file_info)};
   file_info.pcwszFilePath = file.c_str();
   WINTRUST_DATA data = {sizeof(data)};
   data.dwUIChoice = WTD_UI_NONE;
-  // As Windows checks a download before running it: the whole chain, revoked
-  // certificates included.
-  data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
-  data.dwProvFlags = WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+  if (revocation == Revocation::kOnline) {
+    // As Windows checks a download before running it: the whole chain,
+    // revoked certificates included.
+    data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
+    data.dwProvFlags = WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+  } else {
+    data.fdwRevocationChecks = WTD_REVOKE_NONE;
+    data.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL;
+  }
   data.dwUnionChoice = WTD_CHOICE_FILE;
   data.pFile = &file_info;
   data.dwStateAction = WTD_STATEACTION_VERIFY;
   GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
   const HWND no_ui = static_cast<HWND>(INVALID_HANDLE_VALUE);
   const LONG trust = WinVerifyTrust(no_ui, &action, &data);
-  Status checked = Ok{};
+  using Verdict = SignatureCheck::Verdict;
+  SignatureCheck checked{.verdict = Verdict::kRelease};
   const std::string name = ToUtf8(file.filename());
+  const auto reject = [&checked](std::string error) {
+    checked = {.verdict = Verdict::kRejected, .error = std::move(error)};
+  };
   if (trust != ERROR_SUCCESS) {
-    checked = Error{std::format("{} can't be installed, because {}.", name, DescribeTrust(trust))};
+    checked = {.verdict = MayPassLater(trust) ? Verdict::kUnknown : Verdict::kRejected,
+               .error = std::format("{} can't be installed, because {}.", name, DescribeTrust(trust))};
   } else {
     CRYPT_PROVIDER_DATA* provider = WTHelperProvDataFromStateData(data.hWVTStateData);
     CRYPT_PROVIDER_SGNR* signer = provider ? WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0) : nullptr;
     if (!signer || signer->csCertChain == 0 || !signer->pasCertChain) {
-      checked = Error{std::format("{} can't be installed, because its signer couldn't be read.", name)};
+      reject(std::format("{} can't be installed, because its signer couldn't be read.", name));
     } else {
       PCCERT_CONTEXT leaf = signer->pasCertChain[0].pCert;
       PCCERT_CONTEXT root = signer->pasCertChain[signer->csCertChain - 1].pCert;
       if (CommonName(leaf) != kSignerName) {
-        checked = Error{std::format("{} can't be installed, because it was signed by {}, not {}.", name,
-                                    ToUtf8(CommonName(leaf)), ToUtf8(kSignerName))};
+        reject(std::format("{} can't be installed, because it was signed by {}, not {}.", name,
+                           ToUtf8(CommonName(leaf)), ToUtf8(kSignerName)));
       } else if (!HasUsage(leaf, kSignerUsage) || !IsRoot(root)) {
-        checked = Error{std::format("{} can't be installed, because it wasn't signed with the certificate profile "
-                                    "that signs {}'s releases.",
-                                    name, kDisplayName)};
+        reject(std::format("{} can't be installed, because it wasn't signed with the certificate profile that "
+                           "signs {}'s releases.",
+                           name, kDisplayName));
       }
     }
   }

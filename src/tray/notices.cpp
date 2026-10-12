@@ -373,17 +373,29 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   if (first && !update.show && !Stopped(snapshot.state)) {
     if (auto notice = Restarted(options_.restarted_for, snapshot)) Show(std::move(*notice), quiet, update);
   }
-  if (first && !update.show && options_.updated) Show(*options_.updated, quiet, update);
+  // What an update did waits for the first run, as Say's notices do.
+  if (first && !update.show && options_.updated) {
+    if (quiet) {
+      held_ = options_.updated;
+    } else {
+      Show(*options_.updated, quiet, update);
+    }
+  }
   // OBS in another session, unless something above was said: that says more
   // about the mic, and the menu says this too.
   if (other_opened && !update.show) Show(OtherObs(snapshot), quiet, update);
+  ShowHeld(quiet, update);
   if (!snapshot.obs.root.empty()) obs_version_ = snapshot.obs.version;
   return update;
 }
 
 Notifier::Update Notifier::Say(Notice notice, bool quiet) {
   Update update;
-  Show(std::move(notice), quiet, update);
+  if (quiet) {
+    held_ = std::move(notice);
+  } else {
+    Show(std::move(notice), quiet, update);
+  }
   return update;
 }
 
@@ -395,6 +407,7 @@ Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   }
   Due(mic_, Kind::kMicMissing, quiet, now, update);
   Due(cable_, Kind::kCableMissing, quiet, now, update);
+  ShowHeld(quiet, update);
   return update;
 }
 
@@ -459,6 +472,12 @@ void Notifier::Show(Notice notice, bool quiet, Update& update) {
   shown_ = notice;
   update.show = std::move(notice);
   update.hide = false;
+}
+
+void Notifier::ShowHeld(bool quiet, Update& update) {
+  if (quiet || !held_ || update.show) return;
+  Show(std::move(*held_), quiet, update);
+  held_.reset();
 }
 
 void Notifier::Hide(Notice::Kind kind, Update& update) {

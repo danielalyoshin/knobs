@@ -290,7 +290,8 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
   if (updates.offered) {
     items.push_back(Toggle(kIdCheckForUpdates, "Automatically check for &new versions", updates.check));
     if (updates.can_install) {
-      MenuItem install = Toggle(kIdInstallUpdates, "Automatically up&date", updates.check && updates.install);
+      // Kept while the check is off, which disables it.
+      MenuItem install = Toggle(kIdInstallUpdates, "Automatically up&date", updates.install);
       install.enabled = updates.check;
       items.push_back(std::move(install));
     }

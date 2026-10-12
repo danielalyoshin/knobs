@@ -25,9 +25,9 @@ LSTATUS DeleteValue(const std::wstring& key, const std::wstring& name) {
   return status == ERROR_FILE_NOT_FOUND ? ERROR_SUCCESS : status;
 }
 
-}  // namespace
-
-bool StartsWithWindows(const RunEntry& entry) {
+// Whether the value under `entry.run_key` holds `entry.command`, ignoring
+// case.
+bool HoldsCommand(const RunEntry& entry) {
   DWORD size = 0;
   if (RegGetValueW(HKEY_CURRENT_USER, entry.run_key.c_str(), entry.name.c_str(), RRF_RT_REG_SZ, nullptr, nullptr,
                    &size) != ERROR_SUCCESS) {
@@ -40,10 +40,13 @@ bool StartsWithWindows(const RunEntry& entry) {
     return false;
   }
   const std::wstring_view saved(command.data());
-  const bool same = CompareStringOrdinal(saved.data(), static_cast<int>(saved.size()), entry.command.data(),
-                                         static_cast<int>(entry.command.size()), TRUE) == CSTR_EQUAL;
-  return same && !TurnedOffInTaskManager(entry);
+  return CompareStringOrdinal(saved.data(), static_cast<int>(saved.size()), entry.command.data(),
+                              static_cast<int>(entry.command.size()), TRUE) == CSTR_EQUAL;
 }
+
+}  // namespace
+
+bool StartsWithWindows(const RunEntry& entry) { return HoldsCommand(entry) && !TurnedOffInTaskManager(entry); }
 
 Status SetStartWithWindows(const RunEntry& entry, bool on) {
   LSTATUS status = ERROR_SUCCESS;
@@ -61,12 +64,16 @@ Status SetStartWithWindows(const RunEntry& entry, bool on) {
   return Ok{};
 }
 
-Status RunOnceAtNextSignIn(const RunEntry& entry) {
-  const LSTATUS status =
-      RegSetKeyValueW(HKEY_CURRENT_USER, entry.run_key.c_str(), entry.name.c_str(), REG_SZ, entry.command.c_str(),
-                      static_cast<DWORD>((entry.command.size() + 1) * sizeof(wchar_t)));
+Status RunOnceAtNextSignIn(const RunEntry& entry, bool on) {
+  LSTATUS status = ERROR_SUCCESS;
+  if (on) {
+    status = RegSetKeyValueW(HKEY_CURRENT_USER, entry.run_key.c_str(), entry.name.c_str(), REG_SZ,
+                             entry.command.c_str(), static_cast<DWORD>((entry.command.size() + 1) * sizeof(wchar_t)));
+  } else if (HoldsCommand(entry)) {
+    status = DeleteValue(entry.run_key, entry.name);
+  }
   if (status != ERROR_SUCCESS) {
-    return Error{std::format("Couldn't add the entry for the next sign-in to the registry: {}",
+    return Error{std::format("Couldn't change the entry for the next sign-in in the registry: {}",
                              DescribeWinError(status))};
   }
   return Ok{};

@@ -125,7 +125,7 @@ SavedSettings ParseSettings(std::string_view text) {
 
   UpdateSettings& updates = saved.updates;
   updates.check = ReadBool(ini, "Updates", "Check", updates.check);
-  updates.install = updates.check && ReadBool(ini, "Updates", "Install", updates.install);
+  updates.install = ReadBool(ini, "Updates", "Install", updates.install);
   if (const auto checked = ini.Get("Updates", "Checked")) {
     long long seconds = 0;
     const auto [end, error] = std::from_chars(checked->data(), checked->data() + checked->size(), seconds);

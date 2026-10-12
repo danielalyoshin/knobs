@@ -91,7 +91,8 @@ enum FirstRunId : int {
 struct FinishChoices {
   bool start_with_windows = false;
   bool check_for_updates = false;
-  // Updating by itself, which needs the check.
+  // Updating by itself, which needs the check, but is kept without it
+  // (UpdateSettings::install).
   bool install_updates = false;
 
   friend bool operator==(const FinishChoices&, const FinishChoices&) = default;

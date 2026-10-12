@@ -42,8 +42,9 @@ class FirstRunHost {
   // Done was clicked, with the last page's check boxes as `finish`.
   virtual void FinishFirstRun(const FinishChoices& finish) = 0;
   virtual void SaveFirstRun(const FirstRunProgress& progress) = 0;
-  // A page waits for Windows to restart: open knobs again after it.
-  virtual void ResumeAfterRestart() = 0;
+  // A page waits for Windows to restart: open knobs again after it. Off: it
+  // no longer does, as when the cable appeared without one.
+  virtual void ResumeAfterRestart(bool on) = 0;
 };
 
 // The window's class, which the dev tools find it by.

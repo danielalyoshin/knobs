@@ -38,6 +38,7 @@
 #include "tray/screenshot.h"
 #include "tray/tray_app.h"
 #include "update/release.h"
+#include "update/signature.h"
 #include "util/app_dirs.h"
 #include "util/text_file.h"
 #include "util/win_strings.h"
@@ -107,6 +108,9 @@ Options:
   --latest <version>     The latest release the made-up GitHub has, such as
                          0.3.0. Default: this version, {4}. Its "installer"
                          downloads to %TEMP% and only says it would run.
+  --signature <how>      How the made-up installers' signatures check out:
+                         ok, unknown (Windows couldn't finish the check) or
+                         rejected. Default: ok.
   --portable             Run as a portable copy, which can't update itself.
   --updated <version>    Start as the copy an update to <version> started,
                          which says how the update went in a notification.
@@ -168,6 +172,7 @@ struct Options {
   bool check_updates = false;
   bool install_updates = false;
   std::optional<update::Version> latest;
+  update::SignatureCheck::Verdict signature = update::SignatureCheck::Verdict::kRelease;
   bool portable = false;
   std::optional<update::Version> updated;
 };
@@ -243,6 +248,17 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     } else if (arg == L"--latest") {
       options.latest = update::ParseVersion(ToUtf8(value));
       if (!options.latest) return std::nullopt;
+    } else if (arg == L"--signature") {
+      using Verdict = update::SignatureCheck::Verdict;
+      if (value == L"ok") {
+        options.signature = Verdict::kRelease;
+      } else if (value == L"unknown") {
+        options.signature = Verdict::kUnknown;
+      } else if (value == L"rejected") {
+        options.signature = Verdict::kRejected;
+      } else {
+        return std::nullopt;
+      }
     } else if (arg == L"--updated") {
       options.updated = update::ParseVersion(ToUtf8(value));
       if (!options.updated) return std::nullopt;
@@ -755,8 +771,9 @@ int Run(const Options& options) {
                       tray::RestartNeedName(why)));
     return Status(Ok{});
   };
-  tray_options.resume_after_restart = [] {
-    Print(std::format("{} would open again at the next sign-in, to carry on with the first run\n", kDisplayName));
+  tray_options.resume_after_restart = [](bool on) {
+    Print(on ? std::format("{} would open again at the next sign-in, to carry on with the first run\n", kDisplayName)
+             : std::format("{} wouldn't open again at the next sign-in\n", kDisplayName));
     return Status(Ok{});
   };
   // A made-up GitHub, and installers that are only a few bytes.
@@ -775,9 +792,18 @@ int Run(const Options& options) {
     Print(std::format("{} would download {}\n", kDisplayName, update::InstallerUrl(version)));
     return WriteText(file, "A made-up installer.");
   };
-  tray_options.updates.verify = [](const fs::path& file) {
-    Print(std::format("{}'s signature would be checked\n", ToUtf8(file.filename())));
-    return Status(Ok{});
+  tray_options.updates.verify = [verdict = options.signature](const fs::path& file) {
+    using Verdict = update::SignatureCheck::Verdict;
+    Print(std::format("{}'s signature would be checked: {}\n", ToUtf8(file.filename()),
+                      verdict == Verdict::kRelease   ? "ok"
+                      : verdict == Verdict::kUnknown ? "Windows couldn't finish the check"
+                                                     : "rejected"));
+    if (verdict == Verdict::kRelease) return update::SignatureCheck{.verdict = verdict};
+    return update::SignatureCheck{
+        .verdict = verdict,
+        .error = std::format("{} can't be installed, because {}.", ToUtf8(file.filename()),
+                             verdict == Verdict::kUnknown ? "Windows couldn't check whether its certificate was revoked"
+                                                          : "it isn't signed")};
   };
   tray_options.updates.install = [](const fs::path& file) {
     Print(std::format("{} would run, close {} and start the new one\n", ToUtf8(file.filename()), kDisplayName));

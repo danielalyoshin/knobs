@@ -155,12 +155,12 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Pause while OBS is open | On by default. If you turn it off while OBS monitors your mic to the same cable, the cable gets your mic twice. |
 | Start with Windows | Starts knobs when you sign in. |
 | Automatically check for new versions | Once a day, asks GitHub which version is the latest. Off until you turn it on ([Privacy](#privacy)). |
-| Automatically update | Installs a new version by itself, when knobs isn't sending your mic anyway. Only for a copy the installer installed. |
+| Automatically update | Installs a new version by itself, when knobs isn't sending your mic anyway, and says so if it can't. Only for a copy the installer installed, and only with the check on. |
 | Get knobs 0.3.0… | When a check found a newer version: opens its page, with what's new and the download. Once an update has downloaded, **Update to knobs 0.3.0** installs it now instead. |
 | Setup… | Opens the first run again. |
 | Open log folder | Opens knobs's logs. |
 
-**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, when OBS was updated, and, with the update check on, when a new version of knobs is out or knobs has updated itself. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
+**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, when OBS was updated, and, with the update check on, when a new version of knobs is out or knobs has updated itself, or couldn't. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
 
 **knobs keeps its files** in two folders, and never writes to OBS's settings or its install. A portable copy keeps both in the `data` folder beside its `knobs.exe` instead.
 
@@ -188,7 +188,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 
 knobs collects nothing and has no telemetry and no account. It makes no network connections unless you turn on its update check: the links in its first run open in your browser when you click them, and the installer carries VB-Cable rather than downloading it. Your mic's audio goes from the mic, through OBS's filters, to the virtual cable, and stays on your PC.
 
-**The update check** is off until you turn it on, on the setup's last page or in the tray menu. Then, once a day, knobs asks GitHub for `github.com/danielalyoshin/knobs/releases/latest`, which redirects to the latest release, and reads only which version that is. It sends nothing about you or your PC, though GitHub sees your IP address, as any website does. If you also turn on **Automatically update**, knobs downloads the new version's installer from that release on GitHub, checks that it's signed by Daniel Alyoshin as every release is, and runs it. Windows may ask Microsoft whether the installer's certificate was revoked, as it can for any signed program.
+**The update check** is off until you turn it on, on the setup's last page or in the tray menu. Then, once a day, knobs asks GitHub for `github.com/danielalyoshin/knobs/releases/latest`, which redirects to the latest release, and reads only which version that is. It sends nothing about you or your PC, though GitHub sees your IP address, as any website does. If you also turn on **Automatically update**, knobs downloads the new version's installer from that release on GitHub, checks that it's signed by Daniel Alyoshin as every release is, and runs it. Windows may ask Microsoft whether the installer's certificate was revoked, as it can for any signed program. If it can't tell, knobs tries again an hour later, and after three tries it stops and says so, with a link to download the new version yourself.
 
 knobs keeps its settings and logs on your PC, in the folders under [Using knobs](#using-knobs). The log names your audio devices, your OBS mic and its filters, and folders on your PC, which can include your Windows user name. Look it over before you attach it to an issue.
 

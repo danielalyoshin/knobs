@@ -25,6 +25,7 @@
 #include "tray/updates.h"
 #include "update/github.h"
 #include "update/release.h"
+#include "update/signature.h"
 #include "util/result.h"
 
 // The tray icon and its menu (docs/design.md, The tray app). It runs the core
@@ -45,7 +46,7 @@ struct UpdateHooks {
       download;
   // Checks an installer's signature (update::CheckReleaseSignature): once
   // it's downloaded, and again before it runs. On the same thread.
-  std::function<Status(const std::filesystem::path& file)> verify;
+  std::function<update::SignatureCheck(const std::filesystem::path& file)> verify;
   // Starts an installer that updates this copy: it closes this copy and
   // starts the new one with --updated.
   std::function<Status(const std::filesystem::path& file)> install;
@@ -75,12 +76,15 @@ struct TrayOptions {
   UpdateSettings update_settings;
   // Opens the first run once the tray runs, unless it was finished before.
   bool open_first_run = false;
+  // Opens it even if it was: Windows started this copy after a restart the
+  // first run asked for (resume_after_restart).
+  bool resume_first_run = false;
   // Start with Windows.
   std::function<bool()> starts_with_windows;
   std::function<Status(bool on)> set_start_with_windows;
   // Has Windows open knobs at the next sign-in, to carry on with the first
-  // run after a restart it asked for.
-  std::function<Status()> resume_after_restart;
+  // run after a restart it asked for, or not.
+  std::function<Status(bool on)> resume_after_restart;
   // Starts a new copy, which waits for this one to quit, and says why. The
   // tray restarts by itself when the core needs it to follow OBS.
   std::function<Status(core::RestartNeed why)> restart;
@@ -173,6 +177,10 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void OpenUrl(const std::string& url);
   // A line for knobs's log.
   void Log(std::string line);
+  // An update restarts knobs, so it waits until knobs isn't sending the mic
+  // to the cable and the user hasn't paused it, which a new copy wouldn't
+  // be, and nothing of knobs's is open.
+  bool CanRestart() const;
 
   // The update check: does what's due, or sets the timer for when it is.
   void RunUpdates();
@@ -184,7 +192,10 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void StartUpdateJob(Updater::Job job, bool asked = false);
   void FinishUpdateJob();
   void SetUpdates(bool check, bool install);
-  // Stops the job running, and waits for it.
+  // Update to the version offered, as the menu asked: now, or once the job
+  // running is done.
+  void InstallUpdate();
+  // Stops the job running, and waits a moment for it.
   void StopUpdates();
   std::filesystem::path InstallerFile(const update::Version& version) const;
   UpdateMenu MenuUpdates() const;
@@ -198,7 +209,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   Status StartObs(const std::filesystem::path& install_root) override;
   void FinishFirstRun(const FinishChoices& finish) override;
   void SaveFirstRun(const FirstRunProgress& progress) override;
-  void ResumeAfterRestart() override;
+  void ResumeAfterRestart(bool on) override;
 
   // A window of ours that's open (a dialog), to bring forward rather than
   // open the menu over it.
@@ -229,15 +240,21 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   struct UpdateWork;
   std::shared_ptr<UpdateWork> update_work_;
   std::thread update_thread_;
+  // The version the menu's update asked for while a job ran.
+  std::optional<update::Version> install_asked_;
+  // An error to show once the code that hit it is done (kErrorMessage).
+  std::string later_error_;
 
   std::mutex pending_mutex_;  // Guards pending_.
   std::optional<core::Snapshot> pending_;
 };
 
 // Tells a running copy, through its window, that another copy was started:
-// it opens its menu, so the user sees where knobs is. Returns false if no
+// it opens its menu, so the user sees where knobs is, or its unfinished first
+// run. `resume_setup`: Windows started it after a restart the first run asked
+// for, so the first run opens even if it was finished. Returns false if no
 // copy's window was found.
-bool ActivateTray(const std::wstring& window_class);
+bool ActivateTray(const std::wstring& window_class, bool resume_setup = false);
 
 // A dialog for an error before there's a tray to show it.
 void ShowStartupError(std::string_view text);

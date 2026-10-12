@@ -4,10 +4,10 @@
 ; passes the defines below (and Sign, with a signtool command, to sign the
 ; uninstaller and the installer). It installs for the current user only, with no
 ; admin rights, into %LocalAppData%\Programs\knobs: knobs's Run entry and its
-; data are per user too. Uninstalling closes knobs, removes its Run entry
-; and %LocalAppData%\knobs (the copy of OBS's files and the logs), and asks
-; before removing %AppData%\knobs (the settings). A portable copy's Run entry
-; is left alone.
+; data are per user too. Uninstalling closes knobs, removes its Run entry, and
+; its RunOnce entry if one waits for a restart, and %LocalAppData%\knobs (the
+; copy of OBS's files and the logs), and asks before removing %AppData%\knobs
+; (the settings). A portable copy's entries are left alone.
 ;
 ; With no virtual cable on the PC, it offers to install VB-CABLE: VB-Audio's
 ; driver pack, which it carries as VB-Audio ships it (VbCablePack), and whose
@@ -384,18 +384,27 @@ begin
     MsgBox('{#AppName} is still running. Quit it from its tray menu, then uninstall again.', mbError, MB_OK);
 end;
 
-// Removes the Run entry if it starts this install's knobs.exe, not a
-// portable copy's.
-procedure RemoveRunEntry();
+// Whether a value under Key starts this install's knobs.exe, not a portable
+// copy's.
+function StartsThisApp(const Key: String): Boolean;
 var
   Command: String;
 begin
-  if RegQueryStringValue(HKCU, RunKey, '{#AppName}', Command) and
-     (Pos(Lowercase(ExpandConstant('{app}\{#AppName}.exe')), Lowercase(Command)) > 0) then
+  Result := RegQueryStringValue(HKCU, Key, '{#AppName}', Command) and
+            (Pos(Lowercase(ExpandConstant('{app}\{#AppName}.exe')), Lowercase(Command)) > 0);
+end;
+
+// Removes the Run entry, and the RunOnce entry that opens knobs after a
+// restart, if they're this install's.
+procedure RemoveRunEntries();
+begin
+  if StartsThisApp(RunKey) then
   begin
     RegDeleteValue(HKCU, RunKey, '{#AppName}');
     RegDeleteValue(HKCU, ApprovedKey, '{#AppName}');
   end;
+  if StartsThisApp(RunOnceKey) then
+    RegDeleteValue(HKCU, RunOnceKey, '{#AppName}');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -403,13 +412,14 @@ var
   Settings: String;
 begin
   if CurUninstallStep = usUninstall then
-    RemoveRunEntry();
+    RemoveRunEntries();
   if CurUninstallStep = usPostUninstall then
   begin
     Settings := ExpandConstant('{userappdata}\{#AppName}');
     if DirExists(Settings) and not UninstallSilent() and
        (MsgBox('Also delete your {#AppName} settings?' + #13#10#13#10 +
-               'They''re your choice of mic and cable, and whether {#AppName} pauses while OBS is open. ' +
+               'They''re your choice of mic and cable, whether {#AppName} pauses while OBS is open, and ' +
+               'whether it checks for new versions. ' +
                'Keep them if you might install {#AppName} again.',
                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then
       DelTree(Settings, True, True, True);

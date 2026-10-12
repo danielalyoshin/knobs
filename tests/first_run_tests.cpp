@@ -412,26 +412,29 @@ TEST(LastPageAsksAboutUpdates) {
         !view.checks[1].checked);
   CHECK(view.checks[2].id == kCheckInstallUpdates &&
         view.checks[2].text == "Automatically &update when a new version is available" && !view.checks[2].checked);
-  // Updating by itself needs the check: off and disabled without it.
+  // Updating by itself needs the check: disabled without it.
   CHECK(view.checks[2].needs_previous && !view.checks[2].enabled);
   CHECK(FirstRun(progress).View(Running()).checks.size() == 2);
 
   FirstRun first_run(progress, std::nullopt, {}, true);
   view = first_run.View(Running(), 0, {{kCheckForUpdates, true}});
   CHECK(view.checks[1].checked && view.checks[2].enabled && !view.checks[2].checked);
+  // Turning the check off keeps updating by itself as it was, for when it's
+  // on again.
   view = first_run.View(Running(), 0, {{kCheckForUpdates, false}, {kCheckInstallUpdates, true}});
-  CHECK(!view.checks[2].enabled && !view.checks[2].checked);
+  CHECK(!view.checks[2].enabled && view.checks[2].checked);
   FirstRunAction done = first_run.Click(kButtonDone, 0, {{kCheckForUpdates, true}, {kCheckInstallUpdates, true}},
                                         Running());
   CHECK(done.kind == Kind::kFinish && done.finish.check_for_updates && done.finish.install_updates &&
         done.finish.start_with_windows);
   first_run = FirstRun(progress, std::nullopt, {}, true);
   done = first_run.Click(kButtonDone, 0, {{kCheckInstallUpdates, true}}, Running());
-  CHECK(!done.finish.check_for_updates && !done.finish.install_updates);
-  // A copy that can't install keeps it off, whatever it's told.
+  CHECK(!done.finish.check_for_updates && done.finish.install_updates);
+  // A copy that can't install doesn't ask, and keeps what was chosen in
+  // one that can.
   first_run = FirstRun(progress, std::nullopt, {.check_for_updates = true, .install_updates = true});
-  done = first_run.Click(kButtonDone, 0, {{kCheckInstallUpdates, true}}, Running());
-  CHECK(done.finish.check_for_updates && !done.finish.install_updates);
+  done = first_run.Click(kButtonDone, 0, {{kCheckInstallUpdates, false}}, Running());
+  CHECK(done.finish.check_for_updates && done.finish.install_updates);
 
   // Opened again, it shows them as they are.
   view = FirstRun({.done = true, .door = Door::kObsUser, .reached = Page::kDone}, std::nullopt,

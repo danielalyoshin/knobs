@@ -811,7 +811,7 @@ FirstRun::FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page, 
     : progress_(progress),
       finish_{.start_with_windows = !progress.done || now.start_with_windows,
               .check_for_updates = now.check_for_updates,
-              .install_updates = can_install_updates && now.check_for_updates && now.install_updates},
+              .install_updates = now.install_updates},
       can_install_updates_(can_install_updates) {
   if (!page) return;
   switch (*page) {
@@ -892,12 +892,12 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, const CheckS
   for (PageCheck& check : view.checks) {
     if (const auto it = checks.find(check.id); it != checks.end()) check.checked = it->second;
   }
-  // One that needs the one before it is off while that one is.
+  // One that needs the one before it is disabled while that one is off, and
+  // keeps its state for when it's on again.
   for (size_t i = 1; i < view.checks.size(); ++i) {
     PageCheck& check = view.checks[i];
     if (!check.needs_previous) continue;
     check.enabled = view.checks[i - 1].enabled && view.checks[i - 1].checked;
-    check.checked = check.checked && check.enabled;
   }
   return view;
 }
@@ -958,8 +958,8 @@ FirstRunAction FirstRun::Click(int button, int choice, const CheckStates& checks
       };
       checked(kCheckStartWithWindows, finish.start_with_windows);
       checked(kCheckForUpdates, finish.check_for_updates);
-      checked(kCheckInstallUpdates, finish.install_updates);
-      finish.install_updates = can_install_updates_ && finish.check_for_updates && finish.install_updates;
+      // Only a copy that can install asks.
+      if (can_install_updates_) checked(kCheckInstallUpdates, finish.install_updates);
       return {.kind = FirstRunAction::Kind::kFinish, .finish = finish};
     }
     case kButtonNext:

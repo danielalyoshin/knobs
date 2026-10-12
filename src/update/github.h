@@ -41,6 +41,9 @@ class Cancel {
 // or a pre-release.
 Result<Version> FindLatestRelease(Cancel& cancel);
 
+// The most an installer of knobs's can be: Download stops beyond it.
+inline constexpr uint64_t kMaxInstallerBytes = 64 * 1024 * 1024;
+
 // Downloads `url` into `file`, following redirects, as long as it's no bigger
 // than `max_bytes`. Only HTTPS.
 Status Download(std::string_view url, const std::filesystem::path& file, uint64_t max_bytes, Cancel& cancel);

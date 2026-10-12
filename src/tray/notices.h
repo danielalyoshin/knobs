@@ -73,7 +73,10 @@ std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name);
 //   above is shown at the same time, and it's taken down when that OBS
 //   closes.
 // - Nothing shows while `quiet`: the first run is unfinished or open, and
-//   shows the state itself. What it would have said isn't said later.
+//   shows the state itself. What it would have said isn't said later, but
+//   for what an update did and what Say was given, which the first run
+//   doesn't show: that shows once it isn't quiet, unless something else
+//   shows then.
 class Notifier {
  public:
   using Clock = std::chrono::steady_clock;
@@ -107,9 +110,10 @@ class Notifier {
   // A new snapshot.
   Update Changed(const core::Snapshot& snapshot, bool quiet, Clock::time_point now);
   // Something to say that isn't about the core's state, such as a new
-  // version (updates.h).
+  // version (updates.h). While `quiet`, it waits.
   Update Say(Notice notice, bool quiet);
-  // Does what's due by `now` (NextDeadline).
+  // Does what's due by `now` (NextDeadline), and shows what Say held back
+  // if it's no longer quiet.
   Update Tick(bool quiet, Clock::time_point now);
   std::optional<Clock::time_point> NextDeadline() const;
 
@@ -141,6 +145,8 @@ class Notifier {
   void Show(Notice notice, bool quiet, Update& update);
   // Takes down the notification showing if it's a `kind`.
   void Hide(Notice::Kind kind, Update& update);
+  // Shows what Say held back, unless something else shows.
+  void ShowHeld(bool quiet, Update& update);
 
   Options options_;
   core::Snapshot snapshot_;
@@ -158,6 +164,8 @@ class Notifier {
   std::vector<core::OtherObs> other_obs_;
   runtime::ObsVersion obs_version_;
   std::optional<Notice> shown_;
+  // What Say got while quiet: the latest.
+  std::optional<Notice> held_;
 };
 
 }  // namespace knobs::tray

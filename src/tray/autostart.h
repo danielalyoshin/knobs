@@ -33,9 +33,11 @@ Status SetStartWithWindows(const RunEntry& entry, bool on);
 // deletes them as it does.
 inline constexpr std::wstring_view kRunOnceKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
 
-// Has Windows run `entry.command` once, at the next sign-in: a value under
-// `entry.run_key`, which is kRunOnceKey but in tests. The installer writes the
-// same one when it asks for a restart.
-Status RunOnceAtNextSignIn(const RunEntry& entry);
+// Has Windows run `entry.command` once, at the next sign-in, or not: a value
+// under `entry.run_key`, which is kRunOnceKey but in tests. The installer
+// writes the same one when it asks for a restart. Turning it off deletes the
+// value only if it holds `entry.command`, ignoring case, as another copy's
+// is its own.
+Status RunOnceAtNextSignIn(const RunEntry& entry, bool on);
 
 }  // namespace knobs::tray

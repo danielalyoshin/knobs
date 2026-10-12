@@ -10,7 +10,8 @@
 //   --resume-setup
 //               Started by Windows at sign-in after a restart the first run
 //               or the installer asked for (a RunOnce entry): as --startup,
-//               but an unfinished first run opens.
+//               but the first run opens, even if it was finished since. If a
+//               copy is already running, it opens it there.
 //   --restart   Started by a copy that's quitting to restart: wait for it.
 //   --restarted-for <reason>
 //               Why: obs-updated or audio-changed. The new copy says so in a
@@ -50,8 +51,6 @@ using namespace std::chrono_literals;
 
 // How long a restarted copy waits for the old one to shut libobs down.
 constexpr std::chrono::milliseconds kRestartWait = 30s;
-// An installer bigger than this isn't one of knobs's.
-constexpr uint64_t kMaxInstallerBytes = 64 * 1024 * 1024;
 
 std::filesystem::path ExePath() {
   std::wstring path(MAX_PATH, L'\0');
@@ -128,9 +127,16 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     return 1;
   }
   if (!*lock) {
-    // Show where the running copy is, unless Windows or an installer started
-    // this one.
-    if (!startup && !resume_setup && !updated) tray::ActivateTray(window_class);
+    if (resume_setup) {
+      // The copy that has the lock may be the one the Run entry started at
+      // the same sign-in, and not have its window yet: it opens the first
+      // run, as this one would have.
+      for (int tries = 0; tries < 40 && !tray::ActivateTray(window_class, true); ++tries) Sleep(250);
+    } else if (!startup && !updated) {
+      // Show where the running copy is, unless Windows or an installer
+      // started this one.
+      tray::ActivateTray(window_class);
+    }
     return 0;
   }
   const auto dirs = GetAppDirs();
@@ -145,9 +151,10 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   options.instance = instance;
   options.window_class = window_class;
   options.settings_file = dirs->roaming / L"settings.ini";
-  // An unfinished first run comes back, but not at sign-in, unless it asked
-  // for a restart.
-  options.open_first_run = !startup || resume_setup;
+  // An unfinished first run comes back, but not at sign-in. After a restart
+  // it asked for, it comes back even if it was finished since.
+  options.open_first_run = !startup;
+  options.resume_first_run = resume_setup;
   options.log_folder = dirs->Logs();
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };
@@ -156,10 +163,11 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     return StartCopy(exe, std::format(L"--restart --restarted-for {}", FromUtf8(tray::RestartNeedName(why))));
   };
   options.restarted_for = restarted_for;
-  options.resume_after_restart = [exe] {
+  options.resume_after_restart = [exe](bool on) {
     return tray::RunOnceAtNextSignIn({.name = std::wstring(kDisplayNameW),
                                       .command = std::format(L"\"{}\" --resume-setup", exe.native()),
-                                      .run_key = std::wstring(tray::kRunOnceKey)});
+                                      .run_key = std::wstring(tray::kRunOnceKey)},
+                                     on);
   };
   // The update check (docs/design.md, Updates): only once the user turns it
   // on, and updating by itself only in a copy the installer installed, not a
@@ -167,7 +175,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   options.updates.latest = [](update::Cancel& cancel) { return update::FindLatestRelease(cancel); };
   options.updates.download = [](const update::Version& version, const std::filesystem::path& file,
                                 update::Cancel& cancel) {
-    return update::Download(update::InstallerUrl(version), file, kMaxInstallerBytes, cancel);
+    return update::Download(update::InstallerUrl(version), file, update::kMaxInstallerBytes, cancel);
   };
   options.updates.verify = [](const std::filesystem::path& file) { return update::CheckReleaseSignature(file); };
   options.updates.install = [logs = dirs->Logs()](const std::filesystem::path& file) {

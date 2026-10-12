@@ -30,7 +30,6 @@ Notice NotUpdated(const update::Version& version) {
 
 Updater::Updater(Options options, UpdateSettings settings, Clock::time_point started)
     : options_(std::move(options)), settings_(std::move(settings)), started_(started) {
-  if (!options_.can_install) settings_.install = false;
   // A check "after" now was saved before the clock was set back: it counts
   // as now.
   if (settings_.checked && *settings_.checked > started_) settings_.checked = started_;
@@ -38,50 +37,68 @@ Updater::Updater(Options options, UpdateSettings settings, Clock::time_point sta
 
 void Updater::Set(bool check, bool install) {
   settings_.check = check;
-  settings_.install = check && install && options_.can_install;
+  settings_.install = install;
 }
 
-bool Updater::Installs() const {
-  return settings_.check && settings_.install && options_.can_install && settings_.latest &&
-         *settings_.latest > options_.current && settings_.tried != settings_.latest;
+std::optional<update::Version> Updater::installable() const {
+  if (!options_.can_install || !settings_.latest || *settings_.latest <= options_.current ||
+      settings_.tried == settings_.latest) {
+    return std::nullopt;
+  }
+  return settings_.latest;
 }
+
+bool Updater::Installs() const { return settings_.check && settings_.install && installable(); }
 
 Updater::Clock::time_point Updater::NextCheck() const {
   Clock::time_point next = started_ + options_.first;
   if (settings_.checked) next = std::max(next, *settings_.checked + options_.every);
-  if (failed_) next = std::max(next, *failed_ + options_.retry);
+  if (check_failed_) next = std::max(next, *check_failed_ + options_.retry);
+  return next;
+}
+
+Updater::Clock::time_point Updater::NextDownload() const {
+  Clock::time_point next = started_ + options_.first;
+  if (try_failed_) next = std::max(next, *try_failed_ + options_.retry);
   return next;
 }
 
 Updater::Job Updater::Due(Clock::time_point now, bool can_restart) const {
   if (!settings_.check) return Job::kNone;
-  const bool ready = ready_ && ready_ == settings_.latest;
-  if (Installs() && ready && can_restart) return Job::kInstall;
+  if (Installs() && ready() && can_restart && (!try_failed_ || now >= *try_failed_ + options_.retry)) {
+    return Job::kInstall;
+  }
   if (now >= NextCheck()) return Job::kCheck;
-  if (Installs() && !ready && (!failed_ || now >= *failed_ + options_.retry)) return Job::kDownload;
+  if (Installs() && !ready() && now >= NextDownload()) return Job::kDownload;
   return Job::kNone;
 }
 
 std::optional<Updater::Clock::time_point> Updater::NextDeadline(Clock::time_point now) const {
   if (!settings_.check) return std::nullopt;
   Clock::time_point next = NextCheck();
-  if (Installs() && !(ready_ && ready_ == settings_.latest)) {
-    next = std::min(next, failed_ ? *failed_ + options_.retry : now);
+  if (Installs() && !ready()) next = std::min(next, NextDownload());
+  // An install that failed waits to be tried again, then only for a restart.
+  if (Installs() && ready() && try_failed_ && *try_failed_ + options_.retry > now) {
+    next = std::min(next, *try_failed_ + options_.retry);
   }
   return next;
 }
 
 std::optional<Notice> Updater::Checked(Clock::time_point now, std::optional<update::Version> latest) {
   if (!latest) {
-    failed_ = now;
+    check_failed_ = now;
     return std::nullopt;
   }
-  failed_.reset();
+  check_failed_.reset();
   settings_.checked = now;
   const bool news = *latest > options_.current && (!settings_.latest || *latest > *settings_.latest);
+  if (latest != settings_.latest) {
+    ready_.reset();
+    try_failed_.reset();
+    failures_ = 0;
+  }
   settings_.latest = latest;
-  if (ready_ != latest) ready_.reset();
-  // An update that installs by itself says so once it has.
+  // An update that installs by itself says so once it has, or if it can't.
   if (!news || Installs()) return std::nullopt;
   return Available(*latest);
 }
@@ -89,24 +106,36 @@ std::optional<Notice> Updater::Checked(Clock::time_point now, std::optional<upda
 std::optional<Notice> Updater::DownloadDone(Clock::time_point now, Downloaded outcome) {
   switch (outcome) {
     case Downloaded::kDone:
-      failed_.reset();
+      try_failed_.reset();
+      failures_ = 0;
       ready_ = settings_.latest;
       return std::nullopt;
     case Downloaded::kFailed:
-      failed_ = now;
-      return std::nullopt;
+      return Failed(now);
     case Downloaded::kRejected:
-      ready_.reset();
-      settings_.tried = settings_.latest;
-      if (settings_.latest) return NotUpdated(*settings_.latest);
-      return std::nullopt;
+      return GiveUp();
   }
   return std::nullopt;
 }
 
-void Updater::Lost(Clock::time_point now) {
+std::optional<Notice> Updater::NotVerified(Clock::time_point now, bool lost) {
+  if (lost) ready_.reset();
+  return Failed(now);
+}
+
+std::optional<Notice> Updater::Failed(Clock::time_point now) {
+  try_failed_ = now;
+  if (++failures_ < options_.tries) return std::nullopt;
+  return GiveUp();
+}
+
+std::optional<Notice> Updater::GiveUp() {
   ready_.reset();
-  failed_ = now;
+  try_failed_.reset();
+  failures_ = 0;
+  settings_.tried = settings_.latest;
+  if (settings_.latest) return NotUpdated(*settings_.latest);
+  return std::nullopt;
 }
 
 void Updater::Installing() {
@@ -116,7 +145,7 @@ void Updater::Installing() {
 
 std::optional<Updater::Offer> Updater::offer() const {
   if (!settings_.latest || *settings_.latest <= options_.current) return std::nullopt;
-  return Offer{*settings_.latest, options_.can_install && ready_ && ready_ == settings_.latest};
+  return Offer{*settings_.latest, options_.can_install && ready()};
 }
 
 std::optional<Notice> UpdatedNotice(const UpdateSettings& settings, const update::Version& current) {

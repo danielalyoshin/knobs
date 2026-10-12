@@ -549,8 +549,11 @@ void SetupWindow::ShowView(PageView view) {
   const Walkthrough* walk_before = scene_.walkthrough;
   const bool resumed = view_.resume_after_restart;
   view_ = std::move(view);
-  // Also when the cable page turns to waiting for a restart.
-  if (view_.resume_after_restart && (new_page || !resumed)) host_.ResumeAfterRestart();
+  // Also when the cable page turns to waiting for a restart, or from it. A
+  // window closed while it waits leaves it be.
+  if (view_.resume_after_restart != resumed || (new_page && view_.resume_after_restart)) {
+    host_.ResumeAfterRestart(view_.resume_after_restart);
+  }
   choice_ = view_.default_choice;
   checks_.clear();
   for (const PageCheck& check : view_.checks) checks_[check.id] = check.checked;

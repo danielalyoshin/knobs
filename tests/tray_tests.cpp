@@ -216,6 +216,11 @@ TEST(MenuOffersUpdates) {
   menu = BuildMenu(Running(), {}, false, updates);
   CHECK(FindItem(menu.items, kIdCheckForUpdates)->checked && FindItem(menu.items, kIdInstallUpdates)->checked &&
         FindItem(menu.items, kIdInstallUpdates)->enabled);
+  // With the check off, updating by itself keeps its state, disabled.
+  updates.check = false;
+  menu = BuildMenu(Running(), {}, false, updates);
+  CHECK(FindItem(menu.items, kIdInstallUpdates)->checked && !FindItem(menu.items, kIdInstallUpdates)->enabled);
+  updates.check = true;
   updates.can_install = false;
   CHECK(!FindItem(BuildMenu(Running(), {}, false, updates).items, kIdInstallUpdates));
 
@@ -440,8 +445,8 @@ TEST(SettingsRoundTrip) {
   CHECK(ParseSettings("[Setup]\nDoor=elsewhere\nPage=done\n").first_run ==
         FirstRunProgress{.reached = FirstRunPage::kDone});
 
-  // The update check, and what it found: off until it's turned on, and
-  // updating by itself only with the check.
+  // The update check, and what it found: off until it's turned on. Updating
+  // by itself is kept without the check.
   saved.updates = {.check = true,
                    .install = true,
                    .checked = std::chrono::system_clock::time_point(std::chrono::seconds(1791763200)),
@@ -450,7 +455,7 @@ TEST(SettingsRoundTrip) {
   CHECK(FormatSettings(saved).ends_with(
       "[Updates]\nCheck=true\nInstall=true\nChecked=1791763200\nLatest=0.3.0\nTried=0.3.0\n"));
   CHECK(ParseSettings(FormatSettings(saved)).updates == saved.updates);
-  CHECK(!ParseSettings("[Updates]\nCheck=false\nInstall=true\n").updates.install);
+  CHECK(ParseSettings("[Updates]\nCheck=false\nInstall=true\n").updates.install);
   const UpdateSettings odd = ParseSettings("[Updates]\nChecked=soon\nLatest=v0.3\nTried=0.3.0-rc1\n").updates;
   CHECK(!odd.checked && !odd.latest && !odd.tried);
 
@@ -511,12 +516,23 @@ TEST(StartWithWindowsUsesTheRunKey) {
   RunEntry once = entry;
   once.command = L"\"C:\\Program Files\\knobs\\knobs.exe\" --resume-setup";
   once.run_key = scratch + L"\\RunOnce";
-  CHECK(RunOnceAtNextSignIn(once).ok());
-  wchar_t command[MAX_PATH] = {};
-  DWORD size = sizeof(command);
-  CHECK(RegGetValueW(HKEY_CURRENT_USER, once.run_key.c_str(), once.name.c_str(), RRF_RT_REG_SZ, nullptr, command,
-                     &size) == ERROR_SUCCESS &&
-        once.command == command);
+  CHECK(RunOnceAtNextSignIn(once, true).ok());
+  const auto saved = [&once]() -> std::wstring {
+    wchar_t command[MAX_PATH] = {};
+    DWORD size = sizeof(command);
+    if (RegGetValueW(HKEY_CURRENT_USER, once.run_key.c_str(), once.name.c_str(), RRF_RT_REG_SZ, nullptr, command,
+                     &size) != ERROR_SUCCESS) {
+      return L"";
+    }
+    return command;
+  };
+  CHECK(saved() == once.command);
+  // Taken back only if it's this copy's: a portable copy's is its own.
+  RunEntry other = once;
+  other.command = L"\"D:\\knobs\\knobs.exe\" --resume-setup";
+  CHECK(RunOnceAtNextSignIn(other, false).ok() && saved() == once.command);
+  CHECK(RunOnceAtNextSignIn(once, false).ok() && saved().empty());
+  CHECK(RunOnceAtNextSignIn(once, false).ok());
   CHECK(std::wstring_view(kRunOnceKey) == L"Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce");
   CHECK(RegDeleteTreeW(HKEY_CURRENT_USER, scratch.c_str()) == ERROR_SUCCESS);
 }

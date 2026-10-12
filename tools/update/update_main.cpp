@@ -26,9 +26,6 @@ using namespace knobs;
 using namespace knobs::tools;
 namespace fs = std::filesystem;
 
-// As knobs.exe's limit.
-constexpr uint64_t kMaxInstallerBytes = 64 * 1024 * 1024;
-
 std::string Usage() {
   return std::format(R"(Usage: knobs-update <what> [options]
 
@@ -79,6 +76,18 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
   return options;
 }
 
+// Reports `file`'s signature check, and whether one that didn't pass might
+// later, as knobs tries again then.
+void Signature(const fs::path& file) {
+  const update::SignatureCheck checked = update::CheckReleaseSignature(file);
+  Check(checked.ok(), "signature",
+        checked.ok() ? std::format("{}: signed as {}'s releases are", ToUtf8(file.filename()), kDisplayName)
+                     : checked.error);
+  if (checked.verdict == update::SignatureCheck::Verdict::kUnknown) {
+    Report(Outcome::kNote, "signature", std::format("it may pass later, and {} tries again then", kDisplayName));
+  }
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -110,22 +119,13 @@ int wmain(int argc, wchar_t** argv) {
     std::error_code ec;
     fs::create_directories(options->out, ec);
     const std::string url = update::InstallerUrl(*options->download);
-    const Status got = update::Download(url, file, kMaxInstallerBytes, cancel);
+    const Status got = update::Download(url, file, update::kMaxInstallerBytes, cancel);
     Check(got.ok(), "download",
           got ? std::format("{} ({:.1f} MB)", ToUtf8(file), fs::file_size(file, ec) / (1024.0 * 1024.0))
               : got.error());
-    if (got) {
-      const Status signed_ok = update::CheckReleaseSignature(file);
-      Check(signed_ok.ok(), "signature",
-            signed_ok ? std::format("signed as {}'s releases are", kDisplayName) : signed_ok.error());
-    }
+    if (got) Signature(file);
   }
-  if (options->verify) {
-    const Status signed_ok = update::CheckReleaseSignature(*options->verify);
-    Check(signed_ok.ok(), "signature",
-          signed_ok ? std::format("{}: signed as {}'s releases are", ToUtf8(options->verify->filename()), kDisplayName)
-                    : signed_ok.error());
-  }
+  if (options->verify) Signature(*options->verify);
   Print(AnyFailed() ? "FAIL\n" : "PASS\n");
   return AnyFailed() ? kExitFail : kExitPass;
 }
