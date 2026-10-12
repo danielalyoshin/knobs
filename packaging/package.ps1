@@ -13,6 +13,14 @@ release), or the exe given, and writes to build\package:
 The name comes from src\app_info.h and the version from CMakeLists.txt. The
 exe's own version has to match.
 
+The installer carries VB-Audio's VB-CABLE driver pack, as VB-Audio ships it, to
+offer it when there's no virtual cable. It's downloaded from vb-audio.com into
+build\vb-cable the first time, and its SHA-256 checked against the one below,
+so a pack VB-Audio changed fails the build until it's checked and the hash
+updated. VB-Audio allows it to be bundled, with credit
+(https://vb-audio.com/Services/licensing.htm): NOTICE.txt and the installer
+give it.
+
 .PARAMETER Exe
 The knobs.exe to package. By default, build\x64\Release's.
 
@@ -30,13 +38,18 @@ folders.
 
 .PARAMETER NoInstaller
 Writes only the portable zip.
+
+.PARAMETER VbCablePack
+VB-Audio's driver pack, to use instead of downloading it. Its hash is checked
+all the same.
 #>
 param(
   [string]$Exe,
   [switch]$Sign,
   [string]$SignScript = "$PSScriptRoot\sign.ps1",
   [string]$Iscc,
-  [switch]$NoInstaller
+  [switch]$NoInstaller,
+  [string]$VbCablePack
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,6 +104,23 @@ try {
 $artifacts = @($zip)
 
 if (-not $NoInstaller) {
+  # VB-Audio's driver pack, from October 2024.
+  $vbCableUrl = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip'
+  $vbCableSha256 = 'b950e39f01af1d04ea623c8f6d8eb9b6ea5c477c637295fabf20631c85116bfb'
+  if (-not $VbCablePack) {
+    $VbCablePack = "$root\build\vb-cable\$(Split-Path -Leaf $vbCableUrl)"
+    if (-not (Test-Path $VbCablePack)) {
+      New-Item -ItemType Directory -Force (Split-Path -Parent $VbCablePack) | Out-Null
+      Invoke-WebRequest -UseBasicParsing -Uri $vbCableUrl -OutFile "$VbCablePack.part"
+      Move-Item -Force "$VbCablePack.part" $VbCablePack
+    }
+  }
+  if (-not (Test-Path $VbCablePack)) { throw "$VbCablePack doesn't exist." }
+  $vbCableHash = (Get-FileHash -Algorithm SHA256 $VbCablePack).Hash.ToLower()
+  if ($vbCableHash -ne $vbCableSha256) {
+    throw "$VbCablePack has SHA-256 $vbCableHash, not $vbCableSha256. If VB-Audio changed its pack, check the new one and update the hash in package.ps1."
+  }
+
   if (-not $Iscc) {
     $found = Get-Command ISCC.exe -ErrorAction SilentlyContinue
     $Iscc = if ($found) { $found.Source } else {
@@ -100,7 +130,8 @@ if (-not $NoInstaller) {
   }
   if (-not $Iscc -or -not (Test-Path $Iscc)) { throw "Couldn't find Inno Setup 6's ISCC.exe. Install it, or pass -Iscc." }
   # KnobsAppId: knobs's own AppId, which a test build without it doesn't get.
-  $defines = @("/DAppName=$name", "/DKnobsAppId", "/DAppVersion=$version", "/DStageDir=$stage", "/DOutputDir=$out")
+  $defines = @("/DAppName=$name", "/DKnobsAppId", "/DAppVersion=$version", "/DStageDir=$stage", "/DOutputDir=$out",
+    "/DVbCablePack=$((Resolve-Path $VbCablePack).Path)")
   if ($Sign) {
     # Inno Setup signs the uninstaller and the installer with this command:
     # $q is a quote and $f the quoted file.

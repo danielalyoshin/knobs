@@ -9,13 +9,22 @@
 ; before removing %AppData%\knobs (the settings). A portable copy's Run entry
 ; is left alone.
 ;
+; With no virtual cable on the PC, it offers to install VB-CABLE: VB-Audio's
+; driver pack, which it carries as VB-Audio ships it (VbCablePack), and whose
+; own setup it runs, which asks for admin rights. Uninstalling knobs leaves
+; VB-CABLE, which other apps may use.
+;
 ; knobs runs it to update itself (src/main.cpp, StartInstaller), very silent
 ; with /update=1: then it starts knobs again as it ends, with --updated,
 ; whether the update worked or not.
 
 #ifndef AppName
-  #error Run packaging\package.ps1, which passes AppName, AppVersion, StageDir and OutputDir.
+  #error Run packaging\package.ps1, which passes AppName, AppVersion, StageDir, OutputDir and VbCablePack.
 #endif
+#ifndef VbCablePack
+  #error Run packaging\package.ps1, which passes VbCablePack, VB-Audio's driver pack.
+#endif
+#define VbCablePackName ExtractFileName(VbCablePack)
 
 ; Windows knows an install by its AppId. package.ps1 passes KnobsAppId for
 ; knobs's own, which every release has. Any other build, such as one with
@@ -69,10 +78,20 @@ SignTool=signtool
 SignedUninstaller=yes
 #endif
 
+[Messages]
+; The tasks page, which only VB-CABLE's task shows.
+SelectTasksDesc=There's no virtual cable on this PC yet.
+SelectTasksLabel2={#AppName} sends your mic to a virtual cable, which your other apps then use as their mic. Setup can install VB-CABLE, a virtual cable from VB-Audio (www.vb-cable.com), with VB-Audio's own setup. Windows asks to let it install its driver.%n%nVB-CABLE is donationware: all participations are welcome.
+
+[Tasks]
+Name: vbcable; Description: "Install VB-CABLE, from VB-Audio"; Check: OfferVbCable
+
 [Files]
 ; The header's lockup, for InitializeWizard. First, so it unpacks without the
 ; rest.
 Source: "..\assets\installer\header-*.png"; Flags: dontcopy noencryption
+; VB-Audio's driver pack, as it ships, for InstallVbCable.
+Source: "{#VbCablePack}"; Flags: dontcopy noencryption
 Source: "{#StageDir}\{#AppName}.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -90,7 +109,18 @@ Type: filesandordirs; Name: "{localappdata}\{#AppName}"
 [Code]
 const
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
+  RunOnceKey = 'Software\Microsoft\Windows\CurrentVersion\RunOnce';
   ApprovedKey = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
+  // Windows' playback devices, and its installed apps, which every user can
+  // read.
+  RenderKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render';
+  UninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall';
+  // A device's name, and its driver's: PKEY_Device_DeviceDesc and
+  // PKEY_DeviceInterface_FriendlyName.
+  DeviceNameValue = '{a45c254e-df1c-4efd-8020-67d146a850e0},2';
+  DriverNameValue = '{b3f8fa53-0004-438e-9003-51a46e139bfc},6';
+  // How long a cable gets to appear after VB-CABLE's setup closes.
+  CableWaitMs = 15000;
   // The tray's window, which quits on WM_CLOSE (src/main.cpp).
   TrayWindowClass = '{#AppName}.tray';
   WM_CLOSE = $0010;
@@ -98,10 +128,160 @@ const
   // tall, one for each display scale (tools\render-installer-images.ps1).
   HeaderHeights = '58,77,97,116,124,143,159';
 
+var
+  // Read once, as Setup starts: a virtual cable, and VB-CABLE's driver.
+  HadCable, HadVbCable: Boolean;
+  // VB-CABLE's driver was installed, but its devices wait for Windows to
+  // restart.
+  VbCableNeedsRestart: Boolean;
+
 // An update knobs started itself (StartInstaller in src/main.cpp).
 function IsUpdate(): Boolean;
 begin
   Result := ExpandConstant('{param:update|0}') = '1';
+end;
+
+// Whether a playback device is a virtual cable, as the tray recognizes one
+// (IsVirtualCable in src/tray/menu.cpp): VB-Audio's cables, and Virtual Audio
+// Cable. Its device's name and its driver's, as Windows shows them together.
+function IsVirtualCable(const Name: String): Boolean;
+begin
+  Result := (Pos('vb-audio', Lowercase(Name)) > 0) or (Pos('virtual audio cable', Lowercase(Name)) > 0);
+end;
+
+// Whether a virtual cable is installed: one that's on, or turned off in
+// Windows' Sound settings, which the first run says how to turn on.
+function CableInstalled(): Boolean;
+var
+  Devices: TArrayOfString;
+  I: Integer;
+  State: Cardinal;
+  Name, Driver: String;
+begin
+  Result := False;
+  if not RegGetSubkeyNames(HKLM64, RenderKey, Devices) then
+    Exit;
+  for I := 0 to GetArrayLength(Devices) - 1 do
+  begin
+    // DEVICE_STATE_ACTIVE or DEVICE_STATE_DISABLED, in the low bits.
+    if RegQueryDWordValue(HKLM64, RenderKey + '\' + Devices[I], 'DeviceState', State) and
+       (((State and $F) = 1) or ((State and $F) = 2)) then
+    begin
+      Name := '';
+      Driver := '';
+      RegQueryStringValue(HKLM64, RenderKey + '\' + Devices[I] + '\Properties', DeviceNameValue, Name);
+      RegQueryStringValue(HKLM64, RenderKey + '\' + Devices[I] + '\Properties', DriverNameValue, Driver);
+      if IsVirtualCable(Name + ' (' + Driver + ')') then
+      begin
+        Result := True;
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+// Whether VB-CABLE's setup installed its driver: it adds itself to the
+// installed apps as "VBCABLE, The Virtual Audio Cable" (VbCableInstalled in
+// src/audio/device_watch.cpp).
+function VbCableDriverInstalled(): Boolean;
+var
+  Apps: TArrayOfString;
+  I: Integer;
+  Name: String;
+begin
+  Result := False;
+  if not RegGetSubkeyNames(HKLM64, UninstallKey, Apps) then
+    Exit;
+  for I := 0 to GetArrayLength(Apps) - 1 do
+    if RegQueryStringValue(HKLM64, UninstallKey + '\' + Apps[I], 'DisplayName', Name) and
+       (Pos('vbcable', Lowercase(Name)) = 1) then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  HadCable := CableInstalled();
+  HadVbCable := VbCableDriverInstalled();
+  Result := True;
+end;
+
+// VB-CABLE's task, which an update or any other silent install never runs:
+// its setup is a window of VB-Audio's. Not with a cable, nor with VB-CABLE
+// installed but waiting for a restart, which knobs's first run says.
+function OfferVbCable(): Boolean;
+begin
+  Result := not WizardSilent() and not IsUpdate() and not HadCable and not HadVbCable;
+end;
+
+// Opens knobs again at the next sign-in, to carry on with its first run
+// (knobs.exe --resume-setup, which knobs's first run writes too).
+procedure ResumeAfterRestart();
+begin
+  RegWriteStringValue(HKCU, RunOnceKey, '{#AppName}',
+                      '"' + ExpandConstant('{app}\{#AppName}.exe') + '" --resume-setup');
+end;
+
+// Unzips VB-Audio's driver pack and runs its setup, as knobs's guide does by
+// hand: its window, which asks for admin rights. Then waits for the cable.
+// If VB-CABLE's driver is installed but its devices don't appear, Windows
+// has to restart, which Setup then asks for. If it isn't, as when Windows'
+// prompt was declined, knobs's first run shows how to install it by hand.
+procedure InstallVbCable();
+var
+  Folder, Pack: String;
+  Code, Waited: Integer;
+  Ran: Boolean;
+begin
+  Folder := ExpandConstant('{tmp}\vb-cable');
+  ForceDirectories(Folder);
+  ExtractTemporaryFile('{#VbCablePackName}');
+  Pack := ExpandConstant('{tmp}\{#VbCablePackName}');
+  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver, then close it.';
+  WizardForm.FilenameLabel.Caption := '';
+  // tar, which ships with Windows, unzips it.
+  Ran := Exec(ExpandConstant('{sys}\tar.exe'), '-xf "' + Pack + '" -C "' + Folder + '"', Folder, SW_HIDE,
+              ewWaitUntilTerminated, Code) and (Code = 0) and FileExists(Folder + '\VBCABLE_Setup_x64.exe');
+  if Ran then
+    Ran := ShellExec('runas', Folder + '\VBCABLE_Setup_x64.exe', '', Folder, SW_SHOWNORMAL, ewWaitUntilTerminated,
+                     Code);
+  // Its devices take a moment to appear.
+  Waited := 0;
+  while not CableInstalled() and VbCableDriverInstalled() and (Waited < CableWaitMs) do
+  begin
+    Sleep(500);
+    Waited := Waited + 500;
+  end;
+  if CableInstalled() then
+    Exit;
+  if VbCableDriverInstalled() then
+  begin
+    VbCableNeedsRestart := True;
+    ResumeAfterRestart();
+  end
+  else
+    SuppressibleMsgBox('VB-CABLE wasn''t installed. When {#AppName} starts, it shows how to install it, step by step.',
+                       mbInformation, MB_OK, IDOK);
+end;
+
+function NeedRestart(): Boolean;
+begin
+  Result := VbCableNeedsRestart;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Code: Integer;
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('vbcable') then
+    InstallVbCable();
+  // A restart that waits for later skips the Start check box, so knobs starts
+  // now, and again after the restart.
+  if (CurStep = ssDone) and VbCableNeedsRestart and not WizardForm.YesRadio.Checked then
+    ExecAsOriginalUser(ExpandConstant('{app}\{#AppName}.exe'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait,
+                       Code);
 end;
 
 // After an update, knobs starts again: the new copy, or this one if the
