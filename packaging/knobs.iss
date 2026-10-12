@@ -239,9 +239,8 @@ begin
   ForceDirectories(Folder);
   ExtractTemporaryFile('{#VbCablePackName}');
   Pack := ExpandConstant('{tmp}\{#VbCablePackName}');
-  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver. VB-Audio''s website may ' +
-                                    'open in your browser after it.';
-  WizardForm.FilenameLabel.Caption := '';
+  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver, then close it.';
+  WizardForm.FilenameLabel.Caption := 'VB-Audio''s website may then open in your browser.';
   // tar, which ships with Windows, unzips it.
   Ran := Exec(ExpandConstant('{sys}\tar.exe'), '-xf "' + Pack + '" -C "' + Folder + '"', Folder, SW_HIDE,
               ewWaitUntilTerminated, Code) and (Code = 0) and FileExists(Folder + '\VBCABLE_Setup_x64.exe');
@@ -276,7 +275,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('vbcable') then
+  // As installing starts: Setup asks NeedRestart once the files are in,
+  // before ssPostInstall.
+  if (CurStep = ssInstall) and WizardIsTaskSelected('vbcable') then
     InstallVbCable();
   // A restart that waits for later skips the Start check box, so knobs starts
   // now, and again after the restart.
