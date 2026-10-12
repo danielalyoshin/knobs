@@ -60,8 +60,8 @@ Walkthrough ObsFilters() {
   // the + menu and + under it.
   walk.looks = {{5.95f, 8.9f, 760, 1010}, {8.9f, 13.6f, 790, 815}};
   walk.length = 13.6f;
-  // The pointer on +, close to OBS's own size.
-  walk.still = 8.6f;
+  // Filters highlighted in Mic/Aux's menu, the part that's hard to find.
+  walk.still = 5.5f;
   walk.ground = D2D1::ColorF(0x111317);
   return walk;
 }

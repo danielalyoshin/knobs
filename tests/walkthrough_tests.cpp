@@ -94,12 +94,14 @@ TEST(WalkthroughStepsLightUpInOrder) {
       CHECK(WalkAt(walk, walk.clicks[i], kFrame).step == expected.click_steps[i]);
     }
   }
-  // Held still, OBS's shows the pointer on +, close to OBS's own size, and
-  // VB-Cable's Run as administrator, highlighted.
+  // Held still, OBS's shows Filters highlighted in Mic/Aux's menu, close to
+  // OBS's own size, and VB-Cable's Run as administrator, highlighted: the
+  // pointer resting on them before it clicks.
   const WalkFrame obs = WalkAt(Obs(), Obs().still, kFrame);
-  CHECK(obs.step == 3);
-  CHECK(Obs().shots[static_cast<size_t>(obs.shot)].picture == "obs-filters-window");
-  CHECK(Near(obs.pointer, {636, 1124}));
+  CHECK(obs.step == 2);
+  CHECK(Obs().shots[static_cast<size_t>(obs.shot)].picture == "obs-mixer-filters");
+  CHECK(Near(obs.pointer, {470, 794}));
+  CHECK(!obs.ring);
   CHECK(obs.scale >= 0.4f && obs.scale <= 0.5f);
   const Walkthrough& vb = *WalkthroughNamed("vb-cable-setup");
   const WalkFrame cable = WalkAt(vb, vb.still, kFrame);
