@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+#include <array>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -10,9 +11,10 @@
 
 // The first run as data (docs/design.md, First run): which page to show for a
 // snapshot of the core, what the page says and offers, and what each button
-// does. first_run_dialog.cpp shows the pages in one task dialog. Text is UTF-8.
-// Content and footers may hold links, <a href="…">as task dialogs take
-// them</a>.
+// does. setup_window.cpp shows the pages in a window of its own. Text is
+// UTF-8. Content, steps, notes, footers and stage values may hold the markup
+// rich_text.h reads: <a href="…">links</a>, <b>names in a UI</b> and
+// <code>file names</code>.
 namespace knobs::tray {
 
 // In the order the first door goes through them.
@@ -78,21 +80,72 @@ enum FirstRunId : int {
   kChoiceFirst = 200,
 };
 
-enum class PageIcon { kKnob, kInformation, kWarning, kError };
+// The stages of the mic's path, in the band across the top of every page:
+// the mic, OBS's filters, the virtual cable and the other apps.
+enum class Stage { kMic, kFilters, kCable, kApps };
+inline constexpr size_t kStageCount = 4;
+
+enum class StageState {
+  kUnknown,  // Not known yet.
+  kKnown,    // Known, with nothing to mark.
+  kSet,      // In place.
+  kWarning,  // In place, with a warning that changes what to expect.
+  kBlocked,  // Stops knobs, or needs the user before it can run.
+};
+
+struct StageView {
+  StageState state = StageState::kUnknown;
+  std::string value;  // What knobs knows of it: a line or two, "\n" between.
+
+  friend bool operator==(const StageView&, const StageView&) = default;
+};
+
+// The band: each stage as the snapshot has it.
+std::array<StageView, kStageCount> StageViews(const core::Snapshot& snapshot);
 
 struct PageButton {
   int id = 0;
-  std::string text;  // A command link's is "Text\nNote".
+  // A command link's and a choice's may be "Text\nNote". A button's and a
+  // command link's mark their access key with "&", as Windows does: "&Back"
+  // is Alt+B ("&&" for an "&").
+  std::string text;
   bool enabled = true;
 
   friend bool operator==(const PageButton&, const PageButton&) = default;
 };
 
+// A screenshot beside a page's steps, showing one of them.
+struct Picture {
+  std::string name;  // Its resource: "obs-filters", "vb-cable-setup".
+  int step = 0;      // The step it shows, from 1.
+  std::string alt;   // What it shows, for screen readers.
+
+  friend bool operator==(const Picture&, const Picture&) = default;
+};
+
+// A note on the warnings page.
+struct PageNote {
+  bool warning = false;  // Else information.
+  std::string text;
+
+  friend bool operator==(const PageNote&, const PageNote&) = default;
+};
+
 struct PageView {
   FirstRunPage page = FirstRunPage::kWelcome;
-  PageIcon icon = PageIcon::kKnob;
+  // The stage the page is about, which the band points at.
+  std::optional<Stage> stage;
+  std::array<StageView, kStageCount> stages;
   std::string instruction;  // The heading.
+  // Paragraphs, "\n\n" between.
   std::string content;
+  // Numbered steps after the content, and the screenshot beside them.
+  std::vector<std::string> steps;
+  std::optional<Picture> picture;
+  std::vector<PageNote> notes;
+  // The chain as it will run, set out on the last page.
+  std::optional<core::ChainSummary> chain;
+  // The page's note, beside its buttons.
   std::string footer;
   // The buttons are command links (the doors), not push buttons.
   bool command_links = false;
@@ -100,11 +153,14 @@ struct PageView {
   int default_button = 0;
   std::vector<PageButton> choices;
   int default_choice = 0;
-  // A check box under the content, if there's text for one.
+  // A check box under the content, if there's text for one, with its
+  // access key as a button's.
   std::string check;
   bool checked = false;
-  // The page waits for something and moves on by itself.
+  // The page waits for something and moves on by itself, and `status` says
+  // what for, beside the buttons.
   bool waiting = false;
+  std::string status;
 
   friend bool operator==(const PageView&, const PageView&) = default;
 };
@@ -166,6 +222,9 @@ class FirstRun {
   std::optional<FirstRunPage> focus_;
   std::vector<FirstRunPage> history_;
 };
+
+// A button's or check box's text without its access key's "&".
+std::string WithoutAccessKey(std::string_view text);
 
 // Whether any of the collection's mics has a filter that's on.
 bool AnyFilters(const core::Snapshot& snapshot);

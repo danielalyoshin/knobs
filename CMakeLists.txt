@@ -63,18 +63,27 @@ add_library(knobs_tray STATIC
   src/tray/autostart.cpp
   src/tray/badge.cpp
   src/tray/first_run.cpp
-  src/tray/first_run_dialog.cpp
   src/tray/menu.cpp
   src/tray/menu_theme.cpp
   src/tray/message_dialog.cpp
   src/tray/notices.cpp
   src/tray/open_obs.cpp
+  src/tray/rich_text.cpp
   src/tray/settings_file.cpp
+  src/tray/setup_graphics.cpp
+  src/tray/setup_scene.cpp
+  src/tray/setup_theme.cpp
+  src/tray/setup_uia.cpp
+  src/tray/setup_window.cpp
   src/tray/single_instance.cpp
   src/tray/tray_app.cpp
 )
 target_include_directories(knobs_tray PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
-target_link_libraries(knobs_tray PUBLIC knobs_runtime PRIVATE comctl32 shell32)
+# The setup window draws itself with Direct2D and DirectWrite, decodes its
+# screenshots with WIC and speaks UI Automation, all of which ship with
+# Windows.
+target_link_libraries(knobs_tray PUBLIC knobs_runtime
+                      PRIVATE comctl32 shell32 d2d1 dwrite windowscodecs uiautomationcore dwmapi shcore oleaut32)
 
 # The tray app. The manifest asks for per-monitor DPI awareness (v2) and
 # Common Controls 6; the resource compiler finds the icon in assets/.

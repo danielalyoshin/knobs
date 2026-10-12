@@ -9,6 +9,7 @@
 #include <format>
 #include <string_view>
 
+#include "tray/setup_window.h"
 #include "util/win_strings.h"
 
 namespace knobs::tools {
@@ -78,6 +79,11 @@ std::vector<HWND> OpenMenus() {
 HWND OpenDialog() {
   const std::vector<HWND> dialogs = ThreadWindows(L"#32770");
   return dialogs.empty() ? nullptr : dialogs.front();
+}
+
+HWND OpenSetupWindow() {
+  const std::vector<HWND> windows = ThreadWindows(tray::kSetupWindowClass);
+  return windows.empty() ? nullptr : windows.front();
 }
 
 std::optional<RECT> BoundsOf(const std::vector<HWND>& windows) {

@@ -207,7 +207,7 @@ Restarts don't remove a slow mic's short dropouts, or delay steps downstream of 
 
 ## The tray app
 
-The tray app shows the core's state and sends it commands, with Windows' own controls. `knobs-tray` runs it on a made-up OBS and devices, and takes pictures of every state.
+The tray app shows the core's state and sends it commands. The menu and notifications are Windows' own, and the setup window is knobs's own. `knobs-tray` runs it on a made-up OBS and devices, and takes pictures of every state.
 
 ### Status line and menu
 
@@ -224,13 +224,33 @@ Windows keeps a user's programs running when another user signs in, and the cabl
 
 ### First run
 
-The first run is one `TaskDialogIndirect` window that changes pages with `TDM_NAVIGATE_PAGE`. It stays light in dark mode, which is fine for a window seen once. It offers two doors, "I set up my mic in OBS" and "I'm new to OBS", each noting what knobs found, and the one that fits is the default.
+The first run shows its pages in the setup window (below). It offers two doors, "I set up my mic in OBS" and "I'm new to OBS", each noting what knobs found, and the one that fits is the default.
 
-- The first door asks only what it needs: anything that blocks the rest, such as OBS not found, then which mic, when there are several, which cable, when OBS doesn't monitor to a connected one, and the warnings that change what to expect. With no cable installed, it links to VB-Cable and moves on when one appears.
+- The first door asks only what it needs: anything that blocks the rest, such as OBS not found, then which mic, when there are several, which cable, when OBS doesn't monitor to a connected one, and the warnings that change what to expect. With no cable installed, it shows how to install VB-Cable, step by step, and moves on when one appears.
 - The second door lists five steps in OBS, in OBS's own words, which are the same in 32.2.2 and 33.0, and suggests no filters or settings, since OBS is the editor. When OBS closes with filters on the mic, the first run carries on with the first door.
 - The last page shows the chain, which device other apps should use and where the tray icon is, with Start with Windows checked.
 
 A choice takes effect when the core's next snapshot carries it, and the page waits for that. knobs reopens an unfinished first run where it stopped, but not when Windows starts it at sign-in.
+
+### The setup window
+
+`SetupWindow` is a window of knobs's own, drawn with Direct2D and DirectWrite, which ship with Windows, so the tray stays plain Win32 with no UI framework. The pages stay data (`FirstRun`'s `PageView`, with the band's stages from `StageViews`), and the window lays out whichever page the data gives it (`setup_scene`). Its look is getknobs.app's graphite in Windows' own type.
+
+```mermaid
+flowchart TB
+    band["Band: your mic › OBS's filters › virtual cable › your other apps"]
+    panel["Panel: the page, its caret pointing up at the stage it's about"]
+    foot["Foot: the page's note on the left, its buttons on the right"]
+    band --> panel --> foot
+```
+
+- **The band** draws the mic's path as the site's How it works does: each stage an icon on a 1px wire, with its name and what knobs knows of it. A stage that's set, warns or stops knobs wears a badge on its icon's corner, in the tray icon's language: a green disc with a check, an amber triangle with "!", or the red disc with "!". The wire is ink as far as the signal has got, up to the stage the page is about.
+- **The panel** holds the heading, the text, and the page's doors, choices, steps, notes or chain, and scrolls if they don't fit. Its caret points at the page's stage, and pages about no stage, such as Looking for OBS, have none.
+- **Guides** are numbered steps. A screenshot beside them sits level with the step it shows, and that step's number and the screenshot's corner wear the same ink disc. The screenshots (OBS's Filters window, VB-Cable's setup) are PNG resources (`OBS_FILTERS`, `VB_CABLE_SETUP`); without one, the steps take the panel's width.
+- **The look:** 760 by 520 DIPs. Windows' app mode picks the site's dark graphite or the same greys in light, and high contrast uses the user's colours only. Segoe UI Variable (Segoe UI on Windows 10), Consolas for file names, 4px controls and an 8px panel, hairlines on whole device pixels, and on Windows 11 a title bar in the window's own ground.
+- **Motion** uses the site's one curve: the caret slides and the wire inks over 320 ms, a new page fades in over 200 ms, and a waiting page's dot breathes. With Windows' animations off, nothing moves.
+- **Keyboard and screen readers.** Tab moves through the controls in reading order, the arrows through a group of choices, Enter clicks the focused button or the page's default, and Esc closes. Every button, door and the check box has an access key, marked "&" in the page's data and underlined while Alt is held, as in Windows' dialogs. UI Automation (`setup_uia`) gives each part of the page a provider, with the patterns for its controls: the stages as a list with their state, links, doors and buttons to invoke, radios to select, the check box to toggle, and what a page waits for as a live region. A new page announces its heading.
+- **Scale.** It opens on the pointer's monitor at that monitor's scale, and Windows' text size scales the whole window, as far as the screen allows.
 
 ### Notifications and badges
 

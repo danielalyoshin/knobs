@@ -1,0 +1,179 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#pragma once
+
+#include <windows.h>
+#include <d2d1.h>
+#include <wrl/client.h>
+
+#include <array>
+#include <chrono>
+#include <filesystem>
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+
+#include "core/state.h"
+#include "tray/first_run.h"
+#include "tray/menu_theme.h"
+#include "tray/setup_scene.h"
+#include "tray/setup_theme.h"
+#include "tray/setup_uia.h"
+#include "util/result.h"
+
+// The setup window (docs/design.md, The setup window): a window of knobs's
+// own that shows FirstRun's pages, drawn with Direct2D and DirectWrite, and
+// moves between them as the user clicks and as the core's state changes.
+namespace knobs::tray {
+
+// What the first run needs from the tray. Called on the tray's thread.
+class FirstRunHost {
+ public:
+  virtual ~FirstRunHost() = default;
+  // The core's latest state.
+  virtual const core::Snapshot& snapshot() const = 0;
+  virtual void ApplySettings(const core::Settings& settings) = 0;
+  virtual void Reimport() = 0;
+  // Starts a new copy and quits. Returns false if it couldn't, once it has
+  // said why: the tray runs on.
+  virtual bool Restart() = 0;
+  // Starts OBS from its install (OpenObs).
+  virtual Status StartObs(const std::filesystem::path& install_root) = 0;
+  // Done was clicked, with Start with Windows as `start_with_windows`.
+  virtual void FinishFirstRun(bool start_with_windows) = 0;
+  virtual void SaveFirstRun(const FirstRunProgress& progress) = 0;
+};
+
+// The window's class, which the dev tools find it by.
+inline constexpr wchar_t kSetupWindowClass[] = L"knobs.Setup";
+// Clicks what has this id, as the dev tools do: a button or door (a
+// FirstRunId), a choice, or the check box (kCheckBoxId), in wParam.
+inline constexpr UINT kSetupClickMessage = WM_APP + 0x40;
+
+class SetupWindow final : private SetupUiaHost {
+ public:
+  // `theme` is the tray's: kSystem follows Windows' app mode. `zoom`, for
+  // the dev tools' pictures, takes the place of Windows' text size.
+  SetupWindow(FirstRunHost& host, HINSTANCE instance, FirstRun first_run, MenuTheme theme,
+              std::optional<float> zoom = std::nullopt);
+  ~SetupWindow() override;
+  SetupWindow(const SetupWindow&) = delete;
+  SetupWindow& operator=(const SetupWindow&) = delete;
+
+  // Shows the window, and returns once it's closed. Snapshots keep arriving
+  // meanwhile: the tray's messages are pumped by the window's loop.
+  void Show();
+  // The host's snapshot has moved on from `before`.
+  void Changed(const core::Snapshot& before);
+  // Null until it's shown, and after.
+  HWND window() const { return window_; }
+
+ private:
+  using Clock = std::chrono::steady_clock;
+
+  static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
+  LRESULT HandleMessage(UINT message, WPARAM wparam, LPARAM lparam);
+  bool Create();
+  void ApplyTheme();
+  bool MakeTarget();
+  void Paint();
+
+  // Shows the page for the host's snapshot, if it's changed.
+  void Render();
+  void ShowView(PageView view);
+  void Layout();
+  // Something the user did to an element.
+  void Activate(int element);
+  // A button or door, as FirstRunDialog's buttons were.
+  void Click(int id);
+  void Apply(const core::Settings& settings);
+  void Save();
+  void ShowError(const std::string& text);
+  void Close();
+
+  // Keyboard and focus.
+  void OnKey(WPARAM key);
+  // A letter typed, with Alt or without: clicks what has it as its access
+  // key. Returns whether anything did.
+  bool OnAccessKey(wchar_t letter);
+  void FocusOn(int element);
+  void MoveFocus(int step);
+  void MoveChoice(int step);
+  void ScrollTo(float scroll);
+  void ScrollIntoView(int element);
+  D2D1_POINT_2F ToDips(LPARAM lparam) const;
+
+  // Motion.
+  void StartMotion(const Scene& before, bool new_page);
+  void Step();
+
+  ID2D1Bitmap* Picture(const std::string& name);
+
+  // SetupUiaHost.
+  HWND UiaWindow() const override { return window_; }
+  const Scene& UiaScene() const override { return scene_; }
+  float UiaScroll() const override { return scroll_; }
+  int UiaFocus() const override { return focus_; }
+  void UiaFocusOn(int element) override;
+  void UiaActivate(int element) override { Activate(element); }
+  RECT UiaScreenRect(const D2D1_RECT_F& box) const override;
+  D2D1_POINT_2F UiaClientPoint(POINT screen) const override;
+
+  FirstRunHost& host_;
+  HINSTANCE instance_;
+  FirstRun first_run_;
+  FirstRunProgress saved_;
+  MenuTheme theme_;
+  std::optional<float> zoom_asked_;
+  HWND window_ = nullptr;
+  HICON icon_large_ = nullptr;
+  HICON icon_small_ = nullptr;
+  std::optional<WPARAM> quit_;  // WM_QUIT came while the window was open.
+
+  // What's shown.
+  PageView view_;
+  int choice_ = 0;
+  bool checked_ = false;
+  Scene scene_;
+  SetupPalette palette_;
+  // Settings applied, until the core's snapshots carry them.
+  std::optional<core::Settings> pending_;
+  // In a button's handler, which may run a dialog of its own: changes wait
+  // until it returns.
+  bool in_button_ = false;
+  bool render_due_ = false;
+  std::optional<core::Snapshot> changed_from_;
+
+  // Drawing.
+  Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> target_;
+  ScenePainter painter_;
+  std::map<std::string, Microsoft::WRL::ComPtr<ID2D1Bitmap>> pictures_;
+  UINT dpi_ = 96;
+  float zoom_ = 1;  // Windows' text size.
+  float Scale() const { return static_cast<float>(dpi_) / 96 * zoom_; }
+
+  // Using it.
+  int hover_ = -1;
+  int pressed_ = -1;
+  int focus_ = -1;
+  bool show_focus_ = false;
+  // Access keys show while Alt is down, until the mouse is used, or always if
+  // Windows is set to underline them.
+  bool show_access_keys_ = false;
+  bool tracking_mouse_ = false;
+  float scroll_ = 0;
+
+  // Motion.
+  bool animate_ = true;
+  Clock::time_point motion_start_;
+  bool moving_ = false;
+  float caret_from_ = 0;
+  std::optional<float> caret_to_;
+  std::array<float, kStageCount - 1> wire_from_{}, wire_to_{};
+  float arrive_ = 1;
+  SceneState shown_;
+
+  std::unique_ptr<SetupUia> uia_;
+};
+
+}  // namespace knobs::tray

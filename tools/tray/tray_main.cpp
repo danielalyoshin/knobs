@@ -9,6 +9,7 @@
 // tests/fixtures/obs-config, with the installed OBS's libobs.
 
 #include <windows.h>
+#include <commctrl.h>
 #include <conio.h>
 #include <objbase.h>
 
@@ -16,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cwchar>
 #include <cwctype>
 #include <filesystem>
 #include <format>
@@ -86,6 +88,8 @@ against the fake.
 Options:
   --state <name>         The state to start in (below). Default: running.
   --theme <name>         system (Windows' mode), light or dark. Default: system.
+  --zoom <n>             Draw the setup window n times as big, from 1 to 3, as
+                         Windows' text size would, for sharper pictures.
   --settings <file>      Read the settings from this file and save changes to it.
                          Without it, the first run counts as finished unless
                          --first-run is given.
@@ -119,7 +123,8 @@ v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
 and q quits. Changes in OBS are seen when it closes or at a re-import. In the
 first run: y and n click the doors ("I set up my mic in OBS", "I'm new to OBS"),
 x Next, b Back, d Done, p Open OBS (which only says so: OBS would open the
-mic), 1 to 9 pick a choice, and k unchecks the check box.
+mic), 1 to 9 pick a choice, k unchecks the check box, and h holds Alt down, so
+the access keys show.
 
 States:
 {3})",
@@ -129,6 +134,7 @@ States:
 struct Options {
   const FakeScenario* scenario = &FakeScenarios().front();
   tray::MenuTheme theme = tray::MenuTheme::kSystem;
+  std::optional<float> zoom;
   std::optional<fs::path> settings;
   bool start_with_windows = false;
   ImportArgs import_args;
@@ -176,6 +182,10 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       } else {
         return std::nullopt;
       }
+    } else if (arg == L"--zoom") {
+      const float zoom = std::wcstof(std::wstring(value).c_str(), nullptr);
+      if (zoom < 1 || zoom > 3) return std::nullopt;
+      options.zoom = zoom;
     } else if (arg == L"--settings") {
       options.settings = fs::absolute(value);
     } else if (arg == L"--first-run") {
@@ -344,10 +354,10 @@ void Press(wchar_t key) {
       session.app->Quit();
       break;
     default:
-      // The first run's buttons, clicked through the task dialog's own
-      // messages.
-      if (const HWND dialog = OpenDialog()) {
-        const auto click = [dialog](int id) { SendMessageW(dialog, TDM_CLICK_BUTTON, id, 0); };
+      // The first run's buttons, clicked through the setup window's own
+      // message.
+      if (const HWND setup = OpenSetupWindow()) {
+        const auto click = [setup](int id) { SendMessageW(setup, tray::kSetupClickMessage, id, 0); };
         if (key == L'y') {
           click(tray::kButtonObsUser);
         } else if (key == L'n') {
@@ -361,9 +371,12 @@ void Press(wchar_t key) {
         } else if (key == L'p') {
           click(tray::kButtonOpenObs);
         } else if (key == L'k') {
-          SendMessageW(dialog, TDM_CLICK_VERIFICATION, FALSE, FALSE);
+          click(tray::kCheckBoxId);
+        } else if (key == L'h') {
+          // Alt held down: the access keys show.
+          SendMessageW(setup, WM_SYSKEYDOWN, VK_MENU, 1 << 29);
         } else if (key >= L'1' && key <= L'9') {
-          SendMessageW(dialog, TDM_CLICK_RADIO_BUTTON, tray::kChoiceFirst + (key - L'1'), 0);
+          click(tray::kChoiceFirst + (key - L'1'));
         }
       }
       break;
@@ -405,6 +418,7 @@ void CALLBACK OnSettled(HWND, UINT, UINT_PTR timer, DWORD) {
     return;
   }
   const HWND dialog = OpenDialog();
+  const HWND setup = OpenSetupWindow();
   if (session.options.notification) {
     if (!session.waiting_for_notice) {
       session.waiting_for_notice = true;
@@ -413,10 +427,11 @@ void CALLBACK OnSettled(HWND, UINT, UINT_PTR timer, DWORD) {
     return;
   }
   if (session.options.screenshot && !session.screenshot_taken) {
-    if (dialog || session.first_run_opened) {
+    if (setup || dialog || session.first_run_opened) {
       session.screenshot_taken = true;
-      const Status saved = dialog ? SaveWindowPng(dialog, *session.options.screenshot)
-                                  : Status(Error{"The first run's window isn't open."});
+      const HWND shown = dialog ? dialog : setup;
+      const Status saved = shown ? SaveWindowPng(shown, *session.options.screenshot)
+                                 : Status(Error{"The setup window isn't open."});
       Check(saved.ok(), "screenshot", saved ? ToUtf8(*session.options.screenshot) : saved.error());
       session.failed |= !saved;
     } else {
@@ -431,8 +446,8 @@ void CALLBACK OnSettled(HWND, UINT, UINT_PTR timer, DWORD) {
   }
   // A scripted run ends with the keys: close what they opened, then quit.
   if (!session.options.screenshot && session.options.presses.empty()) return;
-  if (dialog) {
-    PostMessageW(dialog, WM_CLOSE, 0, 0);
+  if (dialog || setup) {
+    PostMessageW(dialog ? dialog : setup, WM_CLOSE, 0, 0);
   } else if (!session.first_run_opened && !session.ended) {
     session.ended = true;
     session.app->Quit();
@@ -676,6 +691,7 @@ int Run(const Options& options) {
   tray_options.settings.mic = options.import_args.pick;
   if (const auto dirs = GetAppDirs()) tray_options.log_folder = dirs->Logs();
   tray_options.theme = options.theme;
+  tray_options.setup_zoom = options.zoom;
   tray_options.starts_with_windows = [] { return g_session->start_with_windows; };
   tray_options.set_start_with_windows = [](bool on) {
     g_session->start_with_windows = on;

@@ -16,7 +16,7 @@
 #include "core/state.h"
 #include "tray/badge.h"
 #include "tray/first_run.h"
-#include "tray/first_run_dialog.h"
+#include "tray/setup_window.h"
 #include "tray/menu.h"
 #include "tray/menu_theme.h"
 #include "tray/notices.h"
@@ -57,6 +57,9 @@ struct TrayOptions {
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
   std::filesystem::path log_folder;
   MenuTheme theme = MenuTheme::kSystem;
+  // The setup window's zoom in place of Windows' text size, for pictures
+  // (knobs-tray's --zoom).
+  std::optional<float> setup_zoom;
   // Hears each snapshot on the tray's thread, after the tray has.
   std::function<void(const core::Snapshot& snapshot)> on_snapshot;
   // Hears each notification as it's shown, and nullopt as one is taken
@@ -159,7 +162,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   FirstRunProgress first_run_;
   core::Snapshot snapshot_;
   std::unique_ptr<core::Core> core_;
-  FirstRunDialog* first_run_dialog_ = nullptr;  // While it's open.
+  SetupWindow* setup_window_ = nullptr;  // While it's open.
   Notifier notifier_;
   bool restart_tried_ = false;  // Since the core said it needs a restart.
 

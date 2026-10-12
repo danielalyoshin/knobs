@@ -5,6 +5,7 @@
 // clicks and changes of state move the first run on.
 
 #include <algorithm>
+#include <cctype>
 #include <format>
 #include <optional>
 #include <string>
@@ -15,6 +16,7 @@
 #include "core/state.h"
 #include "test_harness.h"
 #include "tray/first_run.h"
+#include "tray/rich_text.h"
 
 namespace {
 
@@ -85,7 +87,7 @@ FirstRun ObsUser(const core::Snapshot& snapshot) {
 
 std::vector<std::string> Texts(const std::vector<PageButton>& buttons) {
   std::vector<std::string> texts;
-  for (const PageButton& button : buttons) texts.push_back(button.text);
+  for (const PageButton& button : buttons) texts.push_back(WithoutAccessKey(button.text));
   return texts;
 }
 
@@ -103,8 +105,8 @@ TEST(WelcomeSaysWhatWasFound) {
   const auto notes = [](const core::Snapshot& snapshot) {
     const PageView view = FirstRun({}).View(snapshot);
     CHECK(view.page == Page::kWelcome && view.command_links && view.buttons.size() == 2);
-    return std::format("{} | {} | {}", view.buttons[0].text, view.buttons[1].text,
-                       view.default_button == kButtonObsUser ? "obs" : "new");
+    return std::format("{} | {} | {}", WithoutAccessKey(view.buttons[0].text),
+                       WithoutAccessKey(view.buttons[1].text), view.default_button == kButtonObsUser ? "obs" : "new");
   };
   core::Snapshot snapshot = Running();
   CHECK(notes(snapshot) ==
@@ -140,7 +142,7 @@ TEST(WelcomeSaysWhatWasFound) {
   CHECK(Contains(notes(core::Snapshot{}), "\nLooking for OBS…"));
 
   const PageView view = FirstRun({}).View(Running());
-  CHECK(view.icon == PageIcon::kKnob);
+  CHECK(view.stage == Stage::kFilters);
   CHECK(view.footer == std::format("{} isn't affiliated with or endorsed by the OBS Project.", kDisplayName));
 }
 
@@ -152,12 +154,12 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(first_run.progress().door == Door::kObsUser && first_run.Page(Running()) == Page::kDone);
   const PageView done = first_run.View(Running());
   CHECK(done.instruction == "Your mic is set up");
-  CHECK(done.content.starts_with(
-      "Mic/Aux › Noise Suppression › Noise Gate › Compressor › Limiter › CABLE In 16ch\n\n"
-      "In your other apps, choose CABLE Output as your mic."));
+  CHECK((done.chain == core::ChainSummary{"Mic/Aux", kFourFilters, "CABLE In 16ch"}));
+  CHECK(done.content.starts_with("In your other apps, choose <b>CABLE Output</b> as your mic."));
+  CHECK(done.stage == Stage::kApps);
   CHECK(Contains(done.content, "click ^ (Show hidden icons)"));
   CHECK(Contains(done.content, "It pauses while OBS is open"));
-  CHECK(done.check == std::format("Start {} with Windows", kDisplayName) && done.checked);
+  CHECK(done.check == std::format("Start {} with &Windows", kDisplayName) && done.checked);
   CHECK(done.default_button == kButtonDone);
   CHECK(!first_run.View(Running(), 0, false).checked);
 
@@ -209,9 +211,10 @@ TEST(SeveralMicsAskWhichOne) {
   CHECK(view.page == Page::kMic);
   CHECK(view.instruction == std::format("Which mic should {} run?", kDisplayName));
   CHECK(Texts(view.choices) ==
-        (std::vector<std::string>{"Desk Mic: Default communications device (Headset Microphone (USB)), no filters",
-                                  "Mic/Aux: Microphone (Audient iD4), 4 filters",
-                                  "Podcast Mic: device not connected, 1 filter"}));
+        (std::vector<std::string>{"Desk Mic\nDefault communications device (Headset Microphone (USB)), no filters",
+                                  "Mic/Aux\nMicrophone (Audient iD4), 4 filters",
+                                  "Podcast Mic\ndevice not connected, 1 filter"}));
+  CHECK(view.stage == Stage::kMic);
   // One with filters that OBS monitors, so sends to a cable.
   CHECK(view.default_choice == kChoiceFirst + 2);
   snapshot.mics[2].monitored = false;
@@ -242,7 +245,7 @@ TEST(SeveralMicsAskWhichOne) {
   // There's no default device.
   snapshot.default_input.clear();
   CHECK(ObsUser(snapshot).View(snapshot).choices[0].text.starts_with(
-      "Desk Mic: Default communications device (none connected)"));
+      "Desk Mic\nDefault communications device (none connected)"));
 }
 
 TEST(NoFiltersOffersTheSteps) {
@@ -261,7 +264,7 @@ TEST(NoFiltersOffersTheSteps) {
   CHECK(first_run.Page(snapshot) == Page::kFilters);
   first_run.Click(kButtonSkipFilters, 0, false, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kDone);
-  CHECK(first_run.View(snapshot).content.starts_with("Mic/Aux › CABLE In 16ch\n\n"));
+  CHECK((first_run.View(snapshot).chain == core::ChainSummary{"Mic/Aux", {}, "CABLE In 16ch"}));
 
   // With OBS open, what it saved may be behind.
   snapshot.obs_running = true;
@@ -313,7 +316,17 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   FirstRun first_run = ObsUser(none);
   const PageView view = first_run.View(none);
   CHECK(view.page == Page::kCable && view.waiting && view.instruction == "Install a virtual cable");
-  CHECK(Contains(view.content, "<a href=\"https://vb-audio.com/Cable/\">VB-Cable</a>"));
+  // The guide to installing VB-Cable, with a picture of its setup.
+  CHECK(view.content == "There's no virtual cable on this PC yet. To install VB-Cable:");
+  CHECK(view.steps.size() == 6);
+  CHECK(view.steps[0] == "Download its driver pack from <a href=\"https://vb-audio.com/Cable/\"><code>vb-audio.com/"
+                         "Cable</code></a>.");
+  CHECK(Contains(view.steps[2], "right-click <code>VBCABLE_Setup_x64.exe</code> and choose <b>Run as administrator</b>"));
+  CHECK(view.steps[3] == "Click <b>Install Driver</b>.");
+  CHECK(Contains(view.steps[5], "not CABLE Input."));
+  CHECK(view.picture && view.picture->name == "vb-cable-setup" && view.picture->step == 4);
+  CHECK(view.status == std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName));
+  CHECK(view.stage == Stage::kCable);
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back"}));
 
   // VB-Cable installs: its one input appears, and that's the cable.
@@ -347,14 +360,13 @@ TEST(CableThatIsntACable) {
   CHECK(view.page == Page::kCable);
   CHECK(Contains(view.content, "OBS monitors your mic to Headphones, which isn't a virtual cable."));
   CHECK(Texts(view.choices) ==
-        (std::vector<std::string>{"CABLE Input", "CABLE In 16ch", "Headphones (OBS's monitoring device)"}));
+        (std::vector<std::string>{"CABLE Input", "CABLE In 16ch", "Headphones\nOBS's monitoring device"}));
   CHECK(view.default_choice == kChoiceFirst + 2);
   // Keeping it is an answer, and no change.
   CHECK(first_run.Click(kButtonNext, kChoiceFirst + 2, false, snapshot).kind == Kind::kNone);
   CHECK(first_run.Page(snapshot) == Page::kDone);
-  CHECK(first_run.View(snapshot).content.starts_with("Mic/Aux › Noise Suppression › Noise Gate › Compressor › "
-                                                     "Limiter › Headphones\n\nIn your other apps, "
-                                                     "choose the recording side of Headphones as your mic."));
+  CHECK(first_run.View(snapshot).content.starts_with(
+      "In your other apps, choose the recording side of Headphones as your mic."));
 
   // A cable of knobs's own is no question.
   snapshot.settings.cable = kCable16Id;
@@ -385,7 +397,7 @@ TEST(CableMissingAlwaysAsks) {
   snapshot.outputs.push_back({kCable16, kCable16Id});
   first_run = FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, Page::kCable);
   const PageView again = first_run.View(snapshot);
-  CHECK(again.choices.back().text == "CABLE In 16ch (OBS's monitoring device)");
+  CHECK(again.choices.back().text == "CABLE In 16ch\nOBS's monitoring device");
   const FirstRunAction obs = first_run.Click(kButtonNext, kChoiceFirst + 1, false, snapshot);
   CHECK(obs.kind == Kind::kApply && obs.settings.cable.empty() && obs.settings.cable_name.empty());
 }
@@ -397,14 +409,22 @@ TEST(WarningsShowWhatChangesExpectations) {
                     {false, "The mic is on push-to-talk in OBS.", true}};
   FirstRun first_run = ObsUser(snapshot);
   PageView view = first_run.View(snapshot);
-  CHECK(view.page == Page::kWarnings && view.icon == PageIcon::kWarning && view.instruction == "Before you start");
-  CHECK(view.content == "• Filter \"VST\" is a VST plugin.\n\n• The mic is on push-to-talk in OBS.");
+  CHECK(view.page == Page::kWarnings && view.instruction == "Before you start");
+  CHECK((view.notes == std::vector<PageNote>{{true, "Filter \"VST\" is a VST plugin."},
+                                             {false, "The mic is on push-to-talk in OBS."}}));
+  CHECK(view.stages[static_cast<size_t>(Stage::kFilters)].state == StageState::kWarning);
   first_run.Click(kButtonNext, 0, false, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kDone && first_run.progress().reached == Page::kDone);
 
+  // File names are set as the pages set them.
+  core::Snapshot named = snapshot;
+  named.notes = {{true, "Filter \"VST\" is a VST plugin (ReaComp-standalone.dll)."}};
+  CHECK(ObsUser(named).View(named).notes[0].text ==
+        "Filter \"VST\" is a VST plugin (<code>ReaComp-standalone.dll</code>).");
+
   snapshot.notes.erase(snapshot.notes.begin());
   view = ObsUser(snapshot).View(snapshot);
-  CHECK(view.page == Page::kWarnings && view.icon == PageIcon::kInformation);
+  CHECK(view.page == Page::kWarnings && view.notes.size() == 1 && !view.notes[0].warning);
   snapshot.notes.pop_back();
   CHECK(ObsUser(snapshot).Page(snapshot) == Page::kDone);
 }
@@ -552,11 +572,12 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kSteps && view.instruction == "Set up your mic in OBS");
   // As OBS 32.2.2 names them (docs/design.md, First run).
-  CHECK(Contains(view.content, "\n1. Open OBS.\n"));
-  CHECK(Contains(view.content, "\n2. In the Audio Mixer, click Mic/Aux and choose Filters.\n"));
-  CHECK(Contains(view.content, "\n3. Under Audio Filters, click + and add filters as needed.\n"));
-  CHECK(Contains(view.content, "\n4. Click each filter and adjust it by ear, starting from OBS's defaults.\n"));
-  CHECK(Contains(view.content, "\n5. Close OBS. "));
+  CHECK((view.steps == std::vector<std::string>{
+             "Open OBS.", "In the Audio Mixer, click <b>Mic/Aux</b> and choose <b>Filters</b>.",
+             "Under Audio Filters, click <b>+</b> and add filters as needed.",
+             "Click each filter and adjust it by ear, starting from OBS's defaults.",
+             std::format("Close OBS. {} then reads your filters and carries on here.", kDisplayName)}));
+  CHECK(view.picture && view.picture->name == "obs-filters" && view.picture->step == 3);
   CHECK(Contains(view.footer, std::format("<a href=\"{}\">", kSetupGuideUrl)));
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open OBS", "Next"}));
   CHECK(FindButton(view, kButtonOpenObs)->enabled && !FindButton(view, kButtonNext)->enabled);
@@ -568,7 +589,7 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   open.state = State::kPausedForObs;
   open.obs_running = true;
   view = first_run.View(open);
-  CHECK(!FindButton(view, kButtonOpenObs)->enabled && view.footer.starts_with("OBS is open."));
+  CHECK(!FindButton(view, kButtonOpenObs)->enabled && view.waiting && view.status.starts_with("OBS is open."));
   // Closed with no filters added: still here.
   CHECK(first_run.Changed(open, snapshot).kind == Kind::kNone && first_run.Page(snapshot) == Page::kSteps);
   // Closed with filters: on to the first door's pages.
@@ -591,25 +612,149 @@ TEST(SecondDoorWithoutOBSOrAMic) {
   core::Snapshot missing;
   missing.state = State::kObsMissing;
   PageView view = FirstRun({}, Page::kSteps).View(missing);
-  CHECK(Contains(view.content, "\n1. Install OBS Studio 32.2 to 33.x from <a "
-                               "href=\"https://obsproject.com/download\">obsproject.com</a>, and open it.\n"));
-  CHECK(Contains(view.content, "\n2. In Settings › Audio, set Mic/Auxiliary Audio to your mic. Then, in the Audio "
-                               "Mixer, click Mic/Aux and choose Filters.\n"));
+  CHECK(view.steps[0] == "Install OBS Studio 32.2 to 33.x from <a href=\"https://obsproject.com/download\">"
+                         "obsproject.com</a>, and open it.");
+  CHECK(view.steps[1] == "In <b>Settings › Audio</b>, set <b>Mic/Auxiliary Audio</b> to your mic. Then, in the "
+                         "Audio Mixer, click <b>Mic/Aux</b> and choose <b>Filters</b>.");
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Next"}));
 
   core::Snapshot unsupported = missing;
   unsupported.state = State::kObsUnsupported;
   unsupported.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
   view = FirstRun({}, Page::kSteps).View(unsupported);
-  CHECK(Contains(view.content, "OBS's releases on GitHub</a>, and open it."));
-  CHECK(Contains(view.content, " doesn't support OBS 34.0.0 yet."));
+  CHECK(Contains(view.steps[0], "OBS's releases on GitHub</a>, and open it."));
+  CHECK(Contains(view.steps[0], " doesn't support OBS 34.0.0 yet."));
   unsupported.obs.version = {31, 1, 4};
   view = FirstRun({}, Page::kSteps).View(unsupported);
-  CHECK(Contains(view.content, std::format("and open it. OBS 31.1.4 is too old for {}.", kDisplayName)));
-  CHECK(!Contains(view.content, "yet"));
+  CHECK(Contains(view.steps[0], std::format("and open it. OBS 31.1.4 is too old for {}.", kDisplayName)));
+  CHECK(!Contains(view.steps[0], "yet"));
 
   // Several mics, none picked: whichever one they mean.
-  CHECK(Contains(FirstRun({}, Page::kSteps).View(PickMic()).content, "click your mic and choose Filters"));
+  CHECK(FirstRun({}, Page::kSteps).View(PickMic()).steps[1] ==
+        "In the Audio Mixer, click your mic and choose <b>Filters</b>.");
+}
+
+// --- The band ----------------------------------------------------------------------
+
+std::string Band(const core::Snapshot& snapshot) {
+  std::string band;
+  for (const StageView& stage : StageViews(snapshot)) {
+    constexpr const char* kStates[] = {"?", "known", "set", "warning", "blocked"};
+    band += std::format("{}[{}: {}]", band.empty() ? "" : " ", kStates[static_cast<int>(stage.state)], stage.value);
+  }
+  return band;
+}
+
+TEST(TheBandFollowsTheMicsPath) {
+  CHECK(Band(Running()) ==
+        "[set: Mic/Aux\nMicrophone (Audient iD4)] [set: 4 filters] [set: CABLE In 16ch] "
+        "[known: Choose <b>CABLE Output</b>]");
+  CHECK(Band(PickMic()) == "[known: 3 mics in OBS] [?: Not read yet] [set: CABLE In 16ch] [known: Choose <b>CABLE Output</b>]");
+  core::Snapshot looking;
+  CHECK(Band(looking) == "[?: Not read yet] [?: Looking for OBS] [?: Not read yet] [?: Use the cable as their mic]");
+  core::Snapshot missing;
+  missing.state = State::kObsMissing;
+  CHECK(Contains(Band(missing), "[blocked: OBS not found]"));
+  missing.state = State::kObsUnsupported;
+  missing.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
+  CHECK(Contains(Band(missing), "[blocked: Can't run OBS 34.0.0]"));
+
+  core::Snapshot snapshot = Running();
+  snapshot.chain->filters.clear();
+  snapshot.mics[0].filters.clear();
+  CHECK(Contains(Band(snapshot), "[?: No filters yet]"));
+  snapshot = Running();
+  snapshot.notes = {{true, "Filter \"VST\" is a VST plugin."}};
+  CHECK(Contains(Band(snapshot), "[warning: 4 filters]"));
+  snapshot = Running();
+  snapshot.state = State::kMicMissing;
+  snapshot.inputs.clear();
+  CHECK(Band(snapshot).starts_with("[blocked: Mic/Aux\nNot connected]"));
+
+  // The cable: none, one not chosen, one gone, and a device that isn't one.
+  snapshot = Running();
+  snapshot.state = State::kNeedsSetup;
+  snapshot.setup = SetupNeed::kCable;
+  snapshot.obs_cable = {"", "default"};
+  CHECK(Contains(Band(snapshot), "[?: Not chosen yet] [?: Use the cable as their mic]"));
+  snapshot.outputs = {{kSpeakers, kSpeakersId}};
+  CHECK(Contains(Band(snapshot), "[?: No cable yet]"));
+  snapshot = Running();
+  snapshot.state = State::kCableMissing;
+  snapshot.outputs = {{kSpeakers, kSpeakersId}};
+  CHECK(Contains(Band(snapshot), "[blocked: CABLE In 16ch\nNot connected] [?: Use the cable as their mic]"));
+  snapshot = Running();
+  snapshot.obs_cable = {kHeadphones, kHeadphonesId};
+  snapshot.outputs.push_back(snapshot.obs_cable);
+  CHECK(Contains(Band(snapshot), "[known: Headphones\nNot a virtual cable]"));
+
+  // Each page points at the stage it's about.
+  CHECK(FirstRun({}, Page::kWelcome).View(Running()).stage == Stage::kFilters);
+  CHECK(FirstRun({}, Page::kCable).View(Running()).stage == Stage::kCable);
+  CHECK(!ObsUser(looking).View(looking).stage);
+}
+
+TEST(EveryButtonHasItsOwnAccessKey) {
+  // Each button, door and check box on a page has an access key, and no two
+  // share one.
+  const auto keys_ok = [](const PageView& view) {
+    std::vector<char> keys;
+    std::vector<std::string> texts;
+    for (const PageButton& button : view.buttons) texts.push_back(button.text);
+    if (!view.check.empty()) texts.push_back(view.check);
+    for (const std::string& text : texts) {
+      const size_t at = text.find('&');
+      if (at == std::string::npos || at + 1 >= text.size()) return false;
+      const char key = static_cast<char>(std::tolower(static_cast<unsigned char>(text[at + 1])));
+      if (std::find(keys.begin(), keys.end(), key) != keys.end()) return false;
+      keys.push_back(key);
+    }
+    return true;
+  };
+  core::Snapshot missing;
+  missing.state = State::kObsMissing;
+  missing.settings.obs_dir = "D:\\OBS";
+  core::Snapshot settings;
+  settings.state = State::kNeedsSetup;
+  settings.setup = SetupNeed::kObsSettings;
+  settings.obs = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
+  settings.settings.obs_config = "E:\\Portable\\config";
+  core::Snapshot no_filters = Running();
+  no_filters.chain->filters.clear();
+  no_filters.mics[0].filters.clear();
+  core::Snapshot keep = Running();
+  keep.obs_cable = {kHeadphones, kHeadphonesId};
+  keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
+  core::Snapshot restart = Running();
+  restart.state = State::kRestartNeeded;
+  for (const Page page : {Page::kWelcome, Page::kSteps, Page::kLooking, Page::kMic, Page::kCable, Page::kWarnings,
+                          Page::kDone}) {
+    CHECK(keys_ok(FirstRun({}, page).View(PickMic())));
+  }
+  for (const core::Snapshot& snapshot : {missing, settings, no_filters, keep, restart}) {
+    CHECK(keys_ok(ObsUser(snapshot).View(snapshot)));
+  }
+  // A name keeps its "&"s.
+  keep.obs_cable = {"Speakers & Headphones", kHeadphonesId};
+  keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
+  CHECK(Texts(ObsUser(keep).View(keep).buttons).back() == "Keep Speakers & Headphones");
+}
+
+TEST(RichTextReadsThePagesMarkup) {
+  RichText rich = ParseRichText("Click <b>Install Driver</b>.");
+  CHECK(rich.text == L"Click Install Driver." &&
+        (rich.spans == std::vector<TextSpan>{{TextSpan::Kind::kBold, 6, 14, ""}}));
+  rich = ParseRichText("Get <a href=\"https://vb-audio.com/Cable/\"><code>vb-audio.com</code></a> now.");
+  CHECK(rich.text == L"Get vb-audio.com now.");
+  CHECK((rich.spans == std::vector<TextSpan>{{TextSpan::Kind::kLink, 4, 12, "https://vb-audio.com/Cable/"},
+                                            {TextSpan::Kind::kCode, 4, 12, ""}}));
+  // Only the markup's own tags: a name from OBS stays as it is.
+  CHECK(ParseRichText("Mic <3 <i>EQ</i>").text == L"Mic <3 <i>EQ</i>");
+  CHECK(ParseRichText("Mic <3 <i>EQ</i>").spans.empty());
+  // An unclosed tag runs to the end.
+  rich = ParseRichText("<b>Settings › Sound");
+  CHECK(rich.text == L"Settings › Sound" && rich.spans.size() == 1 && rich.spans[0].length == 16);
+  CHECK(PlainText("In <b>Settings</b>, <a href=\"x\">this</a>.") == "In Settings, this.");
 }
 
 // --- Resuming, Back and pages asked for -----------------------------------------

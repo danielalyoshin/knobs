@@ -223,7 +223,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         const core::Snapshot before = std::exchange(snapshot_, std::move(*snapshot));
         UpdateTip();
         if (RestartByItself()) return 0;
-        if (first_run_dialog_) first_run_dialog_->Changed(before);
+        if (setup_window_) setup_window_->Changed(before);
         Notify(notifier_.Changed(snapshot_, Quiet(), Clock::now()));
         if (options_.on_snapshot) options_.on_snapshot(snapshot_);
       }
@@ -281,7 +281,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
 
 void TrayApp::LoadIcons() {
   DestroyIcons();
-  const HICON small = LoadAppIcon(options_.instance, LIM_SMALL);
+  const HICON small_icon = LoadAppIcon(options_.instance, LIM_SMALL);
   // Windows 11 draws a notification's icon about 50 px wide at 100%, and
   // resamples whatever it's given. Twice that is sharpest: an icon that size
   // or a little bigger blurs, and a much bigger one comes out jagged.
@@ -291,10 +291,10 @@ void TrayApp::LoadIcons() {
     notification = nullptr;
   }
   for (const Badge badge : kBadges) {
-    icons_[static_cast<size_t>(badge)] = BadgedIcon(small, badge);
+    icons_[static_cast<size_t>(badge)] = BadgedIcon(small_icon, badge);
     notification_icons_[static_cast<size_t>(badge)] = BadgedIcon(notification, badge);
   }
-  if (small) DestroyIcon(small);
+  if (small_icon) DestroyIcon(small_icon);
   if (notification) DestroyIcon(notification);
 }
 
@@ -394,7 +394,7 @@ void TrayApp::HideBalloon() {
   Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
-bool TrayApp::Quiet() const { return !first_run_.done || first_run_dialog_ != nullptr; }
+bool TrayApp::Quiet() const { return !first_run_.done || setup_window_ != nullptr; }
 
 bool TrayApp::RestartByItself() {
   if (snapshot_.state != core::State::kRestartNeeded) {
@@ -403,7 +403,7 @@ bool TrayApp::RestartByItself() {
   }
   if (restart_tried_ || quitting_) return false;
   // The menu and the first run try again as they close.
-  if (in_menu_ || first_run_dialog_) return false;
+  if (in_menu_ || setup_window_) return false;
   if (OpenDialog()) {
     // Other windows, such as an error or a folder picker, don't say when
     // they close.
@@ -517,8 +517,8 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
 
 void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
   if (quitting_) return;
-  if (first_run_dialog_) {
-    if (const HWND window = first_run_dialog_->window()) SetForegroundWindow(window);
+  if (setup_window_) {
+    if (const HWND window = setup_window_->window()) SetForegroundWindow(window);
     return;
   }
   FirstRunProgress progress = first_run_;
@@ -528,10 +528,11 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
                           : FirstRunProgress{.done = true, .door = Door::kObsUser, .reached = FirstRunPage::kDone};
   }
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
-  FirstRunDialog dialog(*this, options_.instance, FirstRun(progress, page, starts));
-  first_run_dialog_ = &dialog;
+  SetupWindow dialog(*this, options_.instance, FirstRun(progress, page, starts), options_.theme,
+                     options_.setup_zoom);
+  setup_window_ = &dialog;
   dialog.Show();
-  first_run_dialog_ = nullptr;
+  setup_window_ = nullptr;
   RestartByItself();
 }
 
@@ -619,7 +620,7 @@ void TrayApp::ShowAbout() {
 void TrayApp::ShowError(std::string_view text) {
   // Over the first run while it's open, which keeps its buttons from being
   // clicked again while the error is up: a button's handler may be why.
-  const HWND owner = first_run_dialog_ ? first_run_dialog_->window() : nullptr;
+  const HWND owner = setup_window_ ? setup_window_->window() : nullptr;
   ShowMessageDialog(options_.instance, {.owner = owner, .icon = TD_WARNING_ICON, .content = FromUtf8(text)});
 }
 

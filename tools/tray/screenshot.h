@@ -31,6 +31,9 @@ Status SaveWindowPng(HWND window, const std::filesystem::path& file);
 // A dialog (window class #32770) this thread shows, or null.
 HWND OpenDialog();
 
+// The setup window, if this thread shows it, or null.
+HWND OpenSetupWindow();
+
 // Saves opaque pixels, BGRA and top-down, as a PNG. The thread needs COM.
 Status SavePixelsPng(int width, int height, const std::vector<uint32_t>& bgra, const std::filesystem::path& file);
 

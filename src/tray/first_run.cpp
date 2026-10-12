@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <format>
+#include <regex>
 #include <utility>
 
 #include "app_info.h"
@@ -98,6 +99,13 @@ std::vector<import::ImportNote> HeadsUp(const core::Snapshot& snapshot) {
   return notes;
 }
 
+// A note's file names, such as a VST plugin's "ReaComp-standalone.dll", as
+// <code>, as the pages set the files they name.
+std::string MarkFileNames(const std::string& text) {
+  static const std::regex kFile(R"([\w.+-]+\.(dll|exe)\b)", std::regex::icase);
+  return std::regex_replace(text, kFile, "<code>$&</code>");
+}
+
 // The pages the state calls for, which block the rest.
 std::optional<Page> Blocking(const core::Snapshot& snapshot) {
   switch (snapshot.state) {
@@ -144,10 +152,119 @@ bool Applies(Page page, const core::Snapshot& snapshot) {
 }
 
 // The mic the steps and pages talk about: the picked one, or the only one.
+const import::MicCandidate* TheMic(const core::Snapshot& snapshot) {
+  if (snapshot.picked_mic && *snapshot.picked_mic < snapshot.mics.size()) return &snapshot.mics[*snapshot.picked_mic];
+  if (snapshot.mics.size() == 1) return &snapshot.mics.front();
+  return nullptr;
+}
+
 std::string MicName(const core::Snapshot& snapshot) {
   if (snapshot.chain) return snapshot.chain->mic;
-  if (snapshot.mics.size() == 1) return snapshot.mics.front().name;
-  return "";
+  const import::MicCandidate* mic = TheMic(snapshot);
+  return mic ? mic->name : "";
+}
+
+// The recording device a mic records from, if it's connected: for the
+// default device, the default communications device.
+std::string InputName(const std::string& device_id, const core::Snapshot& snapshot) {
+  const audio::AudioDevice* device =
+      FindById(snapshot.inputs, SameId(device_id, kDefaultDevice) ? snapshot.default_input : device_id);
+  return device ? device->name : "";
+}
+
+// --- The band ------------------------------------------------------------------------
+
+StageView MicStage(const core::Snapshot& snapshot) {
+  if (snapshot.state == State::kNeedsSetup && snapshot.setup == SetupNeed::kNoMic) {
+    return {StageState::kBlocked, "No mic in OBS"};
+  }
+  const import::MicCandidate* mic = TheMic(snapshot);
+  if (!mic) {
+    if (snapshot.mics.size() > 1) return {StageState::kKnown, std::format("{} mics in OBS", snapshot.mics.size())};
+    return {StageState::kUnknown, "Not read yet"};
+  }
+  const std::string device = InputName(mic->device_id, snapshot);
+  if (snapshot.state == State::kMicMissing || device.empty()) {
+    return {StageState::kBlocked, mic->name + "\nNot connected"};
+  }
+  return {StageState::kSet, mic->name + "\n" + device};
+}
+
+StageView FiltersStage(const core::Snapshot& snapshot) {
+  switch (snapshot.state) {
+    case State::kStarting:
+      return {StageState::kUnknown, "Looking for OBS"};
+    case State::kObsMissing:
+      return {StageState::kBlocked, "OBS not found"};
+    case State::kObsUnsupported:
+      return {StageState::kBlocked, std::format("Can't run OBS {}", snapshot.obs.version.ToString())};
+    case State::kFailed:
+      return {StageState::kBlocked, "Stopped after an error"};
+    case State::kNeedsSetup:
+      if (snapshot.setup == SetupNeed::kObsSettings) return {StageState::kBlocked, "Can't read OBS's settings"};
+      break;
+    default:
+      break;
+  }
+  std::optional<size_t> count;
+  if (snapshot.chain) {
+    count = snapshot.chain->filters.size();
+  } else if (const import::MicCandidate* mic = TheMic(snapshot)) {
+    count = mic->filters.size();
+  }
+  if (!count) return {StageState::kUnknown, "Not read yet"};
+  if (*count == 0) return {StageState::kUnknown, "No filters yet"};
+  const std::vector<import::ImportNote> notes = HeadsUp(snapshot);
+  const bool warned = std::any_of(notes.begin(), notes.end(), [](const import::ImportNote& n) { return n.warning; });
+  return {warned ? StageState::kWarning : StageState::kSet, Count(*count, "filter")};
+}
+
+StageView CableStage(const core::Snapshot& snapshot) {
+  const audio::AudioDevice sends_to = SendsTo(snapshot);
+  const std::string name = ShortDeviceName(sends_to.name);
+  if (snapshot.state == State::kCableMissing) return {StageState::kBlocked, name + "\nNot connected"};
+  if (NeedsCable(snapshot)) {
+    return {StageState::kUnknown, VirtualCables(snapshot).empty() ? "No cable yet" : "Not chosen yet"};
+  }
+  if (sends_to.id.empty()) return {StageState::kUnknown, "Not read yet"};
+  if (SameId(sends_to.id, kDefaultDevice)) return {StageState::kUnknown, "Not chosen yet"};
+  if (!FindById(snapshot.outputs, sends_to.id)) return {StageState::kBlocked, name + "\nNot connected"};
+  if (!IsVirtualCable(sends_to.name)) return {StageState::kKnown, name + "\nNot a virtual cable"};
+  return {StageState::kSet, name};
+}
+
+StageView AppsStage(const core::Snapshot& snapshot, const StageView& cable) {
+  if (cable.state != StageState::kSet) return {StageState::kUnknown, "Use the cable as their mic"};
+  const std::string side = CableRecordingSide(SendsTo(snapshot).name);
+  if (side.empty()) return {StageState::kKnown, "Use the cable as their mic"};
+  return {StageState::kKnown, std::format("Choose <b>{}</b>", side)};
+}
+
+// The stage a page is about.
+std::optional<Stage> StageOf(Page page, const core::Snapshot& snapshot) {
+  switch (page) {
+    case Page::kWelcome:
+    case Page::kSteps:
+    case Page::kFindObs:
+    case Page::kObsUnsupported:
+    case Page::kObsSettings:
+    case Page::kWarnings:
+      return Stage::kFilters;
+    case Page::kProblem:
+      if (snapshot.state == State::kFailed) return Stage::kFilters;
+      return std::nullopt;
+    case Page::kLooking:
+      return std::nullopt;
+    case Page::kMic:
+      return Stage::kMic;
+    case Page::kFilters:
+      return snapshot.chain ? Stage::kFilters : Stage::kMic;
+    case Page::kCable:
+      return Stage::kCable;
+    case Page::kDone:
+      return Stage::kApps;
+  }
+  return std::nullopt;
 }
 
 bool ObsInstalled(const core::Snapshot& snapshot) {
@@ -221,6 +338,13 @@ std::string ObsOpenLine(const core::Snapshot& snapshot) {
 
 PageButton Button(int id, std::string text, bool enabled = true) { return {id, std::move(text), enabled}; }
 
+// A name in a button's text: its "&"s are text, not an access key.
+std::string EscapeAccessKey(std::string_view name) {
+  std::string escaped;
+  for (const char c : name) escaped += c == '&' ? "&&" : std::string(1, c);
+  return escaped;
+}
+
 PageView Welcome(const core::Snapshot& snapshot) {
   PageView view;
   view.instruction = "Have you set up your mic in OBS?";
@@ -229,8 +353,8 @@ PageView Welcome(const core::Snapshot& snapshot) {
                              kDisplayName);
   view.footer = std::format("{} isn't affiliated with or endorsed by the OBS Project.", kDisplayName);
   view.command_links = true;
-  view.buttons = {Button(kButtonObsUser, "I set up my mic in OBS\n" + ObsUserNote(snapshot)),
-                  Button(kButtonNewToObs, "I'm new to OBS\n" + NewToObsNote(snapshot))};
+  view.buttons = {Button(kButtonObsUser, "I &set up my mic in OBS\n" + ObsUserNote(snapshot)),
+                  Button(kButtonNewToObs, "I'm &new to OBS\n" + NewToObsNote(snapshot))};
   view.default_button = ObsUserFits(snapshot) ? kButtonObsUser : kButtonNewToObs;
   return view;
 }
@@ -260,27 +384,29 @@ PageView Steps(const core::Snapshot& snapshot) {
     // The names in OBS's en-US locale, the same in 32.2.2 and 33.0:
     // Basic.Settings.Audio, Basic.Settings.Audio.AuxDevice, Mixer,
     // Basic.AuxDevice1 and Filters.
-    filters = "In Settings › Audio, set Mic/Auxiliary Audio to your mic. Then, in the Audio Mixer, click Mic/Aux "
-              "and choose Filters.";
+    filters = "In <b>Settings › Audio</b>, set <b>Mic/Auxiliary Audio</b> to your mic. Then, in the Audio Mixer, "
+              "click <b>Mic/Aux</b> and choose <b>Filters</b>.";
   } else {
     // In OBS's mixer, a source's name opens its menu (VolumeControl.cpp).
-    filters = std::format("In the Audio Mixer, click {} and choose Filters.", mic.empty() ? "your mic" : mic);
+    filters = std::format("In the Audio Mixer, click {} and choose <b>Filters</b>.",
+                          mic.empty() ? "your mic" : std::format("<b>{}</b>", mic));
   }
   // An audio-only source's list is Basic.Filters.AudioFilters. knobs
   // suggests no filters and no settings.
-  view.content = std::format(
-      "OBS is where you tune your mic. {0} then runs the same filters with OBS closed.\n\n"
-      "1. {1}\n"
-      "2. {2}\n"
-      "3. Under Audio Filters, click + and add filters as needed.\n"
-      "4. Click each filter and adjust it by ear, starting from OBS's defaults.\n"
-      "5. Close OBS. {0} then reads your filters and carries on here.",
-      kDisplayName, open, filters);
+  view.content =
+      std::format("OBS is where you tune your mic. {} then runs the same filters with OBS closed.", kDisplayName);
+  view.steps = {open, filters, "Under Audio Filters, click <b>+</b> and add filters as needed.",
+                "Click each filter and adjust it by ear, starting from OBS's defaults.",
+                std::format("Close OBS. {} then reads your filters and carries on here.", kDisplayName)};
+  view.picture = Picture{"obs-filters", 3, "OBS's Filters window, with + under Audio Filters"};
   view.footer = std::format("<a href=\"{}\">The setup guide</a> has more on each step.", kSetupGuideUrl);
-  if (snapshot.obs_running) view.footer = "OBS is open. Close it when you're done.\n" + view.footer;
-  view.buttons.push_back(Button(kButtonBack, "Back"));
-  if (installed) view.buttons.push_back(Button(kButtonOpenObs, "Open OBS", !snapshot.obs_running));
-  view.buttons.push_back(Button(kButtonNext, "Next", !snapshot.obs_running && AnyFilters(snapshot)));
+  if (snapshot.obs_running) {
+    view.waiting = true;
+    view.status = "OBS is open. Close it when you're done.";
+  }
+  view.buttons.push_back(Button(kButtonBack, "&Back"));
+  if (installed) view.buttons.push_back(Button(kButtonOpenObs, "&Open OBS", !snapshot.obs_running));
+  view.buttons.push_back(Button(kButtonNext, "&Next", !snapshot.obs_running && AnyFilters(snapshot)));
   view.default_button = installed && !snapshot.obs_running ? kButtonOpenObs : kButtonNext;
   return view;
 }
@@ -290,36 +416,34 @@ PageView Looking() {
   view.instruction = "Looking for OBS…";
   view.content = "Copying the parts of OBS needed to run, this may take a few seconds the first time.";
   view.waiting = true;
-  view.buttons = {Button(kButtonBack, "Back")};
+  view.buttons = {Button(kButtonBack, "&Back")};
   return view;
 }
 
 PageView FindObs(const core::Snapshot& snapshot) {
   PageView view;
-  view.icon = PageIcon::kWarning;
   view.instruction = "Can't find OBS Studio";
   const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again")};
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonTryAgain, "&Try again")};
   if (snapshot.settings.obs_dir) {
     // A folder picked before: it stays picked until the user says otherwise.
     view.content = std::format("{}{}OBS isn't in the folder chosen for it. Choose the folder it's in now, or let {} "
                                "look for it where OBS's installer puts it.",
                                snapshot.detail, gap, kDisplayName);
-    view.buttons.push_back(Button(kButtonLookForObs, "Look for OBS"));
+    view.buttons.push_back(Button(kButtonLookForObs, "&Look for OBS"));
   } else {
     view.content = std::format("{}{}If OBS is installed somewhere else, such as by Steam or in a folder of its own, "
                                "choose that folder. Otherwise, <a href=\"{}\">get OBS Studio</a>, install it, and "
                                "try again.",
                                snapshot.detail, gap, kObsDownloadUrl);
   }
-  view.buttons.push_back(Button(kButtonChooseObs, "Choose folder…"));
+  view.buttons.push_back(Button(kButtonChooseObs, "&Choose folder…"));
   view.default_button = kButtonChooseObs;
   return view;
 }
 
 PageView ObsUnsupported(const core::Snapshot& snapshot) {
   PageView view;
-  view.icon = PageIcon::kWarning;
   view.instruction = "This version of OBS isn't supported";
   const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
   // Only an OBS newer than knobs supports can be waited for. Without an
@@ -329,13 +453,13 @@ PageView ObsUnsupported(const core::Snapshot& snapshot) {
                                              "latest release</a>.",
                                              kDisplayName, snapshot.obs.version.ToString(), kLatestReleaseUrl)
                                : "";
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again")};
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonTryAgain, "&Try again")};
   if (snapshot.settings.obs_dir) {
     // A folder picked before: it stays picked until the user says otherwise.
     view.content = std::format("{}{}This is the OBS in the folder chosen for it, {}. Choose the folder of a "
                                "supported OBS, or let {} look for OBS where OBS's installer puts it.{}",
                                snapshot.detail, gap, ToUtf8(snapshot.obs.root), kDisplayName, wait);
-    view.buttons.push_back(Button(kButtonLookForObs, "Look for OBS"));
+    view.buttons.push_back(Button(kButtonLookForObs, "&Look for OBS"));
     view.default_button = kButtonChooseObs;
   } else {
     view.content = std::format("{}{}Install a supported version from <a href=\"{}\">OBS's releases on GitHub</a>, "
@@ -343,18 +467,17 @@ PageView ObsUnsupported(const core::Snapshot& snapshot) {
                                snapshot.detail, gap, kObsReleasesUrl, wait);
     view.default_button = kButtonTryAgain;
   }
-  view.buttons.push_back(Button(kButtonChooseObs, "Choose folder…"));
+  view.buttons.push_back(Button(kButtonChooseObs, "&Choose folder…"));
   return view;
 }
 
 PageView ObsSettings(const core::Snapshot& snapshot) {
   PageView view;
-  view.icon = PageIcon::kWarning;
   view.instruction = "Can't read OBS's settings";
   const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
   // Try again reads the same folder again: on a drive plugged back in, or
   // with settings put there some other way.
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again")};
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonTryAgain, "&Try again")};
   // A folder picked before, other than the one OBS keeps its settings in,
   // stays picked until the user says otherwise. Opening OBS wouldn't fill
   // it, so the page doesn't suggest that. OBS's own folder picked is as good
@@ -363,8 +486,8 @@ PageView ObsSettings(const core::Snapshot& snapshot) {
     view.content = std::format("{}{}OBS's settings aren't in the folder chosen for them. Choose the folder that holds "
                                "obs-studio now, or use the one OBS keeps them in.",
                                snapshot.detail, gap);
-    view.buttons.push_back(Button(kButtonOwnObsSettings, "Use OBS's own folder"));
-    view.buttons.push_back(Button(kButtonChooseObsSettings, "Choose folder…"));
+    view.buttons.push_back(Button(kButtonOwnObsSettings, "&Use OBS's own folder"));
+    view.buttons.push_back(Button(kButtonChooseObsSettings, "&Choose folder…"));
     view.default_button = kButtonChooseObsSettings;
     return view;
   }
@@ -372,8 +495,8 @@ PageView ObsSettings(const core::Snapshot& snapshot) {
                              "choose that folder: the one that holds obs-studio.",
                              snapshot.detail, gap);
   view.footer = ObsOpenLine(snapshot);
-  view.buttons.push_back(Button(kButtonChooseObsSettings, "Choose folder…"));
-  if (ObsInstalled(snapshot)) view.buttons.push_back(Button(kButtonOpenObs, "Open OBS", !snapshot.obs_running));
+  view.buttons.push_back(Button(kButtonChooseObsSettings, "&Choose folder…"));
+  if (ObsInstalled(snapshot)) view.buttons.push_back(Button(kButtonOpenObs, "&Open OBS", !snapshot.obs_running));
   view.default_button = ObsInstalled(snapshot) && !snapshot.obs_running ? kButtonOpenObs : kButtonChooseObsSettings;
   return view;
 }
@@ -381,16 +504,14 @@ PageView ObsSettings(const core::Snapshot& snapshot) {
 PageView Problem(const core::Snapshot& snapshot) {
   PageView view;
   view.content = snapshot.detail;
-  view.buttons = {Button(kButtonBack, "Back")};
+  view.buttons = {Button(kButtonBack, "&Back")};
   if (snapshot.state == State::kRestartNeeded) {
-    view.icon = PageIcon::kWarning;
-    view.instruction = std::format("{} needs to restart", kDisplayName);
-    view.buttons.push_back(Button(kButtonRestart, std::format("Restart {}", kDisplayName)));
+      view.instruction = std::format("{} needs to restart", kDisplayName);
+    view.buttons.push_back(Button(kButtonRestart, std::format("&Restart {}", kDisplayName)));
     view.default_button = kButtonRestart;
   } else {
-    view.icon = PageIcon::kError;
     view.instruction = "Stopped after an error";
-    view.buttons.push_back(Button(kButtonTryAgain, "Try again"));
+    view.buttons.push_back(Button(kButtonTryAgain, "&Try again"));
     view.default_button = kButtonTryAgain;
   }
   return view;
@@ -407,7 +528,7 @@ std::string MicChoice(const import::MicCandidate& mic, const core::Snapshot& sna
   } else {
     device = "device not connected";
   }
-  return std::format("{}: {}, {}", mic.name, device,
+  return std::format("{}\n{}, {}", mic.name, device,
                      mic.filters.empty() ? "no filters" : Count(mic.filters.size(), "filter"));
 }
 
@@ -433,7 +554,7 @@ PageView Mic(const core::Snapshot& snapshot) {
   }
   view.default_choice = kChoiceFirst + static_cast<int>(preferred.value_or(0));
   view.footer = ObsOpenLine(snapshot);
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonNext, "Next")};
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonNext, "&Next")};
   view.default_button = kButtonNext;
   return view;
 }
@@ -441,21 +562,21 @@ PageView Mic(const core::Snapshot& snapshot) {
 PageView Filters(const core::Snapshot& snapshot) {
   PageView view;
   view.footer = ObsOpenLine(snapshot);
-  view.buttons = {Button(kButtonBack, "Back")};
+  view.buttons = {Button(kButtonBack, "&Back")};
   if (!snapshot.chain) {
     view.instruction = "OBS has no mic yet";
     view.content = std::format("{0} runs a mic from OBS. To set one up, open OBS's Settings › Audio, set "
                                "Mic/Auxiliary Audio to your mic, and close OBS. {0} carries on when OBS closes.",
                                kDisplayName);
-    if (ObsInstalled(snapshot)) view.buttons.push_back(Button(kButtonOpenObs, "Open OBS", !snapshot.obs_running));
+    if (ObsInstalled(snapshot)) view.buttons.push_back(Button(kButtonOpenObs, "&Open OBS", !snapshot.obs_running));
   } else {
     view.instruction = std::format("{} has no filters yet", snapshot.chain->mic);
     view.content = std::format("{} would send it to the cable unprocessed. To set up its filters, follow the steps "
                                "for setting up a mic in OBS.",
                                kDisplayName);
-    view.buttons.push_back(Button(kButtonSkipFilters, "Continue without filters"));
+    view.buttons.push_back(Button(kButtonSkipFilters, "Continue &without filters"));
   }
-  view.buttons.push_back(Button(kButtonShowSteps, "Show the steps"));
+  view.buttons.push_back(Button(kButtonShowSteps, "&Show the steps"));
   view.default_button = kButtonShowSteps;
   return view;
 }
@@ -466,15 +587,23 @@ PageView Cable(const core::Snapshot& snapshot) {
   const std::vector<audio::AudioDevice> choices = CableChoices(snapshot);
   if (VirtualCables(snapshot).empty()) {
     view.instruction = "Install a virtual cable";
-    view.content = std::format("{0} sends your mic to a virtual cable, and other apps use the cable as their mic. "
-                               "There's no virtual cable on this PC yet. Install <a href=\"{1}\">VB-Cable</a>, and "
-                               "{0} moves on as soon as it appears.",
-                               kDisplayName, kVbCableUrl);
-    view.footer = std::format("If the installer restarts Windows, open {} again to carry on.", kDisplayName);
+    view.content = "There's no virtual cable on this PC yet. To install VB-Cable:";
+    // VB-Audio's driver pack (VBCABLE_Driver_Pack45.zip) and its setup.
+    view.steps = {
+        std::format("Download its driver pack from <a href=\"{}\"><code>vb-audio.com/Cable</code></a>.", kVbCableUrl),
+        "Right-click the zip and choose <b>Extract All</b>.",
+        "In the extracted folder, right-click <code>VBCABLE_Setup_x64.exe</code> and choose <b>Run as "
+        "administrator</b>.",
+        "Click <b>Install Driver</b>.",
+        std::format("Restart Windows, then open {} again.", kDisplayName),
+        "After the restart, open <b>Settings › System › Sound</b> and check that Output is still your speakers or "
+        "headphones, not CABLE Input."};
+    view.picture = Picture{"vb-cable-setup", 4, "VB-Cable's setup window, with Install Driver"};
     view.waiting = true;
-    view.buttons = {Button(kButtonBack, "Back")};
+    view.status = std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName);
+    view.buttons = {Button(kButtonBack, "&Back")};
     if (!choices.empty()) {
-      view.buttons.push_back(Button(kButtonKeepDevice, std::format("Keep {}", ShortDeviceName(choices[0].name))));
+      view.buttons.push_back(Button(kButtonKeepDevice, std::format("&Keep {}", EscapeAccessKey(ShortDeviceName(choices[0].name)))));
     }
     return view;
   }
@@ -494,28 +623,24 @@ PageView Cable(const core::Snapshot& snapshot) {
   view.footer = "Other playback devices are under Cable in the tray menu.";
   for (size_t i = 0; i < choices.size(); ++i) {
     std::string text = ShortDeviceName(choices[i].name);
-    if (SameId(choices[i].id, snapshot.obs_cable.id)) text += " (OBS's monitoring device)";
+    if (SameId(choices[i].id, snapshot.obs_cable.id)) text += "\nOBS's monitoring device";
     view.choices.push_back(Button(kChoiceFirst + static_cast<int>(i), std::move(text)));
   }
   const auto current = std::find_if(choices.begin(), choices.end(),
                                     [&](const audio::AudioDevice& device) { return SameId(device.id, sends_to.id); });
   view.default_choice = kChoiceFirst + static_cast<int>(current == choices.end() ? 0 : current - choices.begin());
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonNext, "Next")};
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonNext, "&Next")};
   view.default_button = kButtonNext;
   return view;
 }
 
 PageView Warnings(const core::Snapshot& snapshot) {
   PageView view;
-  const std::vector<import::ImportNote> notes = HeadsUp(snapshot);
-  const bool warning = std::any_of(notes.begin(), notes.end(), [](const import::ImportNote& n) { return n.warning; });
-  view.icon = warning ? PageIcon::kWarning : PageIcon::kInformation;
   view.instruction = "Before you start";
-  for (const import::ImportNote& note : notes) {
-    if (!view.content.empty()) view.content += "\n\n";
-    view.content += "• " + note.text;
+  for (const import::ImportNote& note : HeadsUp(snapshot)) {
+    view.notes.push_back({note.warning, MarkFileNames(note.text)});
   }
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonNext, "Next")};
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonNext, "&Next")};
   view.default_button = kButtonNext;
   return view;
 }
@@ -526,12 +651,12 @@ PageView Done(const core::Snapshot& snapshot, bool start_checked) {
   core::ChainSummary chain = snapshot.chain.value_or(core::ChainSummary{});
   const std::string side = CableRecordingSide(chain.cable);
   chain.cable = ShortDeviceName(chain.cable);
+  if (snapshot.chain) view.chain = chain;
   view.content = std::format(
-      "{0}\n\n"
-      "In your other apps, choose {1} as your mic.\n\n"
-      "{2} runs in the tray, next to the clock. If you don't see its icon, click ^ (Show hidden icons). {3}",
-      core::FormatChain(chain, false),
-      side.empty() ? std::format("the recording side of {}", chain.cable) : side, kDisplayName,
+      "In your other apps, choose {0} as your mic.\n\n"
+      "{1} runs in the tray, next to the clock. If you don't see its icon, click ^ (Show hidden icons). {2}",
+      side.empty() ? std::format("the recording side of {}", chain.cable) : std::format("<b>{}</b>", side),
+      kDisplayName,
       snapshot.settings.pause_for_obs ? "It pauses while OBS is open, and reads your filters again each time OBS "
                                         "closes."
                                       : "It reads your filters again each time OBS closes.");
@@ -548,9 +673,9 @@ PageView Done(const core::Snapshot& snapshot, bool start_checked) {
     default:
       break;
   }
-  view.check = std::format("Start {} with Windows", kDisplayName);
+  view.check = std::format("Start {} with &Windows", kDisplayName);
   view.checked = start_checked;
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonDone, "Done")};
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonDone, "&Done")};
   view.default_button = kButtonDone;
   return view;
 }
@@ -569,6 +694,20 @@ std::optional<FirstRunPage> PageNamed(std::string_view name) {
     if (page_name == name) return page;
   }
   return std::nullopt;
+}
+
+std::string WithoutAccessKey(std::string_view text) {
+  std::string plain;
+  for (size_t i = 0; i < text.size(); ++i) {
+    if (text[i] == '&' && i + 1 < text.size()) ++i;
+    plain += text[i];
+  }
+  return plain;
+}
+
+std::array<StageView, kStageCount> StageViews(const core::Snapshot& snapshot) {
+  const StageView cable = CableStage(snapshot);
+  return {MicStage(snapshot), FiltersStage(snapshot), cable, AppsStage(snapshot, cable)};
 }
 
 bool AnyFilters(const core::Snapshot& snapshot) {
@@ -660,6 +799,8 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, std::optiona
       break;
   }
   view.page = page;
+  view.stage = StageOf(page, snapshot);
+  view.stages = StageViews(snapshot);
   if (std::any_of(view.choices.begin(), view.choices.end(), [choice](const PageButton& c) { return c.id == choice; })) {
     view.default_choice = choice;
   }
