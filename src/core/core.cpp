@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 
+#include "app_info.h"
 #include "audio/device_watch.h"
 #include "core/obs_process.h"
 
@@ -124,14 +125,18 @@ void Core::Run(std::unique_ptr<Backend> backend, std::promise<Status>* started) 
     }
 
     bool obs_running = options_.obs_running();
-    controller.Start(obs_running, Clock::now());
+    controller.Start(obs_running, Clock::now(), options_.paused);
     // Logged once there's a log, which libobs's start opens.
+    std::optional<Clock::time_point> next_device_poll;
     if (!device_watch_error.empty()) {
-      backend->Log(device_watch_error + " Devices that come back won't be noticed until the next re-import.");
+      backend->Log(std::format("{} {} lists them every {} s instead.", device_watch_error, kDisplayName,
+                               std::chrono::duration_cast<std::chrono::seconds>(options_.device_poll).count()));
+      next_device_poll = Clock::now() + options_.device_poll;
     }
     Clock::time_point next_poll = Clock::now() + options_.obs_poll;
     while (!quit_) {
       std::optional<Clock::time_point> deadline = next_poll;
+      if (next_device_poll && *next_device_poll < *deadline) deadline = next_device_poll;
       if (const auto next = controller.NextDeadline(); next && *next < *deadline) deadline = next;
       Wait(deadline);
       std::deque<Task> tasks;
@@ -153,6 +158,10 @@ void Core::Run(std::unique_ptr<Backend> backend, std::promise<Status>* started) 
         }
         if (options_.other_obs) controller.SetOtherObs(options_.other_obs(), now);
         next_poll = now + options_.obs_poll;
+      }
+      if (next_device_poll && now >= *next_device_poll) {
+        controller.PollDevices(now);
+        next_device_poll = now + options_.device_poll;
       }
       controller.Tick(now);
     }

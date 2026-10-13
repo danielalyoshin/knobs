@@ -22,6 +22,7 @@
 #include <thread>
 #include <vector>
 
+#include "app_info.h"
 #include "core/backend.h"
 #include "core/controller.h"
 #include "core/core.h"
@@ -534,6 +535,69 @@ TEST(CoreAsksForARestartToFollowObs) {
   f.controller.SetObsRunning(true, f.now);
   f.controller.SetObsRunning(false, f.now);
   CHECK(f.state() == State::kObsUnsupported && !f.backend.chain_running && f.last().restart == RestartNeed::kNone);
+
+  // An older OBS, or one in a folder chosen since, isn't an update.
+  Fixture older;
+  older.controller.Start(false, older.now);
+  older.backend.obs.install.version = {32, 2, 1};
+  older.controller.Reimport(older.now);
+  CHECK(older.state() == State::kRestartNeeded && older.last().restart == RestartNeed::kObsChanged);
+  CHECK(older.last().detail == std::format("{} runs OBS 32.2.2, and has to restart to use OBS 32.2.1.", kDisplayName));
+  Fixture elsewhere;
+  elsewhere.controller.Start(false, elsewhere.now);
+  elsewhere.backend.obs.install = {"D:\\OBS 33", {33, 0, 0}};
+  elsewhere.controller.Apply({.obs_dir = "D:\\OBS 33"}, elsewhere.now);
+  CHECK(elsewhere.state() == State::kRestartNeeded && elsewhere.last().restart == RestartNeed::kObsChanged);
+}
+
+TEST(CoreStartsPausedAfterAPausedCopyRestarted) {
+  // A restart doesn't put the mic back live: the new copy starts as paused
+  // as the old one was, and opens nothing until resumed.
+  Fixture f;
+  f.controller.Start(false, f.now, true);
+  CHECK(f.published.front().paused_by_user && f.state() == State::kPausedByUser && f.last().paused_by_user);
+  CHECK(!f.backend.chain_running && f.backend.chain_starts == 0 && f.last().chain);
+  f.controller.Resume(f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1);
+}
+
+TEST(CoreSaysWhenWindowsCantListTheDevices) {
+  // Lists that couldn't be read would read as every device unplugged: it's
+  // an error instead, tried again as the devices are.
+  Fixture f;
+  f.backend.devices = {.error = "Couldn't reach Windows' list of audio devices."};
+  f.controller.Start(false, f.now);
+  CHECK(f.state() == State::kFailed && f.last().detail == "Couldn't reach Windows' list of audio devices.");
+  CHECK(!f.backend.chain_running);
+  f.DevicesChange(DefaultDevices());
+  CHECK(f.state() == State::kRunning);
+
+  // A re-import lists them again too, for when Windows' notifications don't
+  // come.
+  const int lists = f.backend.device_lists;
+  f.backend.devices = NoMics();
+  f.controller.Reimport(f.now);
+  CHECK(f.backend.device_lists == lists + 1 && f.state() == State::kMicMissing);
+}
+
+TEST(CorePollsDevicesWithoutCuttingWaitsShort) {
+  // Without Windows' notifications, the core lists the devices now and then.
+  // A list that's the same changes nothing: a stalled mic still waits as
+  // long before it's rebuilt.
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.backend.flowing = false;
+  f.Advance(3s);
+  CHECK(f.state() == State::kMicMissing && f.backend.chain_starts == 1);
+  f.controller.PollDevices(f.now);
+  CHECK(f.state() == State::kMicMissing && f.backend.chain_starts == 1);
+  // One that's changed is acted on at once.
+  f.backend.flowing = true;
+  audio::Endpoints more = DefaultDevices();
+  more.mics.push_back({"Headset Microphone", kHeadsetId});
+  f.backend.devices = more;
+  f.controller.PollDevices(f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 2);
 }
 
 TEST(CoreRebuildsTheChainWhenALostMicComesBack) {

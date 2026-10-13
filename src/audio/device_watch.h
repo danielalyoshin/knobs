@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "audio/audio_devices.h"
@@ -27,13 +28,26 @@ struct Endpoints {
   // for a mic set to "default" (docs/design.md, Mic candidates). Empty if
   // there's none.
   std::string default_mic;
+  // The default playback device, which plays the PC's sound: Output in
+  // Windows' Sound settings. Empty if there's none.
+  std::string default_output;
+  // Why Windows' list of devices couldn't be read, if it couldn't: then the
+  // lists are empty, and say nothing about what's connected.
+  std::string error;
 
   friend bool operator==(const Endpoints&, const Endpoints&) = default;
 };
 
-// Call from a thread with COM initialized. Empty lists if Windows' device
-// enumerator isn't available.
+// Call from a thread with COM initialized. Empty lists, and an error, if
+// Windows' device enumerator isn't available.
 Endpoints ListEndpoints();
+
+// Opens playback device `id` as libobs's monitor does, in shared mode with
+// its own format, and closes it again, playing nothing. An Error, naming the
+// device by `name`, if that fails, as when another app uses it in exclusive
+// mode: libobs's monitor would fail the same way, and say nothing. Call from a
+// thread with COM initialized.
+Status CheckPlaybackDevice(std::string_view id, std::string_view name);
 
 // Hears from Windows whenever an audio endpoint is added, removed, enabled,
 // disabled, plugged in or unplugged, or a default device changes

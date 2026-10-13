@@ -49,9 +49,11 @@ Controller::Controller(Backend& backend, Settings settings, Publish publish, Tim
   snapshot_.settings = settings_;
 }
 
-void Controller::Start(bool obs_running, Clock::time_point now) {
+void Controller::Start(bool obs_running, Clock::time_point now, bool paused) {
   obs_running_ = obs_running;
+  paused_by_user_ = paused;
   snapshot_.obs_running = obs_running;
+  snapshot_.paused_by_user = paused;
   publish_(snapshot_);
   devices_ = backend_.ListDevices();
   Refresh();
@@ -86,6 +88,17 @@ void Controller::DevicesChanged(Clock::time_point now) {
   devices_due_ = std::min(now + timing_.device_settle, *devices_first_ + timing_.device_settle_max);
 }
 
+void Controller::PollDevices(Clock::time_point now) {
+  if (stopped_) return;
+  audio::Endpoints devices = backend_.ListDevices();
+  if (devices == devices_) return;
+  devices_ = std::move(devices);
+  backend_.Log("Audio devices changed.");
+  chain_error_.reset();
+  retry_at_.reset();
+  Reconcile(now);
+}
+
 void Controller::Pause(Clock::time_point now) {
   if (stopped_) return;
   paused_by_user_ = true;
@@ -102,6 +115,9 @@ void Controller::Resume(Clock::time_point now) {
 void Controller::Reimport(Clock::time_point now) {
   if (stopped_) return;
   ClearFailures();
+  // Devices too: without Windows' notifications, as when they couldn't be
+  // listened for, this is how a device that came back is seen.
+  devices_ = backend_.ListDevices();
   Refresh();
   Reconcile(now);
 }
@@ -202,10 +218,18 @@ void Controller::Refresh() {
   if (obs.found == ObsFound::kUnsupported) return fail(State::kObsUnsupported, obs.message);
   // libobs stays loaded until the process ends (runtime::ObsRuntime).
   if (libobs_ && obs.install.version != libobs_->version) {
+    // Newer where the old one was is an update. Older, or another folder
+    // chosen since, isn't.
+    if (obs.install.version > libobs_->version && obs.install.root == libobs_->root) {
+      return fail(State::kRestartNeeded,
+                  std::format("OBS was updated from {} to {}. {} has to restart to use it.",
+                              libobs_->version.ToString(), obs.install.version.ToString(), kDisplayName),
+                  SetupNeed::kNone, RestartNeed::kObsUpdated);
+    }
     return fail(State::kRestartNeeded,
-                std::format("OBS was updated from {} to {}. {} has to restart to use it.",
-                            libobs_->version.ToString(), obs.install.version.ToString(), kDisplayName),
-                SetupNeed::kNone, RestartNeed::kObsUpdated);
+                std::format("{} runs OBS {}, and has to restart to use OBS {}.", kDisplayName,
+                            libobs_->version.ToString(), obs.install.version.ToString()),
+                SetupNeed::kNone, RestartNeed::kObsChanged);
   }
   if (!obs.config) return fail(State::kNeedsSetup, obs.config.error(), SetupNeed::kObsSettings);
   auto config = backend_.ReadObsConfig(*obs.config);
@@ -226,7 +250,7 @@ void Controller::Refresh() {
       libobs_spent_ = !backend_.LibobsCanRetry();
       return fail(State::kFailed, started.error());
     }
-    libobs_ = Libobs{obs.install.version, audio.sample_rate, audio.speakers, audio.channel_setup};
+    libobs_ = Libobs{obs.install.version, obs.install.root, audio.sample_rate, audio.speakers, audio.channel_setup};
   } else if (audio.sample_rate != libobs_->sample_rate || audio.speakers != libobs_->speakers) {
     // OBS restarts for this too (OBSBasic::GetRestartRequirements).
     return fail(State::kRestartNeeded,
@@ -316,6 +340,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   next.chain_revision = chain_revision_;
   next.obs_cable = {profile_cable_name_, profile_cable_id_};
   next.outputs = devices_.outputs;
+  next.default_output = devices_.default_output;
   next.disabled_outputs = devices_.disabled_outputs;
   next.vb_cable_pending = devices_.vb_cable_pending;
   next.inputs = devices_.mics;
@@ -341,6 +366,9 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.restart = problem_->restart;
   } else if (chain_error_) {
     set(State::kFailed, *chain_error_);
+  } else if (!devices_.error.empty()) {
+    // Without the lists, the cable and the mic would read as unplugged.
+    set(State::kFailed, devices_.error);
   } else if (paused_by_user_) {
     set(State::kPausedByUser);
   } else if (obs_running_ && settings_.pause_for_obs) {

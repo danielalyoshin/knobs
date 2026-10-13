@@ -33,8 +33,12 @@ struct CoreOptions {
   // loading its audio sources (docs/design.md, Following OBS), so a second is
   // soon enough to make way for it.
   std::chrono::milliseconds obs_poll{1000};
-  // Listen for audio devices coming and going (audio::DeviceWatch).
+  // Listen for audio devices coming and going (audio::DeviceWatch). If
+  // Windows won't say, list them this often instead.
   bool watch_devices = true;
+  std::chrono::milliseconds device_poll{5000};
+  // Start paused, as the copy before was (Controller::Start).
+  bool paused = false;
   Controller::Timing timing;
 };
 

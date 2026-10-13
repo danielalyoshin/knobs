@@ -12,6 +12,7 @@
 
 #include "app_info.h"
 #include "audio/audio_devices.h"
+#include "audio/device_watch.h"
 #include "runtime/obs_layout.h"
 #include "runtime/obs_version.h"
 #include "runtime/runtime_copy.h"
@@ -174,6 +175,10 @@ Status ObsBackend::StartChain(const ChainPlan& plan) {
   if (!host_) return Error{"libobs isn't running."};
   StopChain();
   const runtime::ObsApi& api = host_->api();
+  // libobs makes no monitor for a device it can't open, and says nothing, so
+  // the cable would get silence while knobs ran (docs/design.md, Monitoring
+  // into the cable).
+  if (const Status opens = audio::CheckPlaybackDevice(plan.cable.id, plan.cable.name); !opens) return opens;
   // First: the monitor opens its device as soon as monitoring starts.
   const Status routed = audio::SetMonitoringDevice(api, plan.cable);
   if (!routed) return routed;

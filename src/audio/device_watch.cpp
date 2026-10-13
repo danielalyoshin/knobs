@@ -2,6 +2,7 @@
 #include "audio/device_watch.h"
 
 #include <windows.h>
+#include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <wrl/client.h>
 
@@ -51,11 +52,12 @@ std::string FriendlyName(IMMDevice* device) {
   return name;
 }
 
-// The endpoints in `states`, such as DEVICE_STATE_ACTIVE.
-std::vector<AudioDevice> Devices(IMMDeviceEnumerator* enumerator, EDataFlow flow, DWORD states) {
-  std::vector<AudioDevice> devices;
+// The endpoints in `states`, such as DEVICE_STATE_ACTIVE, into `devices`.
+// The failure if Windows couldn't list them.
+HRESULT Devices(IMMDeviceEnumerator* enumerator, EDataFlow flow, DWORD states, std::vector<AudioDevice>& devices) {
+  devices.clear();
   ComPtr<IMMDeviceCollection> collection;
-  if (FAILED(enumerator->EnumAudioEndpoints(flow, states, &collection))) return devices;
+  if (const HRESULT hr = enumerator->EnumAudioEndpoints(flow, states, &collection); FAILED(hr)) return hr;
   UINT count = 0;
   collection->GetCount(&count);
   for (UINT i = 0; i < count; ++i) {
@@ -66,7 +68,13 @@ std::vector<AudioDevice> Devices(IMMDeviceEnumerator* enumerator, EDataFlow flow
     std::string name = FriendlyName(device.Get());
     devices.push_back({name.empty() ? id : std::move(name), std::move(id)});
   }
-  return devices;
+  return S_OK;
+}
+
+std::string DefaultDevice(IMMDeviceEnumerator* enumerator, EDataFlow flow, ERole role) {
+  ComPtr<IMMDevice> device;
+  if (FAILED(enumerator->GetDefaultAudioEndpoint(flow, role, &device))) return "";
+  return DeviceId(device.Get());
 }
 
 constexpr wchar_t kUninstallKey[] = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
@@ -195,16 +203,48 @@ void WatchInstalledApps(HKEY uninstall, HANDLE changed, HANDLE stop, const std::
 Endpoints ListEndpoints() {
   Endpoints endpoints;
   const ComPtr<IMMDeviceEnumerator> enumerator = CreateEnumerator();
-  if (!enumerator) return endpoints;
-  endpoints.mics = Devices(enumerator.Get(), eCapture, DEVICE_STATE_ACTIVE);
-  endpoints.outputs = Devices(enumerator.Get(), eRender, DEVICE_STATE_ACTIVE);
-  endpoints.disabled_outputs = Devices(enumerator.Get(), eRender, DEVICE_STATE_DISABLED);
-  endpoints.vb_cable_pending = VbCablePending();
-  ComPtr<IMMDevice> default_mic;
-  if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(eCapture, eCommunications, &default_mic))) {
-    endpoints.default_mic = DeviceId(default_mic.Get());
+  if (!enumerator) {
+    endpoints.error = "Couldn't reach Windows' list of audio devices.";
+    return endpoints;
   }
+  HRESULT hr = Devices(enumerator.Get(), eCapture, DEVICE_STATE_ACTIVE, endpoints.mics);
+  if (SUCCEEDED(hr)) hr = Devices(enumerator.Get(), eRender, DEVICE_STATE_ACTIVE, endpoints.outputs);
+  if (SUCCEEDED(hr)) hr = Devices(enumerator.Get(), eRender, DEVICE_STATE_DISABLED, endpoints.disabled_outputs);
+  if (FAILED(hr)) {
+    // Lists that say nothing would read as every device unplugged.
+    return {.error = std::format("Couldn't read Windows' list of audio devices (0x{:08X}).", static_cast<uint32_t>(hr))};
+  }
+  endpoints.vb_cable_pending = VbCablePending();
+  endpoints.default_mic = DefaultDevice(enumerator.Get(), eCapture, eCommunications);
+  // Sound settings' Output sets the console and multimedia roles together.
+  endpoints.default_output = DefaultDevice(enumerator.Get(), eRender, eConsole);
   return endpoints;
+}
+
+Status CheckPlaybackDevice(std::string_view id, std::string_view name) {
+  const auto failed = [name](HRESULT hr) {
+    return Error{hr == AUDCLNT_E_DEVICE_IN_USE
+                     ? std::format("\"{}\" is in use by another app on its own (exclusive mode), so nothing else can "
+                                   "play into it.",
+                                   name)
+                     : std::format("\"{}\" can't be opened (0x{:08X}).", name, static_cast<uint32_t>(hr))};
+  };
+  const ComPtr<IMMDeviceEnumerator> enumerator = CreateEnumerator();
+  if (!enumerator) return Error{"Couldn't reach Windows' list of audio devices."};
+  ComPtr<IMMDevice> device;
+  HRESULT hr = enumerator->GetDevice(FromUtf8(id).c_str(), &device);
+  if (FAILED(hr)) return failed(hr);
+  ComPtr<IAudioClient> client;
+  hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client.GetAddressOf()));
+  if (FAILED(hr)) return failed(hr);
+  WAVEFORMATEX* format = nullptr;
+  hr = client->GetMixFormat(&format);
+  if (FAILED(hr)) return failed(hr);
+  // As wasapi-output.c opens it: shared, with a 1 s buffer, in 100 ns units.
+  hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 10'000'000, 0, format, nullptr);
+  CoTaskMemFree(format);
+  if (FAILED(hr)) return failed(hr);
+  return Ok{};
 }
 
 Result<std::unique_ptr<DeviceWatch>> DeviceWatch::Start(std::function<void()> on_change) {

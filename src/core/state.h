@@ -26,7 +26,8 @@ struct Settings {
   std::optional<std::filesystem::path> obs_config;
   // Which mic, by name (import::PickMicByName). Empty picks the only one.
   std::string mic;
-  // The playback device to send the mic to, by endpoint ID. Empty: the OBS
+  // The playback device to send the mic to, by endpoint ID. Once it's
+  // chosen, it stays whatever OBS monitors to. Empty until then: the OBS
   // profile's monitoring device.
   std::string cable;
   // Its name, for saying which device is missing while it isn't connected.
@@ -67,7 +68,9 @@ enum class State {
   kRestartNeeded,
   // Something went wrong that knobs can't fix by itself; Snapshot::detail
   // says what. Tried again on a re-import and when OBS exits; a chain that
-  // failed to start also on a device change or a resume.
+  // failed to start also on a device change or a resume. Windows' list of
+  // devices that couldn't be read is read again on a device change or a
+  // re-import.
   kFailed,
 };
 
@@ -95,6 +98,9 @@ enum class RestartNeed {
   kObsUpdated,
   // The OBS profile's sample rate or channels changed.
   kAudioChanged,
+  // The OBS install is another version, but not a newer one where the old
+  // one was: an older one, or one in a folder chosen since.
+  kObsChanged,
 };
 
 // The chain as the user knows it from OBS.
@@ -154,8 +160,10 @@ struct Snapshot {
   // The OBS profile's monitoring device, once a profile has been read. Its
   // ID may be "default".
   audio::AudioDevice obs_cable;
-  // The playback devices that are connected, to pick a cable from.
+  // The playback devices that are connected, to pick a cable from, and
+  // Windows' default one, which plays the PC's sound (audio::Endpoints).
   std::vector<audio::AudioDevice> outputs;
+  std::string default_output;
   // Those turned off in Windows' Sound settings, and whether VB-Cable was
   // installed since Windows started, which tell why there's no cable when
   // there isn't (audio::Endpoints).

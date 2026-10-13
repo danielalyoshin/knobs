@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -22,8 +23,8 @@ namespace knobs::core {
 // it on one thread.
 //
 // After every event it works out the state from what it knows, in this order:
-// problems with OBS, its settings or the import; a chain that failed to start;
-// paused by the user; paused while OBS runs, unless Settings::pause_for_obs is
+// problems with OBS, its settings or the import; a chain that failed to start,
+// or Windows' list of devices that couldn't be read; paused by the user; paused while OBS runs, unless Settings::pause_for_obs is
 // off; the cable missing; the mic missing. The chain runs only while the state
 // is kRunning. Every other state releases it, which frees the mic and the
 // cable, and the next kRunning loads it again with libobs's loader
@@ -80,16 +81,22 @@ class Controller {
 
   Controller(Backend& backend, Settings settings, Publish publish, Timing timing = {});
 
-  // Publishes kStarting, then imports and starts.
-  void Start(bool obs_running, Clock::time_point now);
+  // Publishes kStarting, then imports and starts, or stays paused if
+  // `paused`: a copy restarted while the user had paused it.
+  void Start(bool obs_running, Clock::time_point now, bool paused = false);
   // OBS started or exited. When it exits, its settings are imported again.
   void SetObsRunning(bool running, Clock::time_point now);
   // OBS running in other Windows sessions (Snapshot::other_obs).
   void SetOtherObs(std::vector<OtherObs> others, Clock::time_point now);
   // A device notification. Acted on once they settle (Timing).
   void DevicesChanged(Clock::time_point now);
+  // Lists the devices, as the core does now and then when Windows won't
+  // send notifications, and acts only on what changed, so a stalled mic's
+  // or failed chain's waits aren't cut short.
+  void PollDevices(Clock::time_point now);
   void Pause(Clock::time_point now);
   void Resume(Clock::time_point now);
+  // Imports again, and lists the devices again.
   void Reimport(Clock::time_point now);
   // New settings, then a re-import if the install, OBS's settings folder or
   // the mic changed.
@@ -115,6 +122,7 @@ class Controller {
   // What libobs was started with.
   struct Libobs {
     runtime::ObsVersion version;
+    std::filesystem::path root;  // The install it came from.
     uint32_t sample_rate = 0;
     speaker_layout speakers = SPEAKERS_UNKNOWN;
     std::string channel_setup;
