@@ -39,7 +39,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 
 ## Measured against OBS
 
-**Same sound.** For the same input, knobs's output is bit-identical to OBS's: on test signals, on a chain of every audio filter in OBS's `obs-filters`, and on a recording of real voice. `knobs-compare` checks this against OBS itself.
+**Same sound.** For the same input, knobs's output is bit-identical to OBS's: on test signals, on a chain of every audio filter in OBS's `obs-filters`, on VST plugins, and on a recording of real voice. `knobs-compare` checks this against OBS itself. NVIDIA's noise removal is the exception: it's close to OBS's, but no two runs of it match exactly, in OBS either.
 
 **Same delay.** From the mic to the cable takes 88.1 ms in knobs and 87.7 ms in OBS, on the same cable input.
 
@@ -56,7 +56,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 
 ## How it works
 
-- **Your OBS does the processing.** knobs ships no libobs and no DSP of its own. It loads OBS's `obs.dll` and two of its modules, `win-wasapi` for the mic and `obs-filters` for the filters, from a private copy of your OBS install in `%LocalAppData%\knobs`. The install itself stays unlocked, so a running knobs never blocks an OBS update.
+- **Your OBS does the processing.** knobs ships no libobs and no DSP of its own. It loads OBS's `obs.dll` and the modules your mic needs, `win-wasapi` for the mic and `obs-filters` for the filters, plus `obs-vst` for VST plugins and `nv-filters` for NVIDIA's noise removal when your mic has them, from a private copy of your OBS install in `%LocalAppData%\knobs`. The install itself stays unlocked, so a running knobs never blocks an OBS update.
 - **OBS's loader rebuilds your mic.** knobs reads your active OBS profile and scene collection, and OBS's own loader recreates the mic from them: its filters in order, with their settings, and its Mono, balance and volume. knobs never writes to OBS's settings.
 - **Out to a virtual cable.** libobs's audio monitoring, the same code OBS uses, sends the processed mic to the cable. There's no video, no window and no OBS process. Other apps choose the cable's recording side, such as CABLE Output, as their mic.
 - **Out of OBS's way.** knobs pauses while OBS is open, so the cable never gets your mic twice. When OBS closes, knobs reads its settings again and runs whatever you changed.
@@ -69,7 +69,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 | Windows | 10, version 1803 or later, or 11. 64-bit. |
 | OBS Studio | 32.2 to 33.x, tested on 32.2.2 and 33.0.0-rc1. knobs finds an install from OBS's installer by itself; for a Steam or portable OBS, you choose its folder. |
 | Virtual cable | [VB-Cable](https://vb-audio.com/Cable/), which knobs's installer can install, or another one: knobs recognizes VB-Audio's cables (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. |
-| Mic filters | OBS's built-in audio filters: Noise Suppression (RNNoise or Speex), Noise Gate, Expander, Upward Compressor, Compressor, Limiter, Gain, 3-Band Equalizer and Invert Polarity. [Known limits](#known-limits) has the exceptions. |
+| Mic filters | OBS's built-in audio filters: Noise Suppression (RNNoise or Speex), Noise Gate, Expander, Upward Compressor, Compressor, Limiter, Gain, 3-Band Equalizer and Invert Polarity. Also VST 2.x plugins, as OBS hosts them, and NVIDIA Noise Removal, with NVIDIA's Audio Effects SDK and an NVIDIA RTX GPU, as in OBS. [Known limits](#known-limits) has the exceptions. |
 
 ## Setup
 
@@ -167,7 +167,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Folder | Holds |
 |:---|:---|
 | `%AppData%\knobs` | `settings.ini`: your choices in the menu and the first run |
-| `%LocalAppData%\knobs` | The private copy of OBS's files (about 54 MB), the logs, and an update's installer while it waits to install |
+| `%LocalAppData%\knobs` | The private copy of OBS's files (about 80 MB), the logs, and an update's installer while it waits to install |
 
 **To update,** install the new version over the old one, or turn on **Automatically update**. A portable copy says when a new version is out, with the update check on, and you unzip the new one in its place.
 
@@ -176,8 +176,8 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 ## Known limits
 
 - **One mic.** With several mics in OBS, knobs runs the one you choose.
-- **No VST filters.** knobs leaves them out of the chain and warns you.
-- **No NVIDIA noise removal.** It's in a separate OBS module, `nv-filters`, which knobs doesn't load. The filter passes audio through unchanged, with a warning.
+- **VST plugins run without their windows.** knobs runs a VST filter as OBS does, with the settings OBS saved, but never opens the plugin's window, even when OBS's **Open interface when active** is on. A plugin that crashes takes knobs down, as it takes OBS down.
+- **NVIDIA's noise removal is costly, and not bit-identical.** It runs on your GPU through NVIDIA's runtime, which takes about 800 MB of memory and a fifth of a CPU core while the mic runs. Its output is close to OBS's, but not exactly the same, since it depends on what it heard before, in OBS too. For its first moment after the mic starts, it lets the mic through untouched while it loads, as it does when OBS starts. Without NVIDIA's Audio Effects SDK or a GPU that runs it, the filter passes audio through, and knobs says why.
 - **No sidechain.** With a sidechain source, OBS's compressor ducks the mic when that source plays. knobs runs no other sources, so it runs the compressor as OBS does while the sidechain is silent: as a gain at the compressor's output gain. It warns you.
 - **Mute and push-to-talk don't silence the cable.** OBS's monitoring ignores them too. The first run says so.
 - **The cable is quiet while OBS is open**, unless OBS monitors your mic to it. Turn off **Pause while OBS is open** to keep knobs running then.
@@ -244,7 +244,7 @@ Most of them open no audio device. `knobs-smoke --capture-seconds` opens the mic
 | `tools/` | The dev tools |
 | `packaging/` | The installer's script, the files that ship in each package, and the script that builds both |
 | `docs/` | The design, and the evidence behind it |
-| `tests/` | Unit tests, and the import and core tests on made-up OBS settings |
+| `tests/` | Unit tests, the import and core tests on made-up OBS settings, and a VST plugin of its own for the VST test |
 
 [docs/design.md](docs/design.md) describes how knobs is designed and why, with the measurements behind it.
 

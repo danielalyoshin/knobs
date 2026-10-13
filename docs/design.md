@@ -8,15 +8,15 @@ knobs is a Windows tray app that runs the mic filter chain a user tuned in OBS S
 
 Without knobs, that sound needs OBS open all day, and since OBS 32.0 the Safe Mode prompt can stop OBS from running unattended ([obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650)). Other tools, such as Equalizer APO, VoiceMeeter and NVIDIA Broadcast, have their own DSP, and OBS's gate, expander and compressor are custom code in its `obs-filters` module.
 
-So knobs doesn't reimplement OBS's filters: it runs them. It loads libobs (`obs.dll`) and two of its modules from the user's own OBS install, and recreates the mic with OBS's own loader from the user's own settings. The audio passes through the same compiled code as in OBS, with the same settings in the same order, so for the same input, knobs's output is bit-identical to OBS's.
+So knobs doesn't reimplement OBS's filters: it runs them. It loads libobs (`obs.dll`) and the modules the mic's chain needs from the user's own OBS install, and recreates the mic with OBS's own loader from the user's own settings. The audio passes through the same compiled code as in OBS, with the same settings in the same order, so for the same input, knobs's output is bit-identical to OBS's. NVIDIA's noise removal is the one exception, since no two runs of it match, in OBS either (NVIDIA's noise removal).
 
 The name is "knobs", all lowercase, as in the audio kind. It leaves "OBS" out, as the OBS Project's [Forum Resource and IP Policy](https://obsproject.com/forum/threads/forum-resource-and-ip-policy.178569/) asks of third-party tools, and it's defined once (`KNOBS_DISPLAY_NAME`) in case the OBS team asks for a change.
 
 ## Principles
 
-- **Fidelity is the product.** Audio passes only through OBS's own code: the same filters, settings and order, and the same Mono, balance and volume. knobs has no DSP of its own.
+- **Fidelity is the product.** Audio passes only through OBS's own code, and the VST plugins and NVIDIA runtime it hosts: the same filters, settings and order, and the same Mono, balance and volume. knobs has no DSP of its own.
 - **Leave OBS alone.** knobs never writes to OBS's settings or install. It loads OBS from a private copy, so the install stays unlocked, and it pauses while OBS runs.
-- **Invisible while it works.** Tray only, with no window, no video and no GPU, and it starts with Windows. The target is under 1% of a core.
+- **Invisible while it works.** Tray only, with no window, no video and no GPU, and it starts with Windows. The target is under 1% of a core. NVIDIA's noise removal is the exception: NVIDIA's runtime runs it on the GPU, and costs far more.
 - **Loud when it breaks.** A missing mic, cable or OBS gets a notification that says what to do, and a badge on the icon.
 
 ## Architecture
@@ -30,7 +30,7 @@ flowchart TB
     direction TB
     tray["Tray app<br>menu, first run, notifications"]
     core["Always-on core<br>follows OBS and the devices"]
-    loader["Runtime loader<br>obs.dll, win-wasapi, obs-filters"]
+    loader["Runtime loader<br>obs.dll, win-wasapi, obs-filters,<br>obs-vst and nv-filters when needed"]
     importer["Importer<br>active profile and scene collection"]
     subgraph libobs["libobs: audio only, no video"]
       direction TB
@@ -68,7 +68,7 @@ The dev tools in `tools/` run each layer on its own, from `knobs-smoke` (the run
 
 knobs ships no libobs. It finds OBS through the installer's registry key (`HKLM\SOFTWARE\OBS Studio`), then `C:\Program Files\obs-studio`, and the user picks the folder of a Steam or portable OBS. The version comes from `obs.dll`'s version resource, so nothing in the install is loaded.
 
-knobs loads OBS from a copy in `%LocalAppData%\knobs\runtime\<obs-version>\`, never from the install, so a running knobs never blocks an OBS update. The copy mirrors the install's layout, so libobs's relative data lookups still work. What's copied comes from the PE import tables: the import closure of `obs.dll`, `libobs-d3d11.dll` and the two modules, limited to DLLs the install ships, plus their data folders. For 32.2.2 that's 200 files and 53.6 MB, and for 33.0.0-rc1 201 files and 53.6 MB, mostly FFmpeg, which `obs.dll` imports.
+knobs loads OBS from a copy in `%LocalAppData%\knobs\runtime\<obs-version>\`, never from the install, so a running knobs never blocks an OBS update. The copy mirrors the install's layout, so libobs's relative data lookups still work. What's copied comes from the PE import tables: the import closure of `obs.dll`, `libobs-d3d11.dll` and the modules, the optional ones included when the install has them (Optional modules), limited to DLLs the install ships, plus their data folders. For 32.2.2 that's 322 files and 78.3 MB, and for 33.0.0-rc1 317 files and 71.4 MB, mostly FFmpeg, which `obs.dll` imports, and Qt, which `obs-vst` imports.
 
 Where the modules are depends on the version. OBS 33 gives each module a folder of its own, `core\<module>`, with its data in `core\<module>\data`. Earlier versions keep them together in `obs-plugins\64bit`, with their data in `data\obs-plugins\<module>`. So knobs reads `obs.dll`'s version first, then looks for the rest where that version keeps it (`HasCoreModules`). An OBS it doesn't support is reported as unsupported, not as an incomplete install, since its files may be somewhere knobs doesn't know.
 
@@ -80,14 +80,16 @@ A new OBS version needs a new process, because libobs never unloads module DLLs 
 
 knobs resolves the libobs functions it uses with `GetProcAddress` into a function table (`KNOBS_OBS_API` in `src/runtime/obs_api.h`), typed from the vendored headers in `third_party/libobs`. With no import library, a missing export fails with a clear message instead of at process load. An export only some supported versions have, such as 33.0's `obs_source_set_monitoring_enabled`, is optional instead (`KNOBS_OBS_API_OPTIONAL`): it's null where libobs lacks it, and knobs falls back. `obs.dll`'s dependencies resolve from the copy and the system, never from PATH or the install. libobs finds its data relative to the working directory (`find_libobs_data_file`, `obs-windows.c`), so that's the copy's `bin\64bit` for as long as libobs runs.
 
-knobs checks the OBS version before copying and again after loading, and refuses an unsupported one (Compatibility). It opens only two modules, by absolute path:
+knobs checks the OBS version before copying and again after loading, and refuses an unsupported one (Compatibility). It opens these modules, by absolute path, the last two only for a chain that needs them (Optional modules):
 
 | Module | Provides |
 |---|---|
 | `win-wasapi` | `wasapi_input_capture`, the mic source |
 | `obs-filters` | the audio filters, from noise suppression to the limiter |
+| `obs-vst` | `vst_filter`, VST 2.x plugins, through Qt |
+| `nv-filters` | `nvidia_audiofx_filter`, NVIDIA's noise removal, through NVIDIA's Audio Effects SDK |
 
-It doesn't load `obs-vst`, or `nv-filters`, where OBS 32 keeps NVIDIA's noise removal. Since knobs never calls `obs_load_all_modules()`, or 33.0's `obs_load_core_modules()`, OBS's safe-mode and disabled-module lists don't apply.
+Since knobs never calls `obs_load_all_modules()`, or 33.0's `obs_load_core_modules()`, OBS's safe-mode and disabled-module lists don't apply.
 
 ### The libobs session
 
@@ -95,13 +97,13 @@ It doesn't load `obs-vst`, or `nv-filters`, where OBS 32 keeps NVIDIA's noise re
 2. `obs_startup()` with knobs's own module config folder, `%AppData%\knobs\module-config`, never OBS's. It initializes COM as a single-threaded apartment on its thread, so `obs_shutdown()` must run on the same thread.
 3. `obs_reset_audio()` with the OBS profile's sample rate and channel layout.
 4. No `obs_reset_video()` (Audio without video).
-5. `obs_open_module()` and `obs_init_module()` for the two modules, then `obs_post_load_modules()`.
+5. `obs_open_module()` and `obs_init_module()` for `win-wasapi` and `obs-filters`, then `obs_post_load_modules()`. `obs-vst` and `nv-filters` load the same way when an import first needs them, and have no post-load callback to run.
 6. `obs_load_private_source()` with the mic's saved source (Loading the mic).
 7. Monitoring on, with `obs_source_set_monitoring_enabled()` on OBS 33 and `obs_source_set_monitoring_type()` to Monitor Only on 32.2, and `obs_source_inc_active()`, since the monitor plays only while the source is active.
 8. `obs_set_audio_monitoring_device()` with the cable.
 9. At shutdown, release the sources and drain libobs's destroy queue as `obs_wait_for_destroy_queue` does, then `obs_shutdown()`, which waits for that queue only when there's a video thread. Otherwise a source could be destroyed after its module has unloaded.
 
-A start that fails before any module loads can be tried again in the same process. A loaded module never unloads, so after that, trying again restarts knobs. Once the copy exists, libobs starts and imports the mic in about 30 ms.
+A start that fails before any module loads can be tried again in the same process. A loaded module never unloads, so after that, trying again restarts knobs. Once the copy exists, libobs starts and imports the mic in about 30 ms, or about 0.2 s when it loads `nv-filters` too, and a second when NVIDIA's runtime isn't in Windows' file cache yet.
 
 ## Importing the mic
 
@@ -124,8 +126,9 @@ A mic is any `wasapi_input_capture` source among the collection's global audio d
 
 Before loading, the importer checks the mic's saved source:
 
-- VST filters are removed, with a warning.
-- Filters libobs doesn't know, such as NVIDIA's noise removal, stay in as placeholders that pass audio through, with a warning.
+- VST filters run as `obs-vst`'s, with the plugin's window off, and a note when OBS opens it (VST filters). A plugin that isn't where OBS saved it, or a filter with none chosen, passes audio through, in OBS too, with a note.
+- NVIDIA's noise removal runs when NVIDIA's runtime does, with a note that it isn't bit-identical to OBS's. When it can't run, it stays in as a placeholder, with a warning that says why (NVIDIA's noise removal).
+- Filters libobs doesn't know, such as one from an OBS plugin knobs doesn't load, stay in as placeholders that pass audio through, with a warning.
 - A compressor with a sidechain becomes a Gain filter at its output gain, with a warning. knobs runs no other sources, so the sidechain would be silent, and while its sidechain is below the threshold, the compressor multiplies each sample by exactly its output gain (`compressor_filter_audio`), as the Gain filter does. Left as saved, it would compress the mic by its own level with settings tuned for ducking. `knobs-harness` confirms the swap is bit-identical.
 - Filters that are off stay off. Settings the monitor ignores, such as mute and push-to-talk, get a note.
 
@@ -134,6 +137,33 @@ Before loading, the importer checks the mic's saved source:
 `obs_load_private_source()` loads the checked source. It's the private form of `obs_load_source()`: the same loader, but the source stays out of the global list and registers no hotkeys. It recreates the source, its filters in order with their settings, and its volume, balance, mute, Mono and sync offset. knobs turns the saved monitoring off first (`LoadSourceJson`), so no device opens during the load. Like OBS, it runs the `load` callbacks (`obs_source_load2`) for a mic from `sources`, but not for a global audio device.
 
 The loader is OBS's on purpose. OBS loads the collection with it, from JSON the same OBS version wrote, so there's no hand-written replayer to drift from OBS. Replaying the settings by hand (`obs_source_create`, `obs_source_filter_add`) is only the fallback.
+
+## Optional modules
+
+### Loading on demand
+
+`obs-vst` and `nv-filters` bring what nothing else in knobs needs, Qt and NVIDIA's runtime, so knobs opens them only for a chain with their filter (`kOptionalObsModules`). The picked mic's chain decides (`SceneCollection::NeededModules`): a VST filter that's on needs `obs-vst`, and NVIDIA's noise removal that's on needs `nv-filters`. The import loads them before pre-flight, which then tells the filters libobs has from the rest (`ObsSession::LoadOptionalModule`). Loading `nv-filters` alone costs 572 MB, so other mics' chains don't load anything: their lists count those filters as running until their module has been tried, so a mic whose only filter is NVIDIA's still counts as set up in OBS. A module never unloads, so once a chain has needed one, it stays for the rest of the process, and a module that failed isn't tried again.
+
+The runtime copy carries both modules, and what they import, whenever the install has them, so picking another mic never needs a new copy.
+
+### VST filters
+
+`obs-vst` hosts VST 2.x plugins through Qt. Its filter is a QObject, made on the thread that loads the source, the core's in knobs, and destroyed on libobs's destruction thread, which can only ask Qt to delete it (`vst_destroy`, `obs-vst.cpp`). The delete closes the plugin, unloads its DLL and frees libobs memory, but Qt delivers it only while a QCoreApplication exists (`QCoreApplication::notifyInternal2`). So when knobs loads `obs-vst`, it makes one on the core thread through the runtime copy's `Qt6Core.dll` exports, with no Qt of its own (`QtApp`). Once libobs's destroy queue has drained, knobs delivers what `obs-vst` posted, deletes included, which Qt sends outside an event loop only when asked for them by type. Without that, every chain knobs let go of, at every pause and device change, would leak its VST plugins, still open.
+
+- **No plugin windows.** `obs-vst`'s Open interface when active opens the plugin's window as the filter loads, in a QWidget, and Qt aborts a process that makes a QWidget with no QApplication. Every source knobs loads has it off (`LoadSourceJson`), and pre-flight copies it off too, so turning it on or off in OBS doesn't restart the chain.
+- **Threads.** The plugin opens and closes on the core thread, which pumps messages, for plugins that make windows or timers there, and processes on the mic's capture thread, as in OBS, where it opens on OBS's UI thread.
+- **Settings.** `obs-vst` restores the plugin's state from what OBS saved (`chunk_data`), but only while the plugin's file is the one it was saved with (`chunk_hash`, its MD5). After a plugin update, the plugin runs at its defaults, in OBS too.
+- **DLL lookups.** A plugin's own imports resolve from Windows' default directories, as in OBS: the app's folder, which is knobs's rather than OBS's `bin\64bit`, the copy's `bin\64bit`, and the system's. A plugin that needs a DLL OBS ships and knobs doesn't copy won't load.
+- **Mono.** With a mono profile, `obs-vst` feeds a stereo plugin's second input from a buffer it never clears (`VSTPlugin::process`), in OBS too, so such a plugin's output can vary.
+- **Crashes.** A plugin runs in knobs's process, so one that crashes takes knobs down, as it takes OBS down.
+
+### NVIDIA's noise removal
+
+`nv-filters` registers NVIDIA's noise removal only if NVIDIA's Audio Effects SDK loads and runs: it loads `NVAudioEffects.dll` from the folder `NVAFX_SDK_DIR` names, from 33.0 the one `AFX_SDK_DIR` names, or the SDK's folder in Program Files, and creates a denoiser to try it (`load_nvidia_afx`, `nvidia-audiofx-filter.c`), which takes about a second. Otherwise the filter loads as a placeholder, and pre-flight says why: `nv-filters` didn't load, the SDK isn't installed, or it's installed but didn't start, which it needs an NVIDIA RTX GPU for. The log has `nv-filters`' own reason.
+
+- **Cost.** It's a neural network on the GPU, through CUDA and TensorRT. With it running on a stereo profile, knobs takes about a fifth of a core and 800 MB (NVIDIA's noise removal, in Evidence).
+- **Start.** Each filter loads its model on a thread of its own, in under half a second on the test PC, and passes audio through untouched until then (`nvidia_audio_initialize`). In OBS that's when OBS starts; in knobs, whenever the chain starts, such as after OBS closes. The offline tools wait 5 s for it before the audio, as it has that long live.
+- **Fidelity.** Its output depends on what it heard before, and on where its 10 ms frames fall, which is where the mic started (`nvidia_audio_filter_audio`). So no two runs that start apart match bit for bit, in OBS either, and knobs's output is close to OBS's, not identical. Pre-flight says so. On the same input from the same start, knobs's output is the same every run.
 
 ## The live path
 
@@ -299,13 +329,14 @@ knobs supports OBS 32.2.0 up to, but not including, 34.0.0 (`src/runtime/obs_ver
 
 ### OBS 33.0
 
-Checked against 33.0.0-rc1. Neither `win-wasapi` nor the audio filters changed from 32.2.2, and knobs's output is bit-identical to OBS 33's (Same output as OBS).
+Checked against 33.0.0-rc1. Neither `win-wasapi`, the audio filters nor `obs-vst` changed from 32.2.2, and knobs's output is bit-identical to OBS 33's (Same output as OBS).
 
 - **The modules moved** to folders of their own, `core\<module>`, with no `obs-plugins` folder. knobs looks for them where the version keeps them (Finding and copying OBS).
 - **Monitoring is on or off.** `obs_source_set_monitoring_enabled` replaces `obs_source_set_monitoring_type`, which is deprecated and logs a warning on each call, so knobs uses the new export where it's there. Monitor Only is gone, and with it the shortcut that kept a monitored source out of libobs's output buffers (`source_output_audio_data`, `obs-source.c`). So libobs's audio thread processes the mic each tick, though nothing mixes it, since it's on no output channel. The monitor takes the audio before that, so the cable gets the same audio. Pushing audio through the chain and the monitor for 30 s cost 0.7–0.9% of a core on either version (`knobs-live --measure-output`, Release).
 - **Sources saved by 33.0 store a `monitoring_enabled` bool**, which the loader reads instead of `monitoring_type`. knobs overrides both when loading (`LoadSourceJson`) and reads both on import.
 - **Mute and push-to-talk still don't reach the monitor.** 33.0's new monitoring hotkeys don't apply, since knobs's private source registers none.
 - **Advanced Audio Properties has an Enable check box for monitoring** in place of the list with Monitor Only. The settings the first run's steps name keep their names.
+- **`nv-filters` looks for NVIDIA's SDK in one more place**, the folder `AFX_SDK_DIR` names, and from SDK 3.0.0.49 also loads its per-effect DLLs. knobs looks where the version does when it says why the filter didn't load. Its output is the same as with 32.2.2 (NVIDIA's noise removal, in Evidence).
 
 ## Evidence
 
@@ -314,6 +345,35 @@ Checked against 33.0.0-rc1. Neither `win-wasapi` nor the audio filters changed f
 `knobs-compare` runs the same input through the imported chain in knobs, offline, and in OBS itself: a private portable copy of the install, scripted to play the input as a Media Source carrying the mic's filters and record it to a 32-bit float WAV, with no audio device and without touching the user's OBS settings. knobs plays the input in OBS's packet size for a WAV, 4096 frames; other sizes change the output only at rounding level, about 120 dB below the signal. knobs's side also gets what OBS's recording mix does and the monitor doesn't: −0.0 becomes 0.0, NaN becomes 0, and samples are clamped to ±1.
 
 knobs's output is bit-identical to OBS's on test signals and synthetic speech, for a real mic's chain (3-band EQ, expander, compressor and limiter, with Mono on), for every `obs-filters` audio filter in one chain, for a chain that clips, and for a 20.9 s recording of real voice. With OBS 33.0.0-rc1, it's bit-identical for the real mic's chain on the test signal. `knobs-harness` shows that knobs is deterministic too: its output is bit-identical across runs, processes, and Debug and Release builds.
+
+### VST filters
+
+`knobs-harness` runs a VST plugin of knobs's own through `obs-vst` in CI (`tests/fixtures/vst`), which logs each time it's opened and closed, and on which thread: three runs are bit-identical, every plugin closes on the thread that opened it, no libobs allocation leaks, and Open interface when active doesn't abort. Without delivering Qt's posted events, the same three runs leave three plugins open and 21 libobs allocations leaked. In `knobs-core`, four watchdog rebuilds opened and closed the plugin four times, all on the core thread.
+
+Against OBS, `knobs-compare` on the speech recording, with the test plugin or with four of Cockos's ReaPlugs (ReaEQ, ReaComp, ReaGate and ReaFIR, at their defaults):
+
+- The test plugin alone, or last after the four-filter chain: bit-identical.
+- Plugins before the four-filter chain, with OBS 32.2.2 and 33.0.0-rc1: bit-identical from half a second in. Before that, in the input's silent lead-in, the outputs differ at about −210 dBFS, 201–220 dB below the signal. That's OBS's side of the run: its Media Source starts playing while OBS is still loading the plugins, so the filters after them start late, which the bit-identical run with the plugin last points to.
+
+knobs's output through the same plugins is the same with OBS 32.2.2 and 33.0.0-rc1.
+
+### NVIDIA's noise removal
+
+On the test PC's RTX 4080 SUPER, with NVIDIA's Audio Effects SDK 1.6.1.2:
+
+- knobs's output is bit-identical from run to run once the model has loaded, in packets of 480 or 4096 frames, with OBS 32.2.2 and 33.0.0-rc1.
+- Half a second more silence before the same speech leaves a residual 68.8 dB below the signal, and starting 120 samples later, one 16.9 dB below.
+- Against OBS, lined up by hand, stretches of speech match to 48–90 dB. OBS's recording of it also jumped 1024 frames once, partway through. `knobs-compare`'s alignment, made for chains that match bit for bit, follows neither, so it says to expect a residual.
+
+The cost, measured over 15 s while `knobs-live --measure-output` pushed audio through the chain into the cable (Release):
+
+| Chain | CPU, one core | Private memory | Threads |
+|---|---|---|---|
+| The four-filter chain | about 1% | 17 MB | 10 |
+| The test VST plugin, then the four filters | about 1% | 18 MB | 10 |
+| NVIDIA's noise removal, then the four filters | 18.6% | 798 MB | 19 |
+
+`nv-filters` loaded, with no NVIDIA filter running, costs 572 MB and 9 threads.
 
 ### Mic-to-cable latency
 
@@ -359,9 +419,7 @@ VB-Cable runs on the system clock. The iD4's recording side measures the same as
 ## Non-goals
 
 - Video, recording, streaming or encoding.
-- Editing filters. Users tune in OBS.
-- VST filters. `obs-vst` drives its plugins through Qt, and knobs has no Qt application.
-- NVIDIA noise removal, which is in `nv-filters`.
+- Editing filters, or opening a VST plugin's window. Users tune in OBS.
 - DSP of its own, including following the cable's clock: resampling the mic would make the output no longer OBS's.
 - More than one mic.
 - Platforms other than Windows. OS-specific code stays behind thin seams, so a port stays possible.
