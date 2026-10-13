@@ -150,12 +150,12 @@ Keys while it runs: o opens or closes OBS, w opens or closes OBS in another
 Windows account (Alex's), c plugs the virtual cables in or out,
 m the mics, s stalls the chain or starts it again, f adds filters to OBS's mics
 without any, e adds Noise Suppression to the first mic's chain or takes it out,
-v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
-34.0.0), i re-imports from OBS, a clicks the notification, . waits a second,
-and q quits. Changes in OBS are seen when it closes or at a re-import. In the
-first run: y and n click the doors ("I set up my mic in OBS", "I'm new to OBS"),
-x Next, b Back, d Done, p Open OBS (which only says so: OBS would open the
-mic), 1 to 9 pick a choice, r opens or closes the dropdown of other playback
+v adds a third-party filter to it or takes it out, u updates OBS (to 32.2.3,
+then to 34.0.0), i re-imports from OBS, a clicks the notification, . waits a
+second, and q quits. Changes in OBS are seen when it closes or at a re-import.
+In the first run: y and n click the doors ("I set up my mic in OBS", "I'm new to
+OBS"), x Next, b Back, d Done, p Open OBS (which only says so: OBS would open
+the mic), 1 to 9 pick a choice, r opens or closes the dropdown of other playback
 devices, k, j and l click the last page's check boxes (Start with Windows, the
 update check and updating by itself), and h holds Alt down, so the access keys
 show.
@@ -441,8 +441,8 @@ void Press(wchar_t key) {
       Print("the first mic's chain changes in OBS (seen at the next import)\n");
       break;
     case L'v':
-      session.world->Change(ToggleVstFilter);
-      Print("the first mic gets a VST filter in OBS, or loses it (seen at the next import)\n");
+      session.world->Change(ToggleUnknownFilter);
+      Print("the first mic gets a third-party filter in OBS, or loses it (seen at the next import)\n");
       break;
     case L'u': {
       std::string version;

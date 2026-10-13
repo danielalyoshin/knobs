@@ -89,9 +89,10 @@ void ToggleMics(FakeWorld& world);
 // Adds Noise Suppression to the front of the first mic's chain in OBS, or
 // takes it out again. Seen at the next import.
 void EditChain(FakeWorld& world);
-// Adds a VST filter to the first mic in OBS, which knobs leaves out with a
-// warning, or takes it out again. Seen at the next import.
-void ToggleVstFilter(FakeWorld& world);
+// Adds a filter from a third-party OBS plugin, which knobs doesn't load, to
+// the first mic in OBS, or takes it out again. knobs warns that it passes
+// audio through untouched. Seen at the next import.
+void ToggleUnknownFilter(FakeWorld& world);
 // Updates OBS: from 32.2.2 to 32.2.3, then to 34.0.0, which knobs doesn't
 // support. Seen at the next import. Returns the new version.
 std::string UpdateObs(FakeWorld& world);

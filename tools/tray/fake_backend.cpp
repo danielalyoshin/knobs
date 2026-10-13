@@ -59,13 +59,13 @@ void MonitorToDefault(FakeWorld& world) {
   world.config.audio.monitoring_device_name.clear();
 }
 
-import::ImportNote VstWarning() {
+// A filter from a third-party OBS plugin, which knobs doesn't load.
+import::ImportNote UnknownFilterWarning() {
   return {.warning = true,
-          .text = std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run VST "
-                              "plugins yet, so it leaves the filter out.",
+          .text = std::format("Filter \"Pitch Shift\" (pitch_shift_filter) isn't one {} has. It passes audio "
+                              "through untouched.",
                               kDisplayName),
-          .key = "vst 6f0c1d2e-reacomp",
-          .file = "reacomp-standalone.dll"};
+          .key = "unknown 6f0c1d2e-pitch-shift"};
 }
 
 // No virtual cable is installed. VB-Cable's input is the spare.
@@ -169,10 +169,10 @@ const std::vector<FakeScenario>& FakeScenarios() {
        }},
       {"sound-into-cable", "Windows plays the PC's sound into CABLE Input, as installing VB-Cable can make it",
        [](FakeWorld& world, FakeScript&) { world.devices.default_output = kCableInputId; }},
-      {"warnings", "Mic/Aux has a VST filter and push-to-talk",
+      {"warnings", "Mic/Aux has a third-party filter and push-to-talk",
        [](FakeWorld& world, FakeScript&) {
          world.collection.front().notes = {
-             VstWarning(),
+             UnknownFilterWarning(),
              {false, "Filter \"Expander\" is off in OBS, and stays off."},
              {false,
               "The mic is on push-to-talk in OBS, which doesn't silence the cable. Set up push-to-talk in each "
@@ -263,11 +263,12 @@ void EditChain(FakeWorld& world) {
   SetFilters(mic, std::move(filters));
 }
 
-void ToggleVstFilter(FakeWorld& world) {
+void ToggleUnknownFilter(FakeWorld& world) {
   if (world.collection.empty()) return;
   std::vector<import::ImportNote>& notes = world.collection.front().notes;
-  // Left out of the chain, so the chain's key stays the same.
-  const import::ImportNote warning = VstWarning();
+  // Not one of the filters that run, so the made-up chain's key, which only
+  // they make, stays the same.
+  const import::ImportNote warning = UnknownFilterWarning();
   if (std::erase(notes, warning) == 0) notes.insert(notes.begin(), warning);
 }
 

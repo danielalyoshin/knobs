@@ -139,7 +139,7 @@ TEST(NoticesStayQuietOnAColdBoot) {
 
   // Warnings found at start were the first run's to show...
   FakeWorld warned = tools::DefaultWorld();
-  tools::ToggleVstFilter(warned);
+  tools::ToggleUnknownFilter(warned);
   Fixture warnings(warned);
   warnings.Start();
   CHECK(warnings.events == kNone);
@@ -361,10 +361,10 @@ TEST(NoticesSayAFilterKnobsCantRun) {
   Fixture f;
   f.Start();
   f.ObsOpens();
-  f.ObsCloses(tools::ToggleVstFilter);
+  f.ObsCloses(tools::ToggleUnknownFilter);
   CHECK(f.state() == State::kRunning);
   CHECK(f.events == std::vector<std::string>{std::format("Mic/Aux has a filter {} can't run", kDisplayName)});
-  CHECK(f.last.text == f.controller.snapshot().notes.front().text && f.last.text.starts_with("Filter \"ReaComp\""));
+  CHECK(f.last.text == f.controller.snapshot().notes.front().text && f.last.text.starts_with("Filter \"Pitch Shift\""));
   CHECK(f.last.page == FirstRunPage::kWarnings && f.last.sound && !f.last.problem);
   CHECK(f.notifier.badge() == Badge::kNone);
 
@@ -376,13 +376,13 @@ TEST(NoticesSayAFilterKnobsCantRun) {
   // back with another: the warning, which says more.
   f.ObsOpens();
   f.ObsCloses([](FakeWorld& world) {
-    tools::ToggleVstFilter(world);
+    tools::ToggleUnknownFilter(world);
     tools::EditChain(world);
   });
   CHECK(f.events.size() == 2 && f.last.title == "Mic/Aux changed in OBS");
   f.ObsOpens();
   f.ObsCloses([](FakeWorld& world) {
-    tools::ToggleVstFilter(world);
+    tools::ToggleUnknownFilter(world);
     tools::EditChain(world);
   });
   CHECK(f.events.size() == 3 && f.last.kind == Notice::Kind::kFilterWarnings);
@@ -391,9 +391,9 @@ TEST(NoticesSayAFilterKnobsCantRun) {
   f.ObsOpens();
   f.ObsCloses([](FakeWorld& world) {
     import::ImportNote& warning = world.collection.front().notes.front();
-    warning.text.replace(warning.text.find("ReaComp"), 7, "Comp");
+    warning.text.replace(warning.text.find("Pitch Shift"), 11, "Pitch");
   });
-  CHECK(f.controller.snapshot().notes.front().text.starts_with("Filter \"Comp\""));
+  CHECK(f.controller.snapshot().notes.front().text.starts_with("Filter \"Pitch\""));
   CHECK(f.events.size() == 3);
 }
 
@@ -429,23 +429,22 @@ TEST(NoticesFitWarningsInTheBalloon) {
     return std::format("Filter \"{}\" ({}) isn't one {} has. It passes audio through untouched.", name, type,
                        kDisplayName);
   };
-  const std::string vst = std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run "
-                                      "VST plugins yet, so it leaves the filter out.",
-                                      kDisplayName);
+  const std::string pitch = unknown("Pitch Shift", "pitch_shift_filter");
 
   // One that Windows shows whole: just the warning.
-  Notice notice = WarningsNotice({vst});
-  CHECK(notice.title == std::format("Mic/Aux has a filter {} can't run", kDisplayName) && notice.text == vst);
+  Notice notice = WarningsNotice({pitch});
+  CHECK(notice.title == std::format("Mic/Aux has a filter {} can't run", kDisplayName) && notice.text == pitch);
   // Several: the first line says how many and what a click shows, then each
-  // warning on a line of its own, those the balloon holds whole.
+  // warning on a line of its own, those the balloon holds whole up to the
+  // first it doesn't.
   const std::string a = unknown("A", "a");
   const std::string b = unknown("B", "b");
   notice = WarningsNotice({a, b});
   CHECK(notice.title == std::format("Mic/Aux has filters {} can't run", kDisplayName));
   CHECK(notice.text == "2 warnings. Click to see them all.\n" + a + "\n" + b);
   const std::string deep = unknown("DeepFilterNet", "deepfilternet_noise_suppression_filter");
-  notice = WarningsNotice({vst, deep, ducking("Discord")});
-  CHECK(notice.text == "3 warnings. Click to see them all.\n" + vst);
+  notice = WarningsNotice({pitch, ducking("Discord"), deep});
+  CHECK(notice.text == "3 warnings. Click to see them all.\n" + pitch);
   // One too long to show whole: the first line says a click shows it all.
   const std::string long_ducking = ducking("Discord");
   notice = WarningsNotice({long_ducking});
@@ -567,7 +566,7 @@ TEST(NoticesSayWhatComesWithObsInAnotherAccount) {
   Fixture f;
   f.Start();
   f.ObsOpens();
-  f.world->Change(tools::ToggleVstFilter);
+  f.world->Change(tools::ToggleUnknownFilter);
   f.controller.SetObsRunning(false, f.now);
   f.controller.SetOtherObs({kAlex}, f.now);
   f.FeedLast();
@@ -688,7 +687,7 @@ TEST(NoticesSayKnobsRestartedForAnObsUpdate) {
   Fixture before;
   before.Start();
   FakeWorld added = f.world->Get();
-  tools::ToggleVstFilter(added);
+  tools::ToggleUnknownFilter(added);
   Fixture after(added, {}, {.restarted_for = core::RestartNeed::kObsUpdated, .warned = before.notifier.warnings()});
   after.Start();
   CHECK(after.events == std::vector<std::string>{std::format("Mic/Aux has a filter {} can't run", kDisplayName)});
