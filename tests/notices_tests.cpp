@@ -675,6 +675,12 @@ TEST(NoticesSayKnobsRestartedForAnObsUpdate) {
   other.Start();
   CHECK(other.events == std::vector<std::string>{"OBS changed to 32.2.2"});
 
+  // For NVIDIA's SDK, installed after nv-filters loaded without it.
+  Fixture nvidia(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kNvidiaInstalled});
+  nvidia.Start();
+  CHECK(nvidia.events == std::vector<std::string>{"NVIDIA's Audio Effects SDK was installed"});
+  CHECK(nvidia.last.text == std::format("{} restarted to run NVIDIA's noise removal with it.", kDisplayName));
+
   // Restarted while paused: it still is, and says so.
   Fixture paused(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kAudioChanged});
   paused.controller.Start(false, paused.now, true);
@@ -834,8 +840,8 @@ TEST(NoticesSayWhatStopsKnobs) {
 }
 
 TEST(RestartReasonsHaveNames) {
-  for (const core::RestartNeed need :
-       {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged, core::RestartNeed::kObsChanged}) {
+  for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged,
+                                       core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled}) {
     CHECK(RestartNeedNamed(RestartNeedName(need)) == need);
   }
   CHECK(RestartNeedName(core::RestartNeed::kObsChanged) == "obs-changed");

@@ -15,6 +15,7 @@
 #include "runtime/obs_layout.h"
 #include "runtime/obs_session.h"
 #include "runtime/obs_version.h"
+#include "runtime/pe_imports.h"
 #include "util/text_file.h"
 #include "util/win_strings.h"
 
@@ -142,27 +143,36 @@ bool VstPluginFound(const std::string& path) {
   return !path.empty() && fs::is_regular_file(FromUtf8(path), ec);
 }
 
-// Whether a filter is part of the chain anyone hears: it's on, libobs has its
-// type, and pre-flight keeps it as something that changes the audio. For a
-// type it doesn't have, such as a filter from an OBS plugin knobs doesn't
-// load, libobs loads a placeholder that passes audio through untouched, and
-// so does obs-vst for a plugin it can't find. A compressor with a sidechain
-// runs only as its output gain (GainInsteadOf).
-//
-// An optional module's filter whose module knobs hasn't tried yet counts as
-// running: knobs loads the module once the mic is picked, and only then,
-// since nv-filters alone costs hundreds of MB. `failed` has the modules that
-// didn't load.
-bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& failed) {
-  if (!Bool(api, filter, "enabled", true)) return false;
-  if (api.obs_get_source_output_flags(VersionedId(api, filter).c_str()) == 0) {
-    const runtime::OptionalObsModule* module = OptionalModuleFor(String(api, filter, "id"));
-    const std::string name = module ? std::string(module->name) : "";
-    if (!module || api.obs_get_module(name.c_str()) || failed.contains(name)) return false;
+// The folders the loader finds a VST plugin's own DLLs in, as obs-vst loads
+// it, with LoadLibraryW and the process's default directories
+// (SetDefaultDllDirectories): the program's folder, the runtime copy's
+// bin\64bit, which knobs adds (runtime::ObsRuntime::Load) and obs.dll is in,
+// and the system's. In OBS, the program's folder is OBS's bin\64bit.
+std::vector<fs::path> PluginSearchFolders() {
+  std::vector<fs::path> folders;
+  wchar_t path[MAX_PATH * 2] = {};
+  const DWORD size = static_cast<DWORD>(std::size(path));
+  if (GetModuleFileNameW(nullptr, path, size)) folders.push_back(fs::path(path).parent_path());
+  if (const HMODULE obs = GetModuleHandleW(runtime::kObsDll.data()); obs && GetModuleFileNameW(obs, path, size)) {
+    folders.push_back(fs::path(path).parent_path());
   }
-  if (String(api, filter, "id") == kVstFilterId && !VstPluginFound(VstPluginPath(api, filter))) return false;
-  const auto ducking = AsDucking(api, filter);
-  return !ducking || ducking->output_gain != 0;
+  if (GetSystemDirectoryW(path, size)) folders.push_back(path);
+  return folders;
+}
+
+// The DLLs a VST plugin imports that knobs's process can't find, so obs-vst
+// couldn't load it. Empty if it can't tell.
+std::vector<std::string> VstMissingDlls(const std::string& path) {
+  auto missing = runtime::UnresolvedDllImports(FromUtf8(path), PluginSearchFolders());
+  return missing ? *missing : std::vector<std::string>{};
+}
+
+std::string JoinNames(const std::vector<std::string>& names) {
+  std::string joined;
+  for (size_t i = 0; i < names.size(); ++i) {
+    joined += std::format("{}{}", i == 0 ? "" : i + 1 == names.size() ? " and " : ", ", names[i]);
+  }
+  return joined;
 }
 
 // Where nv-filters finds NVIDIA's Audio Effects SDK, which it loads to run
@@ -185,33 +195,78 @@ fs::path FindNvidiaAudioEffects(const runtime::ObsVersion& obs) {
   return !dir.empty() && fs::is_regular_file(dir / L"NVAudioEffects.dll", ec) ? dir : fs::path();
 }
 
+// Whether a filter is part of the chain anyone hears: it's on, libobs has its
+// type, and pre-flight keeps it as something that changes the audio. For a
+// type it doesn't have, such as a filter from an OBS plugin knobs doesn't
+// load, libobs loads a placeholder that passes audio through untouched, and
+// so does obs-vst for a plugin it can't load. A compressor with a sidechain
+// runs only as its output gain (GainInsteadOf).
+//
+// An optional module's filter whose module knobs hasn't tried yet counts as
+// running if what it needs is there: knobs loads the module once the mic is
+// picked, and only then, since nv-filters alone costs hundreds of MB.
+// `failed` has the modules that didn't load.
+bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& failed) {
+  if (!Bool(api, filter, "enabled", true)) return false;
+  const std::string id = String(api, filter, "id");
+  if (api.obs_get_source_output_flags(VersionedId(api, filter).c_str()) == 0) {
+    const runtime::OptionalObsModule* module = OptionalModuleFor(id);
+    const std::string name = module ? std::string(module->name) : "";
+    if (!module || api.obs_get_module(name.c_str()) || failed.contains(name)) return false;
+    const runtime::ObsVersion obs = runtime::ObsVersion::FromLibobs(api.obs_get_version());
+    if (id == kNvidiaFilterId && FindNvidiaAudioEffects(obs).empty()) return false;
+  }
+  if (id == kVstFilterId) {
+    const std::string path = VstPluginPath(api, filter);
+    if (!VstPluginFound(path) || !VstMissingDlls(path).empty()) return false;
+  }
+  const auto ducking = AsDucking(api, filter);
+  return !ducking || ducking->output_gain != 0;
+}
+
+// What obs-vst will load for a VST filter, which its saved settings don't
+// say: whether the plugin's file is there, which file it is, and what it
+// can't load. For the chain key, so a plugin that appears, is updated or
+// goes away restarts the chain.
+std::string VstPluginState(const std::string& path) {
+  if (!VstPluginFound(path)) return "missing";
+  std::error_code ec;
+  const fs::path file = FromUtf8(path);
+  const uint64_t size = fs::file_size(file, ec);
+  const auto written = fs::last_write_time(file, ec).time_since_epoch().count();
+  return std::format("{} {} {}", size, written, JoinNames(VstMissingDlls(path)));
+}
+
 // Why an optional module's filter isn't one libobs has: the module didn't
 // load, or for nv-filters, NVIDIA's runtime isn't there or didn't start, so
 // nv-filters registered no filter (load_nvidia_afx, nvidia-audiofx-filter.c).
-std::string WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::string_view id,
-                         const std::string& plugin, const ModuleErrors& modules) {
+// A warning, unless OBS can't run it either.
+ImportNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::string_view id,
+                        const std::string& plugin, const ModuleErrors& modules) {
   const auto failed = modules.find(id == kVstFilterId ? "obs-vst" : "nv-filters");
   const std::string error = failed == modules.end() ? "" : failed->second;
   if (id == kVstFilterId) {
-    return std::format("Filter \"{}\" is a VST plugin ({}), and {} couldn't load OBS's VST module: {} It passes audio "
-                       "through untouched.",
-                       name, plugin.empty() ? "none chosen" : plugin, kDisplayName,
-                       error.empty() ? "obs-vst registered no filter." : error);
+    return {true, std::format("Filter \"{}\" is a VST plugin ({}), and {} couldn't load OBS's VST module: {} It "
+                              "passes audio through untouched.",
+                              name, plugin.empty() ? "none chosen" : plugin, kDisplayName,
+                              error.empty() ? "obs-vst registered no filter." : error)};
   }
   if (!error.empty()) {
-    return std::format("Filter \"{}\" is NVIDIA's noise removal, and {} couldn't load OBS's nv-filters module: {} It "
-                       "passes audio through untouched.",
-                       name, kDisplayName, error);
+    return {true, std::format("Filter \"{}\" is NVIDIA's noise removal, and {} couldn't load OBS's nv-filters "
+                              "module: {} It passes audio through untouched.",
+                              name, kDisplayName, error)};
   }
   if (FindNvidiaAudioEffects(runtime::ObsVersion::FromLibobs(api.obs_get_version())).empty()) {
-    return std::format("Filter \"{}\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It isn't "
-                       "installed, so the filter passes audio through untouched, as it does in OBS without it.",
-                       name);
+    return {.text = std::format("Filter \"{}\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. "
+                                "It isn't installed, so the filter passes audio through untouched, as it does in "
+                                "OBS without it.",
+                                name),
+            .changes_expectations = true};
   }
-  return std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK is installed but didn't "
-                     "start, so the filter passes audio through untouched. It needs an NVIDIA RTX GPU, and the log "
-                     "says why it didn't start.",
-                     name);
+  return {true, std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK is installed but "
+                            "didn't start, so the filter passes audio through untouched. It needs an NVIDIA RTX "
+                            "GPU, and the log says why it didn't start.",
+                            name)};
 }
 
 // `file` parsed by libobs as its JSON reader takes it: os_quick_read_utf8_file
@@ -258,19 +313,6 @@ std::string FileName(std::string_view path) {
   return std::string(slash == std::string_view::npos ? path : path.substr(slash + 1));
 }
 
-// A copy of a VST filter with "Open interface when active" off, as
-// audio::LoadSourceJson loads every VST filter, so that turning it on or off
-// in OBS doesn't change the chain key. The window doesn't touch the audio.
-DataPtr VstWithoutWindow(const runtime::ObsApi& api, obs_data_t* vst) {
-  const char* json = api.obs_data_get_json(vst);
-  DataPtr copy = Own(api, json ? api.obs_data_create_from_json(json) : nullptr);
-  if (!copy) return copy;
-  DataPtr settings = Own(api, api.obs_data_get_obj(copy.get(), "settings"));
-  if (!settings) return nullptr;
-  api.obs_data_set_bool(settings.get(), kVstOpenWhenActive, false);
-  return copy;
-}
-
 // One filter's pre-flight. Returns whether to keep it, and sets `instead` to
 // a filter to load in its place, if any.
 bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& modules,
@@ -312,7 +354,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   if (!known) {
     // An optional module's filter, with the module or what it needs missing.
     const std::string plugin = id == kVstFilterId ? FileName(VstPluginPath(api, filter)) : "";
-    notes.push_back({true, WhyNotLoaded(api, name, id, plugin, modules)});
+    notes.push_back(WhyNotLoaded(api, name, id, plugin, modules));
     key("unknown");
     notes.back().file = plugin;
     return true;
@@ -332,11 +374,19 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
                        .changes_expectations = true,
                        .file = FileName(path)});
       key("vst");
+    } else if (const std::vector<std::string> missing = VstMissingDlls(path); !missing.empty()) {
+      // In OBS, the program's folder is OBS's bin\64bit, which can have
+      // them (PluginSearchFolders).
+      notes.push_back({.warning = true,
+                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that needs {}, which {} can't find "
+                                           "in Windows or in its copy of OBS, so it passes audio through untouched.",
+                                           name, FileName(path), JoinNames(missing), kDisplayName),
+                       .file = FileName(path)});
+      key("vst");
     }
+    // audio::LoadSourceJson turns the window off, and the chain key leaves
+    // the setting out.
     if (settings && api.obs_data_get_bool(settings.get(), kVstOpenWhenActive)) {
-      // Null if libobs couldn't copy it, and LoadSourceJson turns the window
-      // off all the same.
-      instead = VstWithoutWindow(api, filter);
       notes.push_back({false, std::format("Filter \"{}\" opens its VST plugin's window in OBS. {} shows no windows, "
                                           "so it runs the plugin without it.",
                                           name, kDisplayName)});
@@ -585,6 +635,12 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
   for (size_t i = 0; i < key_filter_count; ++i) {
     DataPtr filter = Own(api_, api_.obs_data_array_item(key_filters.get(), i));
     for (const char* key : kFilterKeysTheCableIgnores) api_.obs_data_erase(filter.get(), key);
+    if (String(api_, filter.get(), "id") == kVstFilterId) {
+      // Every VST filter loads with its window off (audio::LoadSourceJson).
+      DataPtr settings = Own(api_, api_.obs_data_get_obj(filter.get(), "settings"));
+      if (settings) api_.obs_data_erase(settings.get(), kVstOpenWhenActive);
+      api_.obs_data_set_string(filter.get(), "knobs_plugin", VstPluginState(VstPluginPath(api_, filter.get())).c_str());
+    }
   }
   const char* key_json = api_.obs_data_get_json(source.get());
   if (!key_json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
@@ -598,6 +654,10 @@ std::vector<std::string> NeededModulesForSource(const runtime::ObsApi& api, std:
   std::set<std::string> needed;
   if (source) AddNeededModules(api, source.get(), needed);
   return {needed.begin(), needed.end()};
+}
+
+bool NvidiaAudioEffectsInstalled(const runtime::ObsApi& api) {
+  return !FindNvidiaAudioEffects(runtime::ObsVersion::FromLibobs(api.obs_get_version())).empty();
 }
 
 ModuleErrors LoadModules(runtime::ObsSession& session, const std::vector<std::string>& modules) {

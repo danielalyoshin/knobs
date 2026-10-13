@@ -154,6 +154,7 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   if ((*collection)->from_backup()) {
     Log(std::format("The scene collection doesn't parse, so this is its backup: {}", ToUtf8((*collection)->file())));
   }
+  const runtime::ObsApi& api = host_->api();
   runtime::ObsSession& session = host_->session();
   MicImport result;
   result.mics = (*collection)->Mics(session.module_errors());
@@ -167,14 +168,24 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   // the filters libobs has from the rest. A module never unloads, so one a
   // chain needed stays for the rest of the session.
   const std::vector<std::string> needed = (*collection)->NeededModules(result.mics[*picked]);
-  for (const auto& [module, error] : import::LoadModules(session, needed)) {
-    Log(std::format("Couldn't load the OBS module {}: {}", module, error));
+  const bool needs_nvidia = std::find(needed.begin(), needed.end(), "nv-filters") != needed.end();
+  if (needs_nvidia && !nvidia_sdk_at_load_) nvidia_sdk_at_load_ = import::NvidiaAudioEffectsInstalled(api);
+  const size_t failed_before = session.module_errors().size();
+  const import::ModuleErrors failed = import::LoadModules(session, needed);
+  if (session.module_errors().size() != failed_before) {
+    for (const auto& [module, error] : failed) Log(std::format("Couldn't load the OBS module {}: {}", module, error));
   }
   if (!needed.empty()) result.mics = (*collection)->Mics(session.module_errors());
   auto imported = (*collection)->Import(result.mics[*picked], session.module_errors());
   if (!imported) return Error{imported.error()};
   result.picked = *picked;
   result.mic = std::move(*imported);
+  // nv-filters registers its filter only if NVIDIA's SDK was there as it
+  // loaded (load_nvidia_afx), and a module never loads again.
+  if (needs_nvidia && session.module("nv-filters") && nvidia_sdk_at_load_ == false &&
+      api.obs_get_source_output_flags("nvidia_audiofx_filter") == 0 && import::NvidiaAudioEffectsInstalled(api)) {
+    result.restart = RestartNeed::kNvidiaInstalled;
+  }
   return result;
 }
 

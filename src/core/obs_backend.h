@@ -79,6 +79,9 @@ class ObsBackend : public Backend {
   ObsBackendOptions options_;
   std::unique_ptr<runtime::ObsHost> host_;
   std::unique_ptr<audio::LiveChain> chain_;
+  // Whether NVIDIA's Audio Effects SDK was there when nv-filters loaded, once
+  // it has.
+  std::optional<bool> nvidia_sdk_at_load_;
   std::atomic<uint64_t> packets_ = 0;
   std::mutex level_mutex_;
   // Each packet's peak since the last TakeChainLevel, oldest first, before

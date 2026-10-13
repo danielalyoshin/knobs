@@ -105,10 +105,12 @@ struct ImportedMic {
   // source_json without the keys that don't change what reaches the cable:
   // libobs's monitor ignores mute, push-to-talk and push-to-mute, the source's
   // enabled flag and its sync offset (docs/design.md, Mute and push-to-talk),
-  // knobs sets monitoring itself, its private source registers no hotkeys, the
-  // names of the mic and its filters only label them, and the rest is the
-  // output mix, video or OBS's own bookkeeping, filters' UUIDs included.
-  // Imports with the same key load the same chain.
+  // knobs sets monitoring itself and VST plugins' windows stay closed, its
+  // private source registers no hotkeys, the names of the mic and its filters
+  // only label them, and the rest is the output mix, video or OBS's own
+  // bookkeeping, filters' UUIDs included. Each VST filter also says which
+  // plugin file obs-vst would load, which its settings don't. Imports with the
+  // same key load the same chain.
   std::string chain_key;
 
   // Whether loading should run obs_source_load2 afterwards, as OBS does.
@@ -162,6 +164,11 @@ class SceneCollection {
 
 // NeededModules for one OBS source object, such as knobs-harness's --source.
 std::vector<std::string> NeededModulesForSource(const runtime::ObsApi& api, std::string_view source_json);
+
+// Whether NVIDIA's Audio Effects SDK is where the running OBS version's
+// nv-filters looks for it. nv-filters registers NVIDIA's noise removal only
+// if it was there when the module loaded.
+bool NvidiaAudioEffectsInstalled(const runtime::ObsApi& api);
 
 // Loads optional modules into the session, and returns those that didn't
 // load, with why.

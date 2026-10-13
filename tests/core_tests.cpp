@@ -90,6 +90,7 @@ struct FakeBackend : Backend {
   // failure left a module loaded.
   bool libobs_can_retry = true;
   std::optional<std::string> import_error;
+  RestartNeed import_restart = RestartNeed::kNone;
   // The scene collection's mics. The only one is picked without a pick;
   // otherwise the pick names one.
   std::vector<import::ImportedMic> collection = {MakeMic("Mic/Aux", kMicId, "chain-1")};
@@ -159,6 +160,7 @@ struct FakeBackend : Backend {
     }
     result.picked = picked;
     result.mic = collection[*picked];
+    result.restart = import_restart;
     return result;
   }
   audio::Endpoints ListDevices() override {
@@ -548,6 +550,19 @@ TEST(CoreAsksForARestartToFollowObs) {
   elsewhere.backend.obs.install = {"D:\\OBS 33", {33, 0, 0}};
   elsewhere.controller.Apply({.obs_dir = "D:\\OBS 33"}, elsewhere.now);
   CHECK(elsewhere.state() == State::kRestartNeeded && elsewhere.last().restart == RestartNeed::kObsChanged);
+}
+
+TEST(CoreRestartsWhenNvidiasSdkArrives) {
+  // nv-filters loaded without NVIDIA's SDK, which was installed since: only a
+  // new process can load nv-filters again.
+  Fixture f;
+  f.controller.Start(false, f.now);
+  CHECK(f.state() == State::kRunning);
+  f.backend.import_restart = RestartNeed::kNvidiaInstalled;
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kRestartNeeded && !f.backend.chain_running);
+  CHECK(f.last().restart == RestartNeed::kNvidiaInstalled);
+  CHECK(f.last().detail.find("NVIDIA's Audio Effects SDK was installed") != std::string::npos);
 }
 
 TEST(CoreStartsPausedAfterAPausedCopyRestarted) {

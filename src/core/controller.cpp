@@ -264,6 +264,13 @@ void Controller::Refresh() {
   auto imported = backend_.ImportMic(*config, settings_.mic);
   if (!imported) return fail(State::kFailed, imported.error());
   import_ = std::move(*imported);
+  if (import_->restart == RestartNeed::kNvidiaInstalled) {
+    return fail(State::kRestartNeeded,
+                std::format("NVIDIA's Audio Effects SDK was installed after {0} loaded OBS's NVIDIA filters. {0} has "
+                            "to restart to use it.",
+                            kDisplayName),
+                SetupNeed::kNone, RestartNeed::kNvidiaInstalled);
+  }
   if (!import_->mic) {
     return fail(State::kNeedsSetup, import_->pick_error,
                 import_->mics.empty() ? SetupNeed::kNoMic : SetupNeed::kPickMic);

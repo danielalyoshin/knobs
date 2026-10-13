@@ -294,6 +294,10 @@ std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& sna
       return Notice{.kind = Kind::kRestarted,
                     .title = "OBS's sample rate or channels changed",
                     .text = std::format("{} restarted to follow them, as OBS does.{}", kDisplayName, paused)};
+    case core::RestartNeed::kNvidiaInstalled:
+      return Notice{.kind = Kind::kRestarted,
+                    .title = "NVIDIA's Audio Effects SDK was installed",
+                    .text = std::format("{} restarted to run NVIDIA's noise removal with it.{}", kDisplayName, paused)};
     case core::RestartNeed::kNone:
       break;
   }
@@ -310,6 +314,8 @@ std::string_view RestartNeedName(core::RestartNeed need) {
       return "audio-changed";
     case core::RestartNeed::kObsChanged:
       return "obs-changed";
+    case core::RestartNeed::kNvidiaInstalled:
+      return "nvidia-installed";
     case core::RestartNeed::kNone:
       break;
   }
@@ -317,8 +323,8 @@ std::string_view RestartNeedName(core::RestartNeed need) {
 }
 
 std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name) {
-  for (const core::RestartNeed need :
-       {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged, core::RestartNeed::kObsChanged}) {
+  for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged,
+                                       core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled}) {
     if (RestartNeedName(need) == name) return need;
   }
   return std::nullopt;

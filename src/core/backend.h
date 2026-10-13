@@ -39,6 +39,8 @@ struct MicImport {
   std::optional<size_t> picked;
   std::optional<import::ImportedMic> mic;
   std::string pick_error;
+  // Set when the import found that only a new process can run the chain.
+  RestartNeed restart = RestartNeed::kNone;
 };
 
 // What the chain runs: a mic's source object, loaded by libobs's own loader

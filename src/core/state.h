@@ -101,6 +101,9 @@ enum class RestartNeed {
   // The OBS install is another version, but not a newer one where the old
   // one was: an older one, or one in a folder chosen since.
   kObsChanged,
+  // NVIDIA's Audio Effects SDK was installed after nv-filters loaded without
+  // it, and nv-filters only looks for it as it loads.
+  kNvidiaInstalled,
 };
 
 // The chain as the user knows it from OBS.

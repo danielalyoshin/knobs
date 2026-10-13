@@ -70,7 +70,8 @@ expect("${output}" "[ok  ] modules            loaded obs-vst, which the chain ne
 expect("${output}" "[ok  ] modules            loaded nv-filters, which the chain needs")
 expect("${output}" "[--  ] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll) that isn't at C:/Program Files/VSTPlugins/ReaComp-standalone.dll any more, so it passes audio through untouched, in OBS too.")
 expect("${output}" "[--  ] pre-flight         Filter \"VST\" opens its VST plugin's window in OBS.")
-expect("${output}" "[warn] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It isn't installed")
+# Without the SDK, OBS passes the filter's audio through too: a note.
+expect("${output}" "[--  ] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It isn't installed")
 expect("${output}" "[warn] pre-flight         Compressor \"Ducking\" turns the mic down under \"Music\" in OBS.")
 expect("${output}" " loads only the mic, so it keeps only this compressor's output gain (+2.5 dB), and the mic sounds as it does in OBS while nothing plays on \"Music\".")
 expect("${output}" "[--  ] pre-flight         Filter \"Gate\" is off in OBS, and stays off.")
@@ -91,7 +92,7 @@ expect("${output}" "3. gain_filter \"Ducking\"")
 expect("${output}" "6. gain_filter \"Makeup\"")
 expect("${output}" "7. vst_filter \"Old VST\" (disabled)")
 expect_not("${output}" "compressor_filter")
-expect("${output}" "libobs loaded the chain and ran its load callbacks; 2 warning(s)")
+expect("${output}" "libobs loaded the chain and ran its load callbacks; 1 warning(s)")
 
 # The global Mic/Aux device: no load callbacks, nothing to warn about.
 run_import(output code --pick 1)
