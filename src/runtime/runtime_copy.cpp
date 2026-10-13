@@ -39,12 +39,23 @@ std::string Describe(const std::error_code& ec) {
                                                  : ec.message();
 }
 
+// The optional modules an install has (kOptionalObsModules).
+std::vector<std::string_view> OptionalModulesIn(const fs::path& install_root, const ObsVersion& version) {
+  std::vector<std::string_view> present;
+  for (const OptionalObsModule& module : kOptionalObsModules) {
+    std::error_code ec;
+    if (fs::is_regular_file(PluginDll(install_root, module.name, version), ec)) present.push_back(module.name);
+  }
+  return present;
+}
+
 // The binaries the file set is built from. Recorded in the manifest so a
-// knobs that loads more modules doesn't reuse a copy made without them.
-std::string RootsLine() {
+// knobs that loads more modules, or an install that has an optional module
+// it didn't have, doesn't reuse a copy made without them.
+std::string RootsLine(const fs::path& install_root, const ObsVersion& version) {
   std::string roots(kGraphicsModule);
   for (std::string_view module : kObsModules) roots += std::format(" {}", module);
-  for (const OptionalObsModule& module : kOptionalObsModules) roots += std::format(" {}", module.name);
+  for (std::string_view module : OptionalModulesIn(install_root, version)) roots += std::format(" {}", module);
   return roots;
 }
 
@@ -123,7 +134,7 @@ std::optional<ManifestSummary> ReadIntactManifest(const fs::path& copy_root, con
     if (rest.starts_with("obs-version ")) {
       version_matches = rest.substr(12) == install.version.ToString();
     } else if (rest.starts_with("roots ")) {
-      roots_match = rest.substr(6) == RootsLine();
+      roots_match = rest.substr(6) == RootsLine(install.root, install.version);
     } else if (rest.starts_with("file ")) {
       rest.remove_prefix(5);
       uint64_t size = 0;
@@ -148,7 +159,7 @@ Status WriteManifest(const fs::path& copy_root, const ObsInstall& install,
   std::ofstream out(manifest, std::ios::binary | std::ios::trunc);
   out << kManifestHeader << '\n'
       << "obs-version " << install.version.ToString() << '\n'
-      << "roots " << RootsLine() << '\n'
+      << "roots " << RootsLine(install.root, install.version) << '\n'
       << "source " << ToObsPath(install.root) << '\n';
   for (const fs::path& file : file_set.files) {
     std::error_code size_error;
@@ -373,87 +384,112 @@ RuntimeCopyLock::~RuntimeCopyLock() {
 
 Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVersion& version) {
   const fs::path bin = BinDir(install_root);
-  // The modules to copy: every one knobs always loads, and the optional ones
-  // the install has.
-  std::vector<std::string_view> modules(kObsModules.begin(), kObsModules.end());
-  for (const OptionalObsModule& module : kOptionalObsModules) {
-    std::error_code dll_ec;
-    if (fs::is_regular_file(PluginDll(install_root, module.name, version), dll_ec)) modules.push_back(module.name);
-  }
+  const std::vector<std::string_view> optional = OptionalModulesIn(install_root, version);
   std::map<fs::path, std::map<std::string, fs::path>> dlls_by_dir = {{bin, ListDlls(bin)}};
-  for (std::string_view module : modules) {
+  const auto list_dir = [&](std::string_view module) {
     const fs::path dir = PluginBinDir(install_root, module, version);
     if (!dlls_by_dir.contains(dir)) dlls_by_dir.emplace(dir, ListDlls(dir));
-  }
-  auto find_dll = [&](const fs::path& dir, const std::string& lower_name) -> const fs::path* {
+  };
+  for (std::string_view module : kObsModules) list_dir(module);
+  for (std::string_view module : optional) list_dir(module);
+  const auto find_dll = [&](const fs::path& dir, const std::string& lower_name) -> const fs::path* {
     const auto dir_it = dlls_by_dir.find(dir);
     if (dir_it == dlls_by_dir.end()) return nullptr;
     const auto it = dir_it->second.find(lower_name);
     return it == dir_it->second.end() ? nullptr : &it->second;
   };
 
-  std::vector<fs::path> pending = {ObsDll(install_root),
-                                   bin / (fs::path(kGraphicsModule) += L".dll")};
-  for (std::string_view module : modules) pending.push_back(PluginDll(install_root, module, version));
+  // What one set of roots adds: the DLLs in their import closure that aren't
+  // in `known` yet, the PDBs next to them, and the files in `data_dirs`.
+  struct Part {
+    std::set<fs::path> binaries;
+    std::vector<fs::path> files;
+    uint64_t bytes = 0;
+    std::map<std::string, std::string> system_dlls;  // Lowercase name -> as spelled.
+  };
+  const auto plan_part = [&](std::vector<fs::path> pending, const std::vector<fs::path>& data_dirs,
+                             const std::set<fs::path>& known) -> Result<Part> {
+    Part part;
+    while (!pending.empty()) {
+      const fs::path binary = std::move(pending.back());
+      pending.pop_back();
+      if (known.contains(binary) || !part.binaries.insert(binary).second) continue;
 
-  std::set<fs::path> binaries;
-  std::map<std::string, std::string> system_dlls;  // Lowercase name -> as spelled.
-  while (!pending.empty()) {
-    const fs::path binary = std::move(pending.back());
-    pending.pop_back();
-    if (!binaries.insert(binary).second) continue;
-
-    auto imports = ReadDllImports(binary);
-    if (!imports) return Error{imports.error()};
-    for (const std::string& name : *imports) {
-      const std::string lower = AsciiLower(name);
-      if (IsApiSet(lower)) continue;
-      const fs::path* local = find_dll(binary.parent_path(), lower);
-      if (!local) local = find_dll(bin, lower);
-      if (local) {
-        pending.push_back(*local);
-      } else {
-        system_dlls.emplace(lower, name);
+      auto imports = ReadDllImports(binary);
+      if (!imports) return Error{imports.error()};
+      for (const std::string& name : *imports) {
+        const std::string lower = AsciiLower(name);
+        if (IsApiSet(lower)) continue;
+        const fs::path* local = find_dll(binary.parent_path(), lower);
+        if (!local) local = find_dll(bin, lower);
+        if (local) {
+          pending.push_back(*local);
+        } else {
+          part.system_dlls.emplace(lower, name);
+        }
       }
     }
-  }
-
-  RuntimeFileSet file_set;
-  std::error_code ec;
-  auto add = [&](const fs::path& file) -> Status {
-    const uint64_t size = fs::file_size(file, ec);
-    if (ec) return Error{std::format("Couldn't read {}: {}", ToUtf8(file), Describe(ec))};
-    file_set.files.push_back(file.lexically_relative(install_root));
-    file_set.total_bytes += size;
-    return Ok{};
+    std::error_code ec;
+    const auto add = [&](const fs::path& file) -> Status {
+      const uint64_t size = fs::file_size(file, ec);
+      if (ec) return Error{std::format("Couldn't read {}: {}", ToUtf8(file), Describe(ec))};
+      part.files.push_back(file.lexically_relative(install_root));
+      part.bytes += size;
+      return Ok{};
+    };
+    for (const fs::path& binary : part.binaries) {
+      if (auto added = add(binary); !added) return Error{added.error()};
+      // OBS ships PDBs; keeping them next to the copies makes crashes debuggable.
+      fs::path pdb = binary;
+      pdb.replace_extension(L".pdb");
+      if (fs::exists(pdb, ec)) {
+        if (auto added = add(pdb); !added) return Error{added.error()};
+      }
+    }
+    for (const fs::path& dir : data_dirs) {
+      for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
+           it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        if (auto added = add(it->path()); !added) return Error{added.error()};
+      }
+      if (ec) return Error{std::format("Couldn't read {}: {}", ToUtf8(dir), Describe(ec))};
+    }
+    return part;
   };
 
-  for (const fs::path& binary : binaries) {
-    if (auto added = add(binary); !added) return Error{added.error()};
-    // OBS ships PDBs; keeping them next to the copies makes crashes debuggable.
-    fs::path pdb = binary;
-    pdb.replace_extension(L".pdb");
-    if (fs::exists(pdb, ec)) {
-      if (auto added = add(pdb); !added) return Error{added.error()};
-    }
-  }
+  RuntimeFileSet file_set;
+  std::set<fs::path> known;
+  std::map<std::string, std::string> system_dlls;
+  const auto take = [&](Part& part) {
+    known.merge(part.binaries);
+    file_set.files.insert(file_set.files.end(), part.files.begin(), part.files.end());
+    file_set.total_bytes += part.bytes;
+    system_dlls.merge(part.system_dlls);
+  };
 
+  std::vector<fs::path> roots = {ObsDll(install_root), bin / (fs::path(kGraphicsModule) += L".dll")};
   std::vector<fs::path> data_dirs = {LibobsDataDir(install_root)};
-  for (std::string_view module : modules) {
-    const fs::path data = PluginDataDir(install_root, module, version);
-    // An optional module with no data folder needs none.
-    std::error_code data_ec;
-    const bool optional = std::find(kObsModules.begin(), kObsModules.end(), module) == kObsModules.end();
-    if (optional && !fs::is_directory(data, data_ec)) continue;
-    data_dirs.push_back(data);
+  for (std::string_view module : kObsModules) {
+    roots.push_back(PluginDll(install_root, module, version));
+    data_dirs.push_back(PluginDataDir(install_root, module, version));
   }
-  for (const fs::path& dir : data_dirs) {
-    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
-         it.increment(ec)) {
-      if (!it->is_regular_file(ec)) continue;
-      if (auto added = add(it->path()); !added) return Error{added.error()};
+  auto base = plan_part(std::move(roots), data_dirs, known);
+  if (!base) return Error{base.error()};
+  take(*base);
+
+  // An optional module that can't be read is left out, so a chain that
+  // doesn't need it still runs. One with no data folder needs none.
+  for (std::string_view module : optional) {
+    const fs::path data = PluginDataDir(install_root, module, version);
+    std::error_code data_ec;
+    std::vector<fs::path> module_data;
+    if (fs::is_directory(data, data_ec)) module_data.push_back(data);
+    auto part = plan_part({PluginDll(install_root, module, version)}, module_data, known);
+    if (!part) {
+      file_set.skipped.push_back(std::format("{}: {}", module, part.error()));
+      continue;
     }
-    if (ec) return Error{std::format("Couldn't read {}: {}", ToUtf8(dir), Describe(ec))};
+    take(*part);
   }
 
   std::sort(file_set.files.begin(), file_set.files.end());
@@ -527,7 +563,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
     return Error{std::format("Couldn't move {} into place: {}", ToUtf8(staging), Describe(ec))};
   }
   RemoveRetiredCopies(runtime_base, version);
-  return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes};
+  return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes, std::move(file_set->skipped)};
 }
 
 PrunedCopies PruneRuntimeCopies(const fs::path& runtime_base, const fs::path& keep, const PruneOptions& options) {

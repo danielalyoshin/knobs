@@ -19,6 +19,9 @@ struct RuntimeFileSet {
   // spelled in the import tables. Not copied.
   std::vector<std::string> system_dlls;
   uint64_t total_bytes = 0;
+  // Optional modules left out because their files couldn't be read, each
+  // with why: "obs-vst: Couldn't read ...".
+  std::vector<std::string> skipped;
 };
 
 // Works out what knobs needs from an OBS install:
@@ -27,6 +30,8 @@ struct RuntimeFileSet {
 //    import, directly or indirectly, that the install ships, and the PDBs
 //    next to them;
 //  - data\libobs and those modules' data folders.
+// An optional module whose files can't be read is left out (skipped), so the
+// rest still copies.
 // The modules are where that version of OBS keeps them (HasCoreModules).
 // Imports are resolved like the loader will once they run from the copy: the
 // importing DLL's own folder, then bin\64bit, then the system.
@@ -37,6 +42,8 @@ struct RuntimeCopy {
   bool reused = false;         // An intact copy was already there.
   size_t file_count = 0;
   uint64_t total_bytes = 0;
+  // RuntimeFileSet::skipped, for a copy just made.
+  std::vector<std::string> skipped;
 };
 
 // The mutex RuntimeCopyLock takes unless it's given another: the one every

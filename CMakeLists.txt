@@ -177,6 +177,14 @@ foreach(version IN ITEMS 32.2.2 33.0.0)
 endforeach()
 # A VST 2 plugin of our own, for the vst test: OBS's VST filter needs one,
 # and the tests can't count on any being installed.
+# A DLL whose import, knobs-test-dep.dll, is in a folder of its own, for the
+# unit tests of UnresolvedDllImports.
+add_library(knobs-test-dep SHARED tests/fixtures/dep/test_dep.cpp)
+set_target_properties(knobs-test-dep PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-dep)
+add_library(knobs-test-needs-dep SHARED tests/fixtures/dep/test_needs_dep.cpp)
+target_link_libraries(knobs-test-needs-dep PRIVATE knobs-test-dep)
+add_dependencies(knobs-tests knobs-test-needs-dep)
+
 add_library(knobs-test-vst SHARED tests/fixtures/vst/knobs_test_vst.cpp)
 target_link_libraries(knobs-test-vst PRIVATE knobs_options)
 add_dependencies(knobs-harness knobs-test-vst)

@@ -154,6 +154,24 @@ TEST(PeImportsOfThisBinary) {
   CHECK(ContainsName(*imports, "version.dll"));
 }
 
+TEST(UnresolvedImportsFindsAMissingDll) {
+  // knobs-test-needs-dep.dll, next to this binary, imports
+  // knobs-test-dep.dll, which is in a folder of its own (CMakeLists.txt).
+  const fs::path dll = SelfPath().parent_path() / L"knobs-test-needs-dep.dll";
+  auto missing = UnresolvedDllImports(dll, {SelfPath().parent_path()});
+  CHECK(missing.ok() && *missing == std::vector<std::string>{"knobs-test-dep.dll"});
+  // Found where it is, and the C runtime and Windows' own are found anyway.
+  fs::path dep_folder;
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+    if (entry.path().filename() == L"knobs-test-dep.dll") dep_folder = entry.path().parent_path();
+  }
+  wchar_t system[MAX_PATH] = {};
+  GetSystemDirectoryW(system, MAX_PATH);
+  auto found = UnresolvedDllImports(dll, {dep_folder, system});
+  CHECK(!dep_folder.empty() && found.ok() && found->empty());
+  CHECK(!UnresolvedDllImports(SelfPath().parent_path() / L"missing.dll", {}).ok());
+}
+
 TEST(PeImportsRejectsNonBinaries) {
   TempDir dir(L"pe");
   WriteFile(dir.path / L"not-a-dll.dll", "MZ but not really a PE file");
@@ -394,6 +412,37 @@ TEST(EnsureRecopiesWhenInstallChanges) {
   fs::last_write_time(dll, fs::last_write_time(dll) + std::chrono::hours(1));
   auto again = EnsureRuntimeCopy(install, base, false);
   CHECK(again.ok() && !again->reused);
+  auto settled = EnsureRuntimeCopy(install, base, false);
+  CHECK(settled.ok() && settled->reused);
+}
+
+TEST(PlanLeavesOutAnOptionalModuleItCantRead) {
+  // nv-filters.dll isn't a DLL here, as with a file an antivirus truncated:
+  // the copy leaves the module out and says why, and the rest still copies.
+  TempDir dir(L"plan-skip");
+  const fs::path root = MakeFakeInstall(dir.path / L"obs");
+  WriteFile(root / L"obs-plugins" / L"64bit" / L"nv-filters.dll", "not a DLL");
+  WriteFile(root / L"data" / L"obs-plugins" / L"nv-filters" / L"locale" / L"en-US.ini", "i=j");
+  auto plan = PlanRuntimeCopy(root, {32, 2, 2});
+  CHECK(plan.ok());
+  if (!plan) return;
+  CHECK(plan->skipped.size() == 1 && plan->skipped[0].starts_with("nv-filters: "));
+  CHECK(!ContainsPath(plan->files, L"obs-plugins/64bit/nv-filters.dll"));
+  CHECK(!ContainsPath(plan->files, L"data/obs-plugins/nv-filters/locale/en-US.ini"));
+  CHECK(ContainsPath(plan->files, L"obs-plugins/64bit/obs-vst.dll"));
+  CHECK(plan->files.size() == 11);
+}
+
+TEST(EnsureRecopiesWhenAnOptionalModuleAppears) {
+  // A copy made while the install had no nv-filters isn't reused once it has.
+  TempDir dir(L"appears");
+  const ObsInstall install{MakeFakeInstall(dir.path / L"obs"), {32, 2, 2}};
+  const fs::path base = dir.path / L"runtime";
+  CHECK(EnsureRuntimeCopy(install, base, false).ok());
+  fs::copy_file(SelfPath(), install.root / L"obs-plugins" / L"64bit" / L"nv-filters.dll");
+  auto again = EnsureRuntimeCopy(install, base, false);
+  CHECK(again.ok() && !again->reused);
+  CHECK(fs::exists(base / L"32.2.2" / L"obs-plugins" / L"64bit" / L"nv-filters.dll"));
   auto settled = EnsureRuntimeCopy(install, base, false);
   CHECK(settled.ok() && settled->reused);
 }

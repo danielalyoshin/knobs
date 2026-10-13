@@ -43,6 +43,9 @@ Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
   host->log_attached_ = true;
   host->log_->Write(LOG_INFO, std::format("{}: OBS {}, runtime {}", kDisplayName,
                                           host->install_.version.ToString(), ToUtf8(copy->root)));
+  for (const std::string& skipped : copy->skipped) {
+    host->log_->Write(LOG_WARNING, std::format("Left an optional OBS module out of the runtime copy: {}", skipped));
+  }
 
   SessionOptions session_options;
   session_options.module_config_dir = dirs->ModuleConfig();

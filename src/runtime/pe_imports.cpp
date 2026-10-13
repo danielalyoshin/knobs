@@ -126,7 +126,7 @@ struct ViewUnmapper {
 
 }  // namespace
 
-Result<std::vector<std::string>> ReadDllImports(const std::filesystem::path& file) {
+Result<std::vector<std::string>> ReadDllImports(const std::filesystem::path& file, bool delay_loaded) {
   const std::string name = ToUtf8(file);
   HANDLE raw = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -157,11 +157,31 @@ Result<std::vector<std::string>> ReadDllImports(const std::filesystem::path& fil
       ReadDescriptorNames<IMAGE_IMPORT_DESCRIPTOR>(
           pe, IMAGE_DIRECTORY_ENTRY_IMPORT,
           [](const IMAGE_IMPORT_DESCRIPTOR& d) { return d.Name; }, names) &&
-      ReadDescriptorNames<IMAGE_DELAYLOAD_DESCRIPTOR>(
-          pe, IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT,
-          [](const IMAGE_DELAYLOAD_DESCRIPTOR& d) { return d.DllNameRVA; }, names);
+      (!delay_loaded || ReadDescriptorNames<IMAGE_DELAYLOAD_DESCRIPTOR>(
+                            pe, IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT,
+                            [](const IMAGE_DELAYLOAD_DESCRIPTOR& d) { return d.DllNameRVA; }, names));
   if (!ok) return Error{std::format("{} has a malformed import table.", name)};
   return names;
+}
+
+Result<std::vector<std::string>> UnresolvedDllImports(const std::filesystem::path& file,
+                                                      const std::vector<std::filesystem::path>& folders) {
+  auto imports = ReadDllImports(file, false);
+  if (!imports) return Error{imports.error()};
+  std::vector<std::string> unresolved;
+  for (const std::string& name : *imports) {
+    const std::string lower = AsciiLower(name);
+    // API sets are resolved by the loader, not found as files.
+    if (lower.starts_with("api-ms-") || lower.starts_with("ext-ms-")) continue;
+    const std::wstring wide = FromUtf8(name);
+    if (GetModuleHandleW(wide.c_str())) continue;
+    const bool found = std::any_of(folders.begin(), folders.end(), [&](const std::filesystem::path& folder) {
+      std::error_code ec;
+      return !folder.empty() && std::filesystem::is_regular_file(folder / wide, ec);
+    });
+    if (!found) unresolved.push_back(name);
+  }
+  return unresolved;
 }
 
 }  // namespace knobs::runtime

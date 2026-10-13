@@ -122,7 +122,9 @@ Status ObsSession::LoadOptionalModule(std::string_view name) {
     const std::filesystem::path dll = PluginDll(runtime_.root(), name, runtime_.install_version());
     std::error_code ec;
     if (!std::filesystem::is_regular_file(dll, ec)) {
-      return Error{std::format("This OBS install has no {} module.", name)};
+      // The install lacks it, or its files couldn't be read when the copy
+      // was made (RuntimeFileSet::skipped), which the log says.
+      return Error{std::format("{}'s copy of OBS has no {} module.", kDisplayName, name)};
     }
     const std::string binary = ToObsPath(dll);
     const std::string data = ToObsPath(PluginDataDir(runtime_.root(), name, runtime_.install_version()));
