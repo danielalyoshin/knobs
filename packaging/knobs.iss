@@ -16,7 +16,7 @@
 ;
 ; knobs runs it to update itself (src/main.cpp, StartInstaller), very silent
 ; with /update=1: then it starts knobs again as it ends, with --updated,
-; whether the update worked or not.
+; whether the update worked or not, and --paused if knobs passed /paused=1.
 
 #ifndef AppName
   #error Run packaging\package.ps1, which passes AppName, AppVersion, StageDir, OutputDir and VbCablePack.
@@ -101,7 +101,7 @@ Source: "{#StageDir}\NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppName}.exe"
 
 [Run]
-Filename: "{app}\{#AppName}.exe"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppName}.exe"; Parameters: "{code:StartParameters}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; The copy of OBS's files, the logs, and the dev tools' copies.
@@ -129,12 +129,44 @@ const
   // tall, one for each display scale (tools\render-installer-images.ps1).
   HeaderHeights = '58,77,97,116,124,143,159';
 
+  // Opening HKLM's keys for reading, in the 64-bit registry.
+  HklmRoot = $80000002;
+  KeyRead64 = $20119;
+  ErrorCancelled = 1223;
+
+type
+  TFileTimeRec = record
+    Low: Cardinal;
+    High: Cardinal;
+  end;
+
 var
-  // Read once, as Setup starts: a virtual cable, and VB-CABLE's driver.
-  HadCable, HadVbCable: Boolean;
+  // Read once, as Setup starts: a virtual cable, and VB-CABLE's driver
+  // waiting for a restart.
+  HadCable, VbCableWaited: Boolean;
+  // VB-CABLE's setup ran, as the task asked.
+  VbCableRan: Boolean;
   // VB-CABLE's driver was installed, but its devices wait for Windows to
   // restart.
   VbCableNeedsRestart: Boolean;
+
+function RegOpenKeyEx(Key: Cardinal; SubKey: String; Options, Sam: Cardinal; var Handle: Cardinal): Integer;
+  external 'RegOpenKeyExW@advapi32.dll stdcall';
+function RegQueryInfoKey(Key: Cardinal; ClassName, ClassLength, Reserved, SubKeys, MaxSubKey, MaxClass, Values,
+  MaxValueName, MaxValue, Security: Cardinal; var LastWrite: TFileTimeRec): Integer;
+  external 'RegQueryInfoKeyW@advapi32.dll stdcall';
+function RegCloseKey(Key: Cardinal): Integer;
+  external 'RegCloseKey@advapi32.dll stdcall';
+procedure GetSystemTimeAsFileTime(var Time: TFileTimeRec);
+  external 'GetSystemTimeAsFileTime@kernel32.dll stdcall';
+function GetTickCount64(): Int64;
+  external 'GetTickCount64@kernel32.dll stdcall';
+
+// A FILETIME, in 100 ns since 1601.
+function Ticks(const Time: TFileTimeRec): Int64;
+begin
+  Result := Int64(Time.High) * 4294967296 + Int64(Time.Low);
+end;
 
 // An update knobs started itself (StartInstaller in src/main.cpp).
 function IsUpdate(): Boolean;
@@ -181,32 +213,43 @@ begin
   end;
 end;
 
-// Whether VB-CABLE's setup installed its driver: it adds itself to the
-// installed apps as "VBCABLE, The Virtual Audio Cable" (VbCablePending in
-// src/audio/device_watch.cpp, which also asks whether it was since Windows
-// started).
-function VbCableDriverInstalled(): Boolean;
+// Whether VB-CABLE's setup installed its driver since Windows last started,
+// when its devices may wait for a restart. It adds itself to the installed
+// apps as "VBCABLE, The Virtual Audio Cable", and its key's time says when.
+// Installed before, with no devices, it's as none: a restart won't bring
+// them back, and installing it again does (VbCablePending in
+// src/audio/device_watch.cpp).
+function VbCablePending(): Boolean;
 var
   Apps: TArrayOfString;
   I: Integer;
   Name: String;
+  Key: Cardinal;
+  Written, Now: TFileTimeRec;
+  Started: Int64;
 begin
   Result := False;
   if not RegGetSubkeyNames(HKLM64, UninstallKey, Apps) then
     Exit;
+  GetSystemTimeAsFileTime(Now);
+  Started := Ticks(Now) - GetTickCount64() * 10000;
   for I := 0 to GetArrayLength(Apps) - 1 do
     if RegQueryStringValue(HKLM64, UninstallKey + '\' + Apps[I], 'DisplayName', Name) and
-       (Pos('vbcable', Lowercase(Name)) = 1) then
+       (Pos('vbcable', Lowercase(Name)) = 1) and
+       (RegOpenKeyEx(HklmRoot, UninstallKey + '\' + Apps[I], 0, KeyRead64, Key) = 0) then
     begin
-      Result := True;
-      Exit;
+      if RegQueryInfoKey(Key, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Written) = 0 then
+        Result := Ticks(Written) > Started;
+      RegCloseKey(Key);
+      if Result then
+        Exit;
     end;
 end;
 
 function InitializeSetup(): Boolean;
 begin
   HadCable := CableInstalled();
-  HadVbCable := VbCableDriverInstalled();
+  VbCableWaited := VbCablePending();
   Result := True;
 end;
 
@@ -215,27 +258,50 @@ end;
 // installed but waiting for a restart, which knobs's first run says.
 function OfferVbCable(): Boolean;
 begin
-  Result := not WizardSilent() and not IsUpdate() and not HadCable and not HadVbCable;
+  Result := not WizardSilent() and not IsUpdate() and not HadCable and not VbCableWaited;
+end;
+
+// After VB-CABLE's setup ran, knobs opens its first run at the cable, even if
+// it was finished, to choose the new one (--resume-setup).
+function StartParameters(Param: String): String;
+begin
+  Result := '';
+  if VbCableRan then
+    Result := '--resume-setup';
 end;
 
 // Opens knobs again at the next sign-in, to carry on with its first run
-// (knobs.exe --resume-setup, which knobs's first run writes too).
+// (knobs.exe --resume-setup, which knobs's first run writes too). If the entry
+// can't be written, the user hears to open knobs themselves.
 procedure ResumeAfterRestart();
 begin
-  RegWriteStringValue(HKCU, RunOnceKey, '{#AppName}',
-                      '"' + ExpandConstant('{app}\{#AppName}.exe') + '" --resume-setup');
+  if not RegWriteStringValue(HKCU, RunOnceKey, '{#AppName}',
+                             '"' + ExpandConstant('{app}\{#AppName}.exe') + '" --resume-setup') then
+  begin
+    Log('Couldn''t write the RunOnce entry that opens {#AppName} after the restart.');
+    SuppressibleMsgBox('{#AppName} can''t open by itself after the restart, so open it once Windows has ' +
+                       'restarted, to finish setting up VB-CABLE.', mbInformation, MB_OK, IDOK);
+  end;
+end;
+
+// VB-CABLE wasn't installed, and `Why`: says so, and that knobs shows how to
+// install it by hand.
+procedure VbCableNotInstalled(const Why: String);
+begin
+  Log('VB-CABLE wasn''t installed: ' + Why);
+  SuppressibleMsgBox('VB-CABLE wasn''t installed: ' + Why + #13#10#13#10 + 'When {#AppName} starts, it shows how ' +
+                     'to install it, step by step.', mbInformation, MB_OK, IDOK);
 end;
 
 // Unzips VB-Audio's driver pack and runs its setup, as knobs's guide does by
 // hand: its window, which asks for admin rights. Then waits for the cable.
-// If VB-CABLE's driver is installed but its devices don't appear, Windows
-// has to restart, which Setup then asks for. If it isn't, as when Windows'
+// If VB-CABLE's driver was installed but its devices don't appear, Windows
+// has to restart, which Setup then asks for. If it wasn't, as when Windows'
 // prompt was declined, knobs's first run shows how to install it by hand.
 procedure InstallVbCable();
 var
   Folder, Pack: String;
   Code, Waited: Integer;
-  Ran: Boolean;
 begin
   Folder := ExpandConstant('{tmp}\vb-cable');
   ForceDirectories(Folder);
@@ -243,15 +309,31 @@ begin
   Pack := ExpandConstant('{tmp}\{#VbCablePackName}');
   WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver, then close it.';
   WizardForm.FilenameLabel.Caption := 'VB-Audio''s website may then open in your browser.';
+  VbCableRan := True;
   // tar, which ships with Windows, unzips it.
-  Ran := Exec(ExpandConstant('{sys}\tar.exe'), '-xf "' + Pack + '" -C "' + Folder + '"', Folder, SW_HIDE,
-              ewWaitUntilTerminated, Code) and (Code = 0) and FileExists(Folder + '\VBCABLE_Setup_x64.exe');
-  if Ran then
-    Ran := ShellExec('runas', Folder + '\VBCABLE_Setup_x64.exe', '', Folder, SW_SHOWNORMAL, ewWaitUntilTerminated,
-                     Code);
+  if not Exec(ExpandConstant('{sys}\tar.exe'), '-xf "' + Pack + '" -C "' + Folder + '"', Folder, SW_HIDE,
+              ewWaitUntilTerminated, Code) then
+  begin
+    VbCableNotInstalled('Windows'' tar couldn''t unpack its driver pack (' + SysErrorMessage(Code) + ').');
+    Exit;
+  end;
+  if (Code <> 0) or not FileExists(Folder + '\VBCABLE_Setup_x64.exe') then
+  begin
+    VbCableNotInstalled(Format('its driver pack didn''t unpack (tar exited with code %d).', [Code]));
+    Exit;
+  end;
+  if not ShellExec('runas', Folder + '\VBCABLE_Setup_x64.exe', '', Folder, SW_SHOWNORMAL, ewWaitUntilTerminated,
+                   Code) then
+  begin
+    if Code = ErrorCancelled then
+      VbCableNotInstalled('Windows'' prompt to let it install was declined.')
+    else
+      VbCableNotInstalled('its setup couldn''t start (' + SysErrorMessage(Code) + ').');
+    Exit;
+  end;
   // Its devices take a moment to appear.
   Waited := 0;
-  while not CableInstalled() and VbCableDriverInstalled() and (Waited < CableWaitMs) do
+  while not CableInstalled() and VbCablePending() and (Waited < CableWaitMs) do
   begin
     Sleep(500);
     Waited := Waited + 500;
@@ -259,11 +341,10 @@ begin
   if CableInstalled() then
     Exit;
   // knobs opens after the restart once its files are in (ssPostInstall).
-  if VbCableDriverInstalled() then
+  if VbCablePending() then
     VbCableNeedsRestart := True
   else
-    SuppressibleMsgBox('VB-CABLE wasn''t installed. When {#AppName} starts, it shows how to install it, step by step.',
-                       mbInformation, MB_OK, IDOK);
+    VbCableNotInstalled('its setup closed without installing its driver.');
 end;
 
 function NeedRestart(): Boolean;
@@ -283,17 +364,18 @@ begin
   if (CurStep = ssPostInstall) and VbCableNeedsRestart then
     ResumeAfterRestart();
   // A restart that waits for later skips the Start check box, so knobs starts
-  // now, and again after the restart.
+  // now, at its first run's page that says to restart, and again after it.
   if (CurStep = ssDone) and VbCableNeedsRestart and not WizardForm.YesRadio.Checked then
-    ExecAsOriginalUser(ExpandConstant('{app}\{#AppName}.exe'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait,
-                       Code);
+    ExecAsOriginalUser(ExpandConstant('{app}\{#AppName}.exe'), '--resume-setup', ExpandConstant('{app}'),
+                       SW_SHOWNORMAL, ewNoWait, Code);
 end;
 
 // After an update, knobs starts again: the new copy, or this one if the
-// update failed, which says so.
+// update failed, which says so. Paused if the copy that started the update
+// was (/paused=1).
 procedure DeinitializeSetup();
 var
-  App: String;
+  App, Parameters: String;
   Code: Integer;
 begin
   if not IsUpdate() then
@@ -303,8 +385,11 @@ begin
   except
     Exit;
   end;
+  Parameters := '--updated';
+  if ExpandConstant('{param:paused|0}') = '1' then
+    Parameters := Parameters + ' --paused';
   if FileExists(App + '\{#AppName}.exe') then
-    Exec(App + '\{#AppName}.exe', '--updated', App, SW_SHOWNORMAL, ewNoWait, Code);
+    Exec(App + '\{#AppName}.exe', Parameters, App, SW_SHOWNORMAL, ewNoWait, Code);
 end;
 
 // Shows the lockup in the header, where Setup's small image goes. Setup keeps
