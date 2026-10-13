@@ -251,7 +251,7 @@ int Run(const Options& options) {
                      FormatPeakOf(padded.samples)));
 
   RegisterPushSource(api);
-  auto imported = ImportMic(api, *config, options.import_args);
+  auto imported = ImportMic(*host, *config, options.import_args);
   if (!imported) {
     Check(false, "import", imported.error());
     return FinishRun(*host);
@@ -265,6 +265,18 @@ int Run(const Options& options) {
     return FinishRun(*host);
   }
   ReportChain(ran->chain);
+  if (ran->waited > 0) {
+    Report(Outcome::kNote, "warm-up",
+           std::format("waited {:.0f} s for NVIDIA's noise removal to start before the audio, as OBS's has time to",
+                       ran->waited));
+    // Its output depends on what it heard before and where its 10 ms frames
+    // fall. On the test PC, OBS's recording of it also jumped 1024 frames
+    // partway through once, which the alignment doesn't follow.
+    Report(Outcome::kNote, "NVIDIA",
+           "its noise removal is a neural network that remembers what it heard, so it isn't bit-identical between "
+           "runs that don't start together, in OBS either: expect a residual. Compare stretches by hand to see how "
+           "close they are.");
+  }
   FloatAudio& ours = ran->output;
   const auto ours_written = WriteFloatWav(work_dir / (std::wstring(kDisplayNameW) + L".wav"), ours);
   Check(ours_written.ok(), kDisplayName,

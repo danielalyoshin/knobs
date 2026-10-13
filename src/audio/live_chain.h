@@ -32,7 +32,8 @@ struct LoadOptions {
 // Loads an OBS source object with libobs's own loader
 // (obs_load_private_source), which recreates the source, its filters in order
 // and its source-level state (volume, balance, Mono, sync offset). Monitoring
-// is off afterwards, whatever the JSON says. Returns a new reference.
+// is off afterwards, and VST filters don't open their plugins' windows,
+// whatever the JSON says. Returns a new reference.
 Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_view json,
                                      const LoadOptions& options = {});
 

@@ -219,7 +219,7 @@ int Run(const Options& options) {
   std::string json;
   bool load_callbacks = false;
   if (config) {
-    auto imported = ImportMic(api, *config, options.import_args);
+    auto imported = ImportMic(*host, *config, options.import_args);
     if (!imported) {
       Check(false, "import", imported.error());
       return FinishRun(*host);
@@ -235,6 +235,15 @@ int Run(const Options& options) {
     json = std::move(*text);
   } else {
     json = options.chain == "gain" ? audio::MicWithGainSourceJson("default", 0.0) : kCoverageChain;
+  }
+  if (!config) {
+    // As an import loads them (ImportMic).
+    for (const std::string& module : import::NeededModulesForSource(api, json)) {
+      const Status loaded = host->session().LoadOptionalModule(module);
+      Check(loaded.ok(), "modules",
+            loaded ? std::format("loaded {}, which the chain needs", module)
+                   : std::format("{}: {}", module, loaded.error()));
+    }
   }
 
   // Runs. Stops at the first one that fails; earlier failures, such as
@@ -253,6 +262,12 @@ int Run(const Options& options) {
     }
     if (run == 1) {
       ReportChain(result->chain);
+      if (result->waited > 0) {
+        Report(Outcome::kNote, "warm-up",
+               std::format("each run waits {:.0f} s for NVIDIA's noise removal to start before the audio, as it "
+                           "has time to live",
+                           result->waited));
+      }
       if (result->chain.volume != 1.0f) {
         Report(Outcome::kNote, "volume",
                std::format("the output leaves out the source's volume ({:.2f}); libobs applies it afterwards",

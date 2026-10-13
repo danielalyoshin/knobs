@@ -62,7 +62,7 @@ std::variant<StartedTool, int> StartTool(const ToolStartOptions& options);
 
 // Once libobs runs: reads the active scene collection, picks the mic and
 // runs the pre-flight checks.
-Result<import::ImportedMic> ImportMic(const runtime::ObsApi& api, const import::ActiveObsConfig& config,
+Result<import::ImportedMic> ImportMic(runtime::ObsHost& host, const import::ActiveObsConfig& config,
                                       const ImportArgs& args);
 
 }  // namespace knobs::tools

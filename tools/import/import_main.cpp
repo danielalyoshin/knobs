@@ -117,7 +117,7 @@ int Run(const Options& options) {
   auto& [host, config] = std::get<StartedTool>(started);
   const runtime::ObsApi& api = host->api();
 
-  auto imported = ImportMic(api, *config, options.import_args);
+  auto imported = ImportMic(*host, *config, options.import_args);
   if (!imported) {
     Check(false, "import", imported.error());
     return FinishRun(*host);

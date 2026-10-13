@@ -197,7 +197,8 @@
                     "id": "vst_filter",
                     "versioned_id": "vst_filter",
                     "settings": {
-                        "plugin_path": "C:/Program Files/VSTPlugins/ReaComp-standalone.dll"
+                        "plugin_path": "C:/Program Files/VSTPlugins/ReaComp-standalone.dll",
+                        "open_when_active_vst_settings": true
                     },
                     "mixers": 255,
                     "sync": 0,

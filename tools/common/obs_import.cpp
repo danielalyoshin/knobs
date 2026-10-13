@@ -2,6 +2,8 @@
 #include "common/obs_import.h"
 
 #include <format>
+#include <string>
+#include <vector>
 
 #include "common/console.h"
 #include "runtime/obs_install.h"
@@ -82,9 +84,9 @@ std::variant<StartedTool, int> StartTool(const ToolStartOptions& options) {
   return started;
 }
 
-Result<import::ImportedMic> ImportMic(const runtime::ObsApi& api, const import::ActiveObsConfig& config,
+Result<import::ImportedMic> ImportMic(runtime::ObsHost& host, const import::ActiveObsConfig& config,
                                       const ImportArgs& args) {
-  auto collection = import::ReadActiveCollection(api, config);
+  auto collection = import::ReadActiveCollection(host.api(), config);
   if (!collection) return Error{collection.error()};
   Check(true, "collection", std::format("\"{}\": {}", config.collection, ToUtf8((*collection)->file())));
   if ((*collection)->from_backup()) {
@@ -93,7 +95,8 @@ Result<import::ImportedMic> ImportMic(const runtime::ObsApi& api, const import::
                        ToUtf8(fs::path((*collection)->file()).replace_extension())));
   }
 
-  const auto mics = (*collection)->Mics();
+  runtime::ObsSession& session = host.session();
+  auto mics = (*collection)->Mics(session.module_errors());
   if (mics.size() > 1) {
     for (size_t i = 0; i < mics.size(); ++i) Report(Outcome::kNote, "mics", import::DescribeMic(mics[i], i + 1));
   }
@@ -102,10 +105,23 @@ Result<import::ImportedMic> ImportMic(const runtime::ObsApi& api, const import::
     return Error{mics.size() > 1 && args.pick.empty() ? picked.error() + "\nPass --pick with a number or a name."
                                                       : picked.error()};
   }
+  // As knobs does (core::ObsBackend::ImportMic): the optional modules the
+  // picked mic needs, then its mic and pre-flight again.
+  const std::vector<std::string> needed = (*collection)->NeededModules(mics[*picked]);
+  const import::ModuleErrors failed = import::LoadModules(session, needed);
+  for (const std::string& module : needed) {
+    const auto error = failed.find(module);
+    if (error == failed.end()) {
+      Check(true, "modules", std::format("loaded {}, which the chain needs", module));
+    } else {
+      Report(Outcome::kWarn, "modules", std::format("{}: {}", module, error->second));
+    }
+  }
+  if (!needed.empty()) mics = (*collection)->Mics(session.module_errors());
   const import::MicCandidate& mic = mics[*picked];
   Check(true, "mic", std::format("{}, device {}", import::DescribeMic(mic, *picked + 1), mic.device_id));
 
-  auto imported = (*collection)->Import(mic);
+  auto imported = (*collection)->Import(mic, session.module_errors());
   if (!imported) return Error{imported.error()};
   for (const import::ImportNote& note : imported->notes) {
     Report(note.warning ? Outcome::kWarn : Outcome::kNote, "pre-flight", note.text);

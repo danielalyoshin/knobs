@@ -63,27 +63,35 @@ message("${output}")
 if(NOT code EQUAL 0)
   message(FATAL_ERROR "Importing \"Podcast Mic\" failed.")
 endif()
-expect("${output}" "[warn] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll)")
-expect("${output}" "[warn] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal")
+# The optional modules load for the filters that need them. The VST plugin
+# isn't there, and NVIDIA's SDK isn't either: the test points nv-filters at a
+# folder without it (NVAFX_SDK_DIR).
+expect("${output}" "[ok  ] modules            loaded obs-vst, which the chain needs")
+expect("${output}" "[ok  ] modules            loaded nv-filters, which the chain needs")
+expect("${output}" "[--  ] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll) that isn't at C:/Program Files/VSTPlugins/ReaComp-standalone.dll any more, so it passes audio through untouched, in OBS too.")
+expect("${output}" "[--  ] pre-flight         Filter \"VST\" opens its VST plugin's window in OBS.")
+expect("${output}" "[warn] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It isn't installed")
 expect("${output}" "[warn] pre-flight         Compressor \"Ducking\" turns the mic down under \"Music\" in OBS.")
 expect("${output}" " loads only the mic, so it keeps only this compressor's output gain (+2.5 dB), and the mic sounds as it does in OBS while nothing plays on \"Music\".")
 expect("${output}" "[--  ] pre-flight         Filter \"Gate\" is off in OBS, and stays off.")
 expect("${output}" "[--  ] pre-flight         Filter \"Third-Party\" (some_plugin_filter) isn't one ")
 expect("${output}" " has, but it's off in OBS anyway.")
-expect("${output}" "[--  ] pre-flight         Filter \"Old VST\", a VST plugin, is off in OBS.")
+expect("${output}" "[--  ] pre-flight         Filter \"Old VST\" is off in OBS, and stays off.")
 expect("${output}" "The mic is muted and on push-to-talk in OBS, which doesn't silence the cable. Set up push-to-talk in each app that uses the cable.")
 expect("${output}" "sync offset of 50 ms")
 expect("${output}" "OBS doesn't monitor this mic")
-# Both VST filters are gone, and the compressor with a sidechain is a Gain
-# filter at its output gain, in its place; the rest load in order, with
-# source-level state.
-expect("${output}" "balance 0.30, Mono off, then 5 filter(s), then volume 0.50")
-expect("${output}" "1. nvidia_audiofx_filter \"NVIDIA Noise Removal\" (unknown to libobs")
-expect("${output}" "2. gain_filter \"Ducking\"")
-expect("${output}" "5. gain_filter \"Makeup\"")
-expect_not("${output}" "vst_filter")
+# The compressor with a sidechain is a Gain filter at its output gain, in its
+# place; the rest load in order, with source-level state, the VST filters as
+# obs-vst's.
+expect("${output}" "balance 0.30, Mono off, then 7 filter(s), then volume 0.50")
+expect("${output}" "1. vst_filter \"VST\"")
+expect_not("${output}" "1. vst_filter \"VST\" (unknown")
+expect("${output}" "2. nvidia_audiofx_filter \"NVIDIA Noise Removal\" (unknown to libobs")
+expect("${output}" "3. gain_filter \"Ducking\"")
+expect("${output}" "6. gain_filter \"Makeup\"")
+expect("${output}" "7. vst_filter \"Old VST\" (disabled)")
 expect_not("${output}" "compressor_filter")
-expect("${output}" "libobs loaded the chain and ran its load callbacks; 3 warning(s)")
+expect("${output}" "libobs loaded the chain and ran its load callbacks; 2 warning(s)")
 
 # The global Mic/Aux device: no load callbacks, nothing to warn about.
 run_import(output code --pick 1)

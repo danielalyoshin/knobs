@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "common/offline_chain.h"
 
+#include <windows.h>
+
 #include <format>
 #include <vector>
 
@@ -11,6 +13,24 @@ namespace {
 
 // Where the synthetic timestamps start. Only their spacing matters.
 constexpr uint64_t kFirstTimestampNs = 1'000'000'000;
+
+// NVIDIA's noise removal loads its model on a thread of its own, and passes
+// audio through untouched until it has (nvidia_audio_initialize,
+// nvidia-audiofx-filter.c). Live, that's the first moments after the mic
+// starts, in OBS too; offline, where seconds of audio take milliseconds, it
+// would be all of it. It took under 0.5 s on an RTX 4080 SUPER, and NVIDIA's
+// code allows about 2 s.
+constexpr DWORD kLateStartWaitMs = 5000;
+
+double WaitForLateStarts(const audio::ChainInfo& chain) {
+  for (const audio::ChainInfo::Filter& filter : chain.filters) {
+    if (filter.type == "nvidia_audiofx_filter" && filter.known && filter.enabled) {
+      Sleep(kLateStartWaitMs);
+      return kLateStartWaitMs / 1000.0;
+    }
+  }
+  return 0;
+}
 
 struct Collector {
   uint32_t channels = 0;
@@ -44,6 +64,7 @@ Result<OfflineRun> RunChainOffline(const runtime::ObsApi& api, runtime::ObsSessi
 
   OfflineRun run;
   run.chain = audio::DescribeChain(api, *source);
+  run.waited = WaitForLateStarts(run.chain);
   Collector collector;
   collector.channels = get_audio_channels(session.options().speakers);
   api.obs_source_add_audio_capture_callback(*source, OnAudio, &collector);

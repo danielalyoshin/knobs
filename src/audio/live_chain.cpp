@@ -3,6 +3,7 @@
 
 #include <format>
 
+#include "runtime/obs_layout.h"
 #include "util/json.h"
 
 namespace knobs::audio {
@@ -20,6 +21,27 @@ void SetMonitoring(const runtime::ObsApi& api, obs_source_t* source, bool on) {
   } else {
     api.obs_source_set_monitoring_type(source, on ? OBS_MONITORING_TYPE_MONITOR_ONLY : OBS_MONITORING_TYPE_NONE);
   }
+}
+
+// Turns obs-vst's "Open interface when active" off for every VST filter in
+// a source object, which would otherwise abort the process as it loads
+// (runtime::kVstOpenWhenActive). Nested objects are shared, so this changes
+// `source` itself.
+void CloseVstWindows(const runtime::ObsApi& api, obs_data_t* source) {
+  obs_data_array_t* filters = api.obs_data_get_array(source, "filters");
+  const size_t count = filters ? api.obs_data_array_count(filters) : 0;
+  for (size_t i = 0; i < count; ++i) {
+    obs_data_t* filter = api.obs_data_array_item(filters, i);
+    if (OrEmpty(api.obs_data_get_string(filter, "id")) == "vst_filter") {
+      obs_data_t* settings = api.obs_data_get_obj(filter, "settings");
+      if (settings) {
+        api.obs_data_set_bool(settings, runtime::kVstOpenWhenActive, false);
+        api.obs_data_release(settings);
+      }
+    }
+    api.obs_data_release(filter);
+  }
+  if (filters) api.obs_data_array_release(filters);
 }
 
 }  // namespace
@@ -52,6 +74,7 @@ Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_vie
   // that key (docs/design.md, OBS 33.0).
   api.obs_data_set_int(data, "monitoring_type", OBS_MONITORING_TYPE_NONE);
   api.obs_data_set_bool(data, "monitoring_enabled", false);
+  CloseVstWindows(api, data);
   obs_source_t* source = api.obs_load_private_source(data);
   api.obs_data_release(data);
   if (!source) return Error{"libobs couldn't load the source."};

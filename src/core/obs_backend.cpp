@@ -154,15 +154,24 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   if ((*collection)->from_backup()) {
     Log(std::format("The scene collection doesn't parse, so this is its backup: {}", ToUtf8((*collection)->file())));
   }
+  runtime::ObsSession& session = host_->session();
   MicImport result;
-  result.mics = (*collection)->Mics();
+  result.mics = (*collection)->Mics(session.module_errors());
   auto picked =
       options_.pick_by_number ? import::PickMic(result.mics, pick) : import::PickMicByName(result.mics, pick);
   if (!picked) {
     result.pick_error = picked.error();
     return result;
   }
-  auto imported = (*collection)->Import(result.mics[*picked]);
+  // The optional modules the picked mic needs, before its pre-flight tells
+  // the filters libobs has from the rest. A module never unloads, so one a
+  // chain needed stays for the rest of the session.
+  const std::vector<std::string> needed = (*collection)->NeededModules(result.mics[*picked]);
+  for (const auto& [module, error] : import::LoadModules(session, needed)) {
+    Log(std::format("Couldn't load the OBS module {}: {}", module, error));
+  }
+  if (!needed.empty()) result.mics = (*collection)->Mics(session.module_errors());
+  auto imported = (*collection)->Import(result.mics[*picked], session.module_errors());
   if (!imported) return Error{imported.error()};
   result.picked = *picked;
   result.mic = std::move(*imported);

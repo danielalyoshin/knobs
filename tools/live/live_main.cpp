@@ -892,7 +892,7 @@ void RunMode(runtime::ObsHost& host, const Options& options, const std::optional
   std::string output_query = options.output.empty() ? "CABLE Input" : options.output;
   std::string mic_query = options.mic.empty() ? "default" : options.mic;
   if (config) {
-    auto imported = ImportMic(api, *config, options.import_args);
+    auto imported = ImportMic(host, *config, options.import_args);
     if (!imported) return Check(false, "import", imported.error());
     chain = {std::move(imported->source_json), imported->load_callbacks()};
     if (options.output.empty()) {

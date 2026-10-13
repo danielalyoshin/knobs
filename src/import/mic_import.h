@@ -3,6 +3,8 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -11,6 +13,10 @@
 #include "import/obs_config.h"
 #include "runtime/obs_api.h"
 #include "util/result.h"
+
+namespace knobs::runtime {
+class ObsSession;
+}
 
 // Finds the mics in an OBS scene collection and prepares one for libobs's
 // loader. The collection is parsed by libobs itself (obs_data), as OBS parses
@@ -81,6 +87,10 @@ struct ImportNote {
   friend bool operator==(const ImportNote&, const ImportNote&) = default;
 };
 
+// The optional OBS modules a chain needed that didn't load, by name
+// (runtime::kOptionalObsModules), with why.
+using ModuleErrors = std::map<std::string, std::string, std::less<>>;
+
 struct ImportedMic {
   MicCandidate mic;
   // The mic's source object for libobs's loader: as OBS saved it, minus the
@@ -126,12 +136,20 @@ class SceneCollection {
   std::string name() const;
 
   // Every win-wasapi input: the global devices first, then "sources" in
-  // order.
-  std::vector<MicCandidate> Mics() const;
+  // order. Their filters count an optional module's as running until the
+  // module has been tried; `modules` has those that failed.
+  std::vector<MicCandidate> Mics(const ModuleErrors& modules = {}) const;
+
+  // The optional modules (runtime::kOptionalObsModules) whose filters are on
+  // in `mic`'s chain. Load them (LoadModules) before Import(), which tells the
+  // filters libobs has from the rest. Only the picked mic's: nv-filters alone
+  // costs hundreds of MB.
+  std::vector<std::string> NeededModules(const MicCandidate& mic) const;
 
   // Runs the pre-flight checks on `mic` and returns it ready to load. Needs
-  // libobs started with its modules, to tell which filters it has.
-  Result<ImportedMic> Import(const MicCandidate& mic) const;
+  // libobs started with its modules, and the optional ones loaded, to tell
+  // which filters it has. `modules` says why any it needed didn't load.
+  Result<ImportedMic> Import(const MicCandidate& mic, const ModuleErrors& modules = {}) const;
 
  private:
   SceneCollection(const runtime::ObsApi& api, obs_data_t* data) : api_(api), data_(data) {}
@@ -141,6 +159,13 @@ class SceneCollection {
   std::filesystem::path file_;
   bool from_backup_ = false;
 };
+
+// NeededModules for one OBS source object, such as knobs-harness's --source.
+std::vector<std::string> NeededModulesForSource(const runtime::ObsApi& api, std::string_view source_json);
+
+// Loads optional modules into the session, and returns those that didn't
+// load, with why.
+ModuleErrors LoadModules(runtime::ObsSession& session, const std::vector<std::string>& modules);
 
 // Reads the active scene collection: the file FindSceneCollectionFile picks,
 // or its backup. Each file is parsed once along the way.

@@ -196,7 +196,10 @@ add_test(NAME import
           -DWORK=${CMAKE_CURRENT_BINARY_DIR}/import-fixture
           "-DOBS_DIR=${KNOBS_TEST_OBS_DIR}"
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/import_fixture.cmake)
-set_tests_properties(import PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
+# nv-filters looks for NVIDIA's Audio Effects SDK where NVAFX_SDK_DIR says
+# first: a folder that doesn't exist makes it missing on every PC.
+set_tests_properties(import PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed."
+                     ENVIRONMENT "NVAFX_SDK_DIR=${CMAKE_CURRENT_BINARY_DIR}/no-nvidia-sdk")
 add_test(NAME core
   COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-core>
           -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
