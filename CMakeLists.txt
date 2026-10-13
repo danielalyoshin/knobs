@@ -175,6 +175,11 @@ foreach(version IN ITEMS 32.2.2 33.0.0)
   target_link_options(fake-obs-${major} PRIVATE /NOENTRY)
   add_dependencies(knobs-tests fake-obs-${major})
 endforeach()
+# A VST 2 plugin of our own, for the vst test: OBS's VST filter needs one,
+# and the tests can't count on any being installed.
+add_library(knobs-test-vst SHARED tests/fixtures/vst/knobs_test_vst.cpp)
+target_link_libraries(knobs-test-vst PRIVATE knobs_options)
+add_dependencies(knobs-harness knobs-test-vst)
 
 enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
@@ -206,3 +211,10 @@ add_test(NAME core
           "-DOBS_DIR=${KNOBS_TEST_OBS_DIR}"
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/core_fixture.cmake)
 set_tests_properties(core PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
+add_test(NAME vst
+  COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-harness>
+          -DPLUGIN=$<TARGET_FILE:knobs-test-vst>
+          -DWORK=${CMAKE_CURRENT_BINARY_DIR}/vst-fixture
+          "-DOBS_DIR=${KNOBS_TEST_OBS_DIR}"
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/vst_fixture.cmake)
+set_tests_properties(vst PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
