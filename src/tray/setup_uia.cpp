@@ -37,6 +37,7 @@ long ControlType(Role role) {
     case Role::kDoor:
     case Role::kButton:
     case Role::kToggle:
+    case Role::kDropdown:
       return UIA_ButtonControlTypeId;
     case Role::kChoiceGroup:
       return UIA_GroupControlTypeId;
@@ -55,7 +56,9 @@ long ControlType(Role role) {
   return UIA_CustomControlTypeId;
 }
 
-bool Invokable(Role role) { return role == Role::kLink || role == Role::kDoor || role == Role::kButton; }
+bool Invokable(Role role) {
+  return role == Role::kLink || role == Role::kDoor || role == Role::kButton || role == Role::kDropdown;
+}
 
 bool Toggles(Role role) { return role == Role::kCheckBox || role == Role::kToggle; }
 
@@ -80,7 +83,8 @@ class Provider final : public IRawElementProviderSimple,
                        public IRawElementProviderFragmentRoot,
                        public IInvokeProvider,
                        public IToggleProvider,
-                       public ISelectionItemProvider {
+                       public ISelectionItemProvider,
+                       public IExpandCollapseProvider {
  public:
   Provider(std::shared_ptr<UiaBridge> bridge, int index)
       : bridge_(std::move(bridge)), index_(index), generation_(bridge_->generation) {}
@@ -110,6 +114,8 @@ class Provider final : public IRawElementProviderSimple,
       *out = static_cast<IToggleProvider*>(this);
     } else if (iid == __uuidof(ISelectionItemProvider) && element && element->role == Role::kRadio) {
       *out = static_cast<ISelectionItemProvider*>(this);
+    } else if (iid == __uuidof(IExpandCollapseProvider) && element && element->role == Role::kDropdown) {
+      *out = static_cast<IExpandCollapseProvider*>(this);
     } else {
       return E_NOINTERFACE;
     }
@@ -136,7 +142,8 @@ class Provider final : public IRawElementProviderSimple,
     if (!element) return UIA_E_ELEMENTNOTAVAILABLE;
     if ((pattern == UIA_InvokePatternId && Invokable(element->role)) ||
         (pattern == UIA_TogglePatternId && Toggles(element->role)) ||
-        (pattern == UIA_SelectionItemPatternId && element->role == Role::kRadio)) {
+        (pattern == UIA_SelectionItemPatternId && element->role == Role::kRadio) ||
+        (pattern == UIA_ExpandCollapsePatternId && element->role == Role::kDropdown)) {
       *out = static_cast<IRawElementProviderSimple*>(this);
       AddRef();
     }
@@ -364,6 +371,24 @@ class Provider final : public IRawElementProviderSimple,
     return S_OK;
   }
 
+  // IExpandCollapseProvider: a dropdown, open while it's selected.
+  HRESULT STDMETHODCALLTYPE Expand() override {
+    const Element* element = Live();
+    if (!element) return UIA_E_ELEMENTNOTAVAILABLE;
+    return element->selected ? S_OK : Activate();
+  }
+  HRESULT STDMETHODCALLTYPE Collapse() override {
+    const Element* element = Live();
+    if (!element) return UIA_E_ELEMENTNOTAVAILABLE;
+    return element->selected ? Activate() : S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE get_ExpandCollapseState(ExpandCollapseState* state) override {
+    const Element* element = Live();
+    if (!element) return UIA_E_ELEMENTNOTAVAILABLE;
+    *state = element->selected ? ExpandCollapseState_Expanded : ExpandCollapseState_Collapsed;
+    return S_OK;
+  }
+
  private:
   bool Alive() const { return bridge_->host && (index_ == kRoot || generation_ == bridge_->generation); }
 
@@ -434,6 +459,17 @@ void SetupUia::Toggled(int element, bool was_on) {
 }
 
 void SetupUia::Selected(int element) { Raise(bridge_, element, UIA_SelectionItem_ElementSelectedEventId); }
+
+void SetupUia::Expanded(int element, bool open) {
+  if (!bridge_->host || element < 0 || !UiaClientsAreListening()) return;
+  IRawElementProviderSimple* provider = Provider::For(bridge_, element);
+  VARIANT before = {}, after = {};
+  before.vt = after.vt = VT_I4;
+  before.lVal = open ? ExpandCollapseState_Collapsed : ExpandCollapseState_Expanded;
+  after.lVal = open ? ExpandCollapseState_Expanded : ExpandCollapseState_Collapsed;
+  UiaRaiseAutomationPropertyChangedEvent(provider, UIA_ExpandCollapseExpandCollapseStatePropertyId, before, after);
+  provider->Release();
+}
 
 void SetupUia::StatusChanged(int element) { Raise(bridge_, element, UIA_LiveRegionChangedEventId); }
 

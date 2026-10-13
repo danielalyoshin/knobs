@@ -25,7 +25,8 @@ class SetupUiaHost {
   // The element with the keyboard focus, or -1.
   virtual int UiaFocus() const = 0;
   virtual void UiaFocusOn(int element) = 0;
-  // Clicks a button, door or link, selects a radio, or toggles the check box.
+  // Clicks a button, door or link, selects a radio, toggles the check box, or
+  // opens or closes a dropdown.
   virtual void UiaActivate(int element) = 0;
   // A box in client DIPs, in screen pixels.
   virtual RECT UiaScreenRect(const D2D1_RECT_F& box) const = 0;
@@ -51,6 +52,8 @@ class SetupUia {
   void FocusChanged(int element);
   void Toggled(int element, bool was_on);
   void Selected(int element);
+  // A dropdown opened, or closed.
+  void Expanded(int element, bool open);
   // What a waiting page waits for changed.
   void StatusChanged(int element);
   // The window is going: providers stop answering.

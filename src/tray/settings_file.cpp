@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "tray/settings_file.h"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <format>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "import/obs_ini.h"
 #include "util/text_file.h"
@@ -86,12 +88,25 @@ std::string FormatSettings(const SavedSettings& saved) {
   text += "\n[Updates]\n";
   Line(text, "Check", updates.check ? "true" : "false");
   Line(text, "Install", updates.install ? "true" : "false");
-  if (updates.checked) {
-    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(updates.checked->time_since_epoch());
-    Line(text, "Checked", std::to_string(seconds.count()));
-  }
+  const auto time = [&text](std::string_view key, const std::optional<std::chrono::system_clock::time_point>& when) {
+    if (!when) return;
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(when->time_since_epoch());
+    Line(text, key, std::to_string(seconds.count()));
+  };
+  time("Checked", updates.checked);
   if (updates.latest) Line(text, "Latest", updates.latest->ToString());
+  time("Seen", updates.seen);
+  if (updates.reminded) Line(text, "Reminded", updates.reminded->ToString());
+  if (updates.failures > 0) Line(text, "Failures", std::to_string(updates.failures));
+  time("Failed", updates.failed);
   if (updates.tried) Line(text, "Tried", updates.tried->ToString());
+  if (updates.installing) Line(text, "Installing", updates.installing->ToString());
+  if (saved.warned) {
+    std::string warned;
+    for (const std::string& key : *saved.warned) warned += (warned.empty() ? "" : "\n") + key;
+    text += "\n[Notices]\n";
+    Line(text, "Warned", warned);
+  }
   return text;
 }
 
@@ -126,15 +141,39 @@ SavedSettings ParseSettings(std::string_view text) {
   UpdateSettings& updates = saved.updates;
   updates.check = ReadBool(ini, "Updates", "Check", updates.check);
   updates.install = ReadBool(ini, "Updates", "Install", updates.install);
-  if (const auto checked = ini.Get("Updates", "Checked")) {
-    long long seconds = 0;
-    const auto [end, error] = std::from_chars(checked->data(), checked->data() + checked->size(), seconds);
-    if (error == std::errc{} && end == checked->data() + checked->size() && seconds > 0) {
-      updates.checked = std::chrono::system_clock::time_point(std::chrono::seconds(seconds));
+  // A whole positive number, or nothing.
+  const auto number = [&ini](std::string_view key) -> std::optional<long long> {
+    const auto value = ini.Get("Updates", key);
+    if (!value) return std::nullopt;
+    long long n = 0;
+    const auto [end, error] = std::from_chars(value->data(), value->data() + value->size(), n);
+    if (error != std::errc{} || end != value->data() + value->size() || n <= 0) return std::nullopt;
+    return n;
+  };
+  const auto time = [&number](std::string_view key) -> std::optional<std::chrono::system_clock::time_point> {
+    if (const auto seconds = number(key)) return std::chrono::system_clock::time_point(std::chrono::seconds(*seconds));
+    return std::nullopt;
+  };
+  updates.checked = time("Checked");
+  updates.latest = update::ParseVersion(ini.Get("Updates", "Latest").value_or(""));
+  // What's kept about the latest release means nothing without it.
+  if (updates.latest) {
+    updates.seen = time("Seen");
+    updates.reminded = update::ParseVersion(ini.Get("Updates", "Reminded").value_or(""));
+    updates.failures = static_cast<int>(std::min<long long>(number("Failures").value_or(0), 1000));
+    updates.failed = time("Failed");
+  }
+  updates.tried = update::ParseVersion(ini.Get("Updates", "Tried").value_or(""));
+  updates.installing = update::ParseVersion(ini.Get("Updates", "Installing").value_or(""));
+
+  if (const auto warned = ini.Get("Notices", "Warned")) {
+    std::vector<std::string>& keys = saved.warned.emplace();
+    for (size_t start = 0; start <= warned->size();) {
+      const size_t end = std::min(warned->find('\n', start), warned->size());
+      if (end > start) keys.push_back(warned->substr(start, end - start));
+      start = end + 1;
     }
   }
-  updates.latest = update::ParseVersion(ini.Get("Updates", "Latest").value_or(""));
-  updates.tried = update::ParseVersion(ini.Get("Updates", "Tried").value_or(""));
   return saved;
 }
 

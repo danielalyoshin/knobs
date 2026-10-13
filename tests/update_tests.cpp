@@ -227,7 +227,7 @@ TEST(UpdatesInstallWhenKnobsCanRestart) {
   // restart, at once; one that's lost since is downloaded again.
   updater = Make({.check = true, .install = true, .checked = kStart - 1h, .latest = Version{0, 3, 0}});
   CHECK(updater.installable() == (Version{0, 3, 0}));
-  updater.Found();
+  updater.Found(kStart);
   CHECK(updater.Due(kStart, false) == Job::kNone && updater.Due(kStart, true) == Job::kInstall);
   CHECK(!updater.NotVerified(kStart, true));
   CHECK(updater.Due(kStart + 30min, true) == Job::kNone && updater.Due(kStart + 1h, true) == Job::kDownload);
@@ -294,7 +294,7 @@ TEST(UpdatesThatKeepFailingGiveUp) {
   // An installer Windows couldn't finish checking, as offline at sign-in, is
   // kept, and checked again an hour later, then only when knobs can restart.
   updater = Make({.check = true, .install = true, .checked = kStart - 1h, .latest = Version{0, 3, 0}});
-  updater.Found();
+  updater.Found(kStart);
   CHECK(updater.Due(kStart, true) == Job::kInstall);
   CHECK(!updater.NotVerified(kStart, false));
   CHECK(updater.ready() && updater.offer() == (Updater::Offer{{0, 3, 0}, true}));
@@ -326,12 +326,12 @@ TEST(UpdatesThatWaitADaySaySo) {
 
   // One downloaded before this start counts from the start.
   updater = Make({.check = true, .install = true, .checked = kStart, .latest = Version{0, 3, 0}});
-  updater.Found();
+  updater.Found(kStart);
   CHECK(updater.NextDeadline(kStart + 1h) == kStart + 24h);
   CHECK(!updater.Waiting(kStart + 23h) && updater.Waiting(kStart + 24h));
   // Not with updating by itself off, or once it's installing.
   updater = Make({.check = true, .install = true, .checked = kStart, .latest = Version{0, 3, 0}});
-  updater.Found();
+  updater.Found(kStart);
   updater.Set(true, false);
   CHECK(!updater.Waiting(kStart + 25h));
   updater.Set(true, true);
@@ -350,16 +350,61 @@ TEST(UpdatesThatWaitADaySaySo) {
   CHECK(!updater.DownloadDone(kStart + 30h, Downloaded::kDone) && !updater.Waiting(kStart + 60h));
 }
 
+TEST(UpdatesKeepTheirDayAndTriesAcrossRestarts) {
+  // A PC switched off every night still gets to a day, and a release with no
+  // installer still gets to three tries: what counts toward them is kept.
+  Updater updater = Make({.check = true, .install = true});
+  updater.Checked(kStart + 1min, Version{0, 3, 0});
+  CHECK(!updater.DownloadDone(kStart + 2min, Downloaded::kUnusable));
+  CHECK(updater.settings().seen == kStart + 1min && updater.settings().failures == 1);
+  CHECK(updater.settings().failed == kStart + 2min);
+  // Restarted soon after: an hour from the last failure, not a minute from
+  // the start.
+  Updater soon({.current = kCurrent, .can_install = true}, updater.settings(), kStart + 10min);
+  CHECK(soon.Due(kStart + 11min, true) == Job::kNone && soon.Due(kStart + 62min, true) == Job::kDownload);
+  // Restarted 12 hours on, it tries again, and the tries add up.
+  Updater restarted({.current = kCurrent, .can_install = true}, updater.settings(), kStart + 12h);
+  CHECK(restarted.Due(kStart + 12h + 1min, true) == Job::kDownload);
+  CHECK(!restarted.DownloadDone(kStart + 13h, Downloaded::kUnusable));
+  const std::optional<Notice> gave_up = restarted.DownloadDone(kStart + 14h, Downloaded::kUnusable);
+  CHECK(gave_up && gave_up->kind == Notice::Kind::kUpdateFailed && restarted.settings().tried == (Version{0, 3, 0}));
+
+  // The day since it was first found counts across restarts too, and its
+  // notification is said once.
+  updater = Make({.check = true, .install = true});
+  updater.Checked(kStart + 1min, Version{0, 3, 0});
+  CHECK(!updater.DownloadDone(kStart + 2min, Downloaded::kFailed));
+  Updater next_day({.current = kCurrent, .can_install = true}, updater.settings(), kStart + 23h);
+  CHECK(!next_day.Waiting(kStart + 23h + 30min) && next_day.Waiting(kStart + 1min + 24h));
+  Updater again({.current = kCurrent, .can_install = true}, next_day.settings(), kStart + 30h);
+  CHECK(!again.Waiting(kStart + 72h) && again.reminded() == (Version{0, 3, 0}));
+
+  // One downloaded before this start has waited since its file was written.
+  updater = Make({.check = true, .install = true, .checked = kStart, .latest = Version{0, 3, 0}});
+  updater.Found(kStart - 20h);
+  CHECK(!updater.Waiting(kStart + 3h) && updater.Waiting(kStart + 4h));
+}
+
 TEST(UpdatedCopySaysHowItWent) {
-  const std::optional<Notice> updated = UpdatedNotice({.tried = Version{0, 2, 0}}, kCurrent);
+  const std::optional<Notice> updated = UpdatedNotice({.installing = Version{0, 2, 0}}, kCurrent);
   CHECK(updated && updated->kind == Notice::Kind::kUpdated);
   CHECK(updated->title == std::format("{} was updated to 0.2.0", kDisplayName));
   CHECK(updated->text == "Click to see what's new." && updated->url == update::ReleasePageUrl(kCurrent));
-  const std::optional<Notice> failed = UpdatedNotice({.tried = Version{0, 3, 0}}, kCurrent);
+  const std::optional<Notice> failed = UpdatedNotice({.installing = Version{0, 3, 0}}, kCurrent);
   CHECK(failed && failed->kind == Notice::Kind::kUpdateFailed);
-  CHECK(!UpdatedNotice({}, kCurrent) && !UpdatedNotice({.tried = Version{0, 1, 1}}, kCurrent));
+  CHECK(!UpdatedNotice({}, kCurrent) && !UpdatedNotice({.installing = Version{0, 1, 1}}, kCurrent));
+  // Tried before, and said: nothing to say.
+  CHECK(!UpdatedNotice({.tried = Version{0, 3, 0}}, kCurrent));
+  // The installer is started: the next copy to run says how it went.
+  Updater installing = Make({.check = true, .install = true, .checked = kStart, .latest = Version{0, 3, 0}});
+  installing.Found(kStart);
+  installing.Installing();
+  CHECK(installing.settings().installing == (Version{0, 3, 0}));
+  installing.Reported();
+  CHECK(!installing.settings().installing && installing.settings().tried == (Version{0, 3, 0}));
 
-  // The notifier says it after the first import, unless a problem says more.
+  // The notifier says it after the first import, after a problem that says
+  // more.
   core::Snapshot running;
   running.state = core::State::kRunning;
   Notifier notifier({.updated = updated});
@@ -369,7 +414,16 @@ TEST(UpdatedCopySaysHowItWent) {
   core::Snapshot missing;
   missing.state = core::State::kObsMissing;
   Notifier problem({.updated = updated});
-  CHECK(problem.Changed(missing, false, Notifier::Clock::now()).show->kind == Notice::Kind::kObsMissing);
+  const Notifier::Clock::time_point at = Notifier::Clock::now();
+  CHECK(problem.Changed(missing, false, at).show->kind == Notice::Kind::kObsMissing);
+  CHECK(problem.NextDeadline() == at + 8s);
+  CHECK(!problem.Tick(false, at + 7s).show && problem.Tick(false, at + 8s).show == updated);
+  // Paused, the copy says it still is.
+  core::Snapshot paused = running;
+  paused.state = core::State::kPausedByUser;
+  paused.paused_by_user = true;
+  Notifier still({.updated = updated});
+  CHECK(still.Changed(paused, false, at).show->text == "It's still paused. Click to see what's new.");
   // A new version is said as it's found. While the first run is open, it
   // waits for it to close.
   CHECK(Notifier().Say(*failed, false).show == failed);

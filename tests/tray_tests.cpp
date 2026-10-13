@@ -120,6 +120,9 @@ TEST(StatusLineFollowsTheState) {
   snapshot.chain.reset();
   snapshot.mics = {Mic("Mic/Aux"), Mic("Mic/Aux 2"), Mic("Podcast Mic")};
   CHECK(StatusLine(snapshot) == "OBS has 3 mics");
+  // One mic, renamed in OBS since it was picked by name.
+  snapshot.mics.resize(1);
+  CHECK(StatusLine(snapshot) == "OBS has 1 mic");
   snapshot.setup = SetupNeed::kNoMic;
   CHECK(StatusLine(snapshot) == "No mic in OBS yet");
   snapshot.setup = SetupNeed::kObsSettings;
@@ -198,6 +201,16 @@ TEST(MenuListsTheDesignedItems) {
   other.chain->cable.clear();
   CHECK(FindItem(BuildMenu(other, {}, false).items, kIdOtherObs)->text ==
         "OBS in Alex's account may also send audio to your cable");
+
+  // Windows plays the PC's sound into a cable: a line that opens Sound
+  // settings.
+  core::Snapshot sound = Running();
+  sound.default_output = kCableInputId;
+  const Menu sound_menu = BuildMenu(sound, {}, false);
+  CHECK(sound_menu.items[1].id == kIdSoundIntoCable && sound_menu.items[1].enabled && !sound_menu.items[1].bold);
+  CHECK(sound_menu.items[1].text == "Windows plays your PC's sound into CABLE Input…");
+  sound.default_output = kSpeakersId;
+  CHECK(!FindItem(BuildMenu(sound, {}, false).items, kIdSoundIntoCable));
 }
 
 TEST(MenuOffersUpdates) {
@@ -342,23 +355,27 @@ TEST(MenuPickMeansTheMicByThatName) {
 }
 
 TEST(MenuCableListsCablesFirst) {
+  // The cable knobs sends to is checked: until one's picked, what OBS
+  // monitors to. There's no "Same as OBS": a pick stays whatever OBS does.
   Menu menu = BuildMenu(Running(), {}, false);
   const MenuItem* cable = FindItem(menu.items, kIdCableMenu);
-  CHECK(Texts(cable->items) == (std::vector<std::string>{"&Same as OBS (CABLE In 16ch)", "-", kCableInput, kCable16,
-                                                         "-", "&Other devices"}));
-  CHECK(cable->items[0].checked && !cable->items[2].checked && !cable->items[3].checked);
-  CHECK(Texts(cable->items[5].items) == (std::vector<std::string>{kSpeakers}));
+  CHECK(Texts(cable->items) == (std::vector<std::string>{kCableInput, kCable16, "-", "&Other devices"}));
+  CHECK(!cable->items[0].checked && cable->items[1].checked && cable->items[1].radio);
+  CHECK(Texts(cable->items[3].items) == (std::vector<std::string>{kSpeakers}));
   CHECK(menu.cables.size() == 3 && menu.cables[2].id == kSpeakersId);
-  const auto picked = SettingsForPick(menu, cable->items[2].id, {.mic = "Mic/Aux"});
+  const auto picked = SettingsForPick(menu, cable->items[0].id, {.mic = "Mic/Aux"});
   CHECK(picked && picked->cable == kCableInputId && picked->cable_name == kCableInput && picked->mic == "Mic/Aux");
-  const auto same = SettingsForPick(menu, kIdCableSameAsObs, *picked);
-  CHECK(same && same->cable.empty() && same->cable_name.empty());
+  // OBS's device, picked, is the user's pick too.
+  const auto same = SettingsForPick(menu, cable->items[1].id, *picked);
+  CHECK(same && same->cable == kCable16Id && same->cable_name == kCable16);
   CHECK(!SettingsForPick(menu, kIdQuit, {}));
 
-  // A pick of knobs's own, even the device OBS uses.
-  menu = BuildMenu(Running(), {.cable = kCable16Id, .cable_name = kCable16}, false);
+  // A pick of knobs's own, whatever OBS monitors to.
+  core::Snapshot elsewhere = Running();
+  elsewhere.obs_cable = {kSpeakers, kSpeakersId};
+  menu = BuildMenu(elsewhere, {.cable = kCableInputId, .cable_name = kCableInput}, false);
   cable = FindItem(menu.items, kIdCableMenu);
-  CHECK(!cable->items[0].checked && cable->items[3].checked);
+  CHECK(cable->items[0].checked && !cable->items[1].checked && !cable->items[3].items[0].checked);
 
   // A pick that isn't connected stays visible.
   core::Snapshot unplugged = Running();
@@ -366,15 +383,15 @@ TEST(MenuCableListsCablesFirst) {
   menu = BuildMenu(unplugged, {.cable = "{0.0.0.00000000}.{cable-a}", .cable_name = "CABLE-A Input (VB-Audio Cable A)"},
                    false);
   cable = FindItem(menu.items, kIdCableMenu);
-  const MenuItem& gone = cable->items[4];
+  const MenuItem& gone = cable->items[2];
   CHECK(gone.text == "CABLE-A Input (VB-Audio Cable A) (not connected)" && gone.checked && !gone.enabled);
 
-  // And so does OBS's.
+  // And so does OBS's, until there's a pick.
   unplugged.outputs.pop_back();
   menu = BuildMenu(unplugged, {}, false);
   cable = FindItem(menu.items, kIdCableMenu);
-  CHECK(cable->items[0].text == "&Same as OBS (CABLE In 16ch, not connected)" && cable->items[0].checked &&
-        cable->items[0].enabled);
+  CHECK(cable->items[1].text == std::format("{} (not connected)", kCable16) && cable->items[1].checked &&
+        !cable->items[1].enabled);
 }
 
 TEST(MenuCableWhenOBSDoesntMonitorToACable) {
@@ -384,17 +401,20 @@ TEST(MenuCableWhenOBSDoesntMonitorToACable) {
   snapshot.setup = SetupNeed::kCable;
   snapshot.obs_cable = {"Default", "default"};
   Menu menu = BuildMenu(snapshot, {}, false);
-  CHECK(Texts(FindItem(menu.items, kIdCableMenu)->items) ==
-        (std::vector<std::string>{kCableInput, kCable16, "-", "&Other devices"}));
+  const MenuItem* cables = FindItem(menu.items, kIdCableMenu);
+  CHECK(Texts(cables->items) == (std::vector<std::string>{kCableInput, kCable16, "-", "&Other devices"}));
+  CHECK(std::none_of(cables->items.begin(), cables->items.end(), [](const MenuItem& item) { return item.checked; }));
 
-  // To headphones: offered only while it's the choice.
+  // To headphones: checked under Other devices, until a cable is picked.
   snapshot = Running();
   snapshot.obs_cable = {"Headphones (Audient iD4)", "{0.0.0.00000000}.{headphones}"};
   snapshot.outputs.push_back(snapshot.obs_cable);
   menu = BuildMenu(snapshot, {}, false);
-  CHECK(FindItem(menu.items, kIdCableMenu)->items[0].text == "&Same as OBS (Headphones)");
+  const MenuItem* others = FindItem(menu.items, kIdOtherDevicesMenu);
+  CHECK(Texts(others->items) == (std::vector<std::string>{kSpeakers, "Headphones (Audient iD4)"}));
+  CHECK(others->items[1].checked);
   menu = BuildMenu(snapshot, {.cable = kCable16Id}, false);
-  CHECK(!FindItem(menu.items, kIdCableSameAsObs));
+  CHECK(!FindItem(menu.items, kIdOtherDevicesMenu)->items[1].checked);
 
   // No cable installed.
   snapshot = Running();
@@ -461,6 +481,31 @@ TEST(SettingsRoundTrip) {
   CHECK(ParseSettings("[Updates]\nCheck=false\nInstall=true\n").updates.install);
   const UpdateSettings odd = ParseSettings("[Updates]\nChecked=soon\nLatest=v0.3\nTried=0.3.0-rc1\n").updates;
   CHECK(!odd.checked && !odd.latest && !odd.tried);
+  // What's kept so a restart doesn't start a day, or three tries, over, and
+  // the version an installer was started for.
+  saved.updates.latest = update::Version{0, 3, 1};
+  saved.updates.seen = std::chrono::system_clock::time_point(std::chrono::seconds(1791763300));
+  saved.updates.reminded = update::Version{0, 3, 1};
+  saved.updates.failures = 2;
+  saved.updates.failed = std::chrono::system_clock::time_point(std::chrono::seconds(1791766800));
+  saved.updates.installing = update::Version{0, 3, 0};
+  CHECK(FormatSettings(saved).ends_with(
+      "[Updates]\nCheck=true\nInstall=true\nChecked=1791763200\nLatest=0.3.1\nSeen=1791763300\nReminded=0.3.1\n"
+      "Failures=2\nFailed=1791766800\nTried=0.3.0\nInstalling=0.3.0\n"));
+  CHECK(ParseSettings(FormatSettings(saved)).updates == saved.updates);
+  // Without the version they're about, they mean nothing.
+  const UpdateSettings orphans = ParseSettings("[Updates]\nSeen=1791763300\nFailures=2\n").updates;
+  CHECK(!orphans.seen && orphans.failures == 0);
+
+  // The warnings notifications have said, one a line, so a restart doesn't
+  // say them again, or miss one added meanwhile. None is a list too.
+  saved.warned = std::vector<std::string>{"vst {uuid-1}", "unknown {uuid-2}"};
+  CHECK(FormatSettings(saved).ends_with("\n[Notices]\nWarned=vst {uuid-1}\\nunknown {uuid-2}\n"));
+  CHECK(ParseSettings(FormatSettings(saved)).warned == saved.warned);
+  saved.warned.emplace();
+  CHECK(ParseSettings(FormatSettings(saved)).warned == std::vector<std::string>{});
+  CHECK(!ParseSettings("").warned);
+  saved.warned.reset();
 
   const fs::path folder = fs::temp_directory_path() / std::format(L"knobs-tests-{}-settings", GetCurrentProcessId());
   const fs::path file = folder / L"settings.ini";

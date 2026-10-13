@@ -25,9 +25,11 @@ namespace knobs::tray {
 inline constexpr float kSetupWidth = 760;
 inline constexpr float kSetupHeight = 520;
 
-// The walkthrough's play and pause, beside the buttons', choices' and check
+// The walkthrough's play and pause, and the dropdown that shows a page's more
+// choices (PageView::more_choices), beside the buttons', choices' and check
 // boxes' ids (FirstRunId).
 inline constexpr int kWalkToggleId = 400;
+inline constexpr int kMoreChoicesId = 401;
 // The frame a guide's walkthrough plays in.
 inline constexpr D2D1_SIZE_F kWalkFrame = {300, 188};
 
@@ -42,6 +44,7 @@ enum class Role {
   kDoor,  // A command link.
   kChoiceGroup,
   kRadio,
+  kDropdown,  // Opens and closes a group's more choices, and says which is chosen.
   kStepList,
   kStep,
   kPicture,
@@ -69,7 +72,7 @@ struct Element {
   std::string url;           // A link's.
   bool focusable = false;
   bool enabled = true;
-  bool selected = false;  // A radio's, or a check box's.
+  bool selected = false;  // A radio's, or a check box's, or a dropdown's: open.
   bool is_default = false;
   bool warning = false;   // A note's.
   // A link: the boxes of its words and its glyph, one per line, and its
@@ -150,8 +153,9 @@ struct Scene {
   bool Visible(const Element& element, float scroll) const;
 };
 
-// Lays out `view`, with the choice as the user has it.
-Scene LayoutScene(const PageView& view, int choice);
+// Lays out `view`, with the choice as the user has it, and its more choices
+// shown if `more_open`.
+Scene LayoutScene(const PageView& view, int choice, bool more_open = false);
 
 // What changes as the window is used, for the painter.
 struct SceneState {

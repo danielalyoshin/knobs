@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <utility>
 
 #include "app_info.h"
@@ -366,13 +367,6 @@ std::string ObsOpenLine(const core::Snapshot& snapshot) {
 
 PageButton Button(int id, std::string text, bool enabled = true) { return {id, std::move(text), enabled}; }
 
-// A name in a button's text: its "&"s are text, not an access key.
-std::string EscapeAccessKey(std::string_view name) {
-  std::string escaped;
-  for (const char c : name) escaped += c == '&' ? "&&" : std::string(1, c);
-  return escaped;
-}
-
 PageView Welcome(const core::Snapshot& snapshot) {
   PageView view;
   view.instruction = "Have you set up your mic in OBS?";
@@ -613,72 +607,99 @@ PageView Filters(const core::Snapshot& snapshot) {
   return view;
 }
 
-PageView Cable(const core::Snapshot& snapshot) {
+// Windows plays the PC's sound into a virtual cable, as installing one can
+// make it do: the user hears nothing, and the cable's apps hear it with the
+// mic. A note for the pages that end with a cable.
+void NoteSoundIntoCable(const core::Snapshot& snapshot, PageView& view) {
+  const std::string cable = DefaultOutputCable(snapshot);
+  if (cable.empty()) return;
+  view.notes.push_back(
+      {true, std::format("Windows plays your PC's sound into {}, so you can't hear it, and your other apps hear it "
+                         "with your mic. In Sound settings, set Output to your speakers or headphones.",
+                         EscapeMarkup(cable))});
+  view.buttons.insert(view.buttons.end() - 1, Button(kButtonOpenSoundOutput, "&Open Sound settings"));
+}
+
+// `number` gives each device its choice's ID, which stays with it as devices
+// come and go.
+PageView Cable(const core::Snapshot& snapshot, int choice, bool windows11,
+               const std::function<int(const audio::AudioDevice&)>& number) {
   PageView view;
   const audio::AudioDevice sends_to = SendsTo(snapshot);
+  const std::vector<audio::AudioDevice> cables = VirtualCables(snapshot);
   const std::vector<audio::AudioDevice> choices = CableChoices(snapshot);
-  const auto keep = [&view, &choices] {
-    if (!choices.empty()) {
-      view.buttons.push_back(
-          Button(kButtonKeepDevice, std::format("&Keep {}", EscapeAccessKey(ShortDeviceName(choices[0].name)))));
+  // Every playback device, the cables first and the rest behind a dropdown,
+  // so a cable knobs doesn't know by name can be chosen too.
+  bool chosen = false;
+  for (size_t i = 0; i < choices.size(); ++i) {
+    std::string text = ShortDeviceName(choices[i].name);
+    if (SameId(choices[i].id, snapshot.obs_cable.id)) text += "\nOBS's monitoring device";
+    const int id = number(choices[i]);
+    chosen |= id == choice;
+    (i < cables.size() ? view.choices : view.more_choices).push_back(Button(id, std::move(text)));
+  }
+  view.more_label = cables.empty() ? "Use another playback device" : "Other playback devices";
+  // Where knobs sends the mic now, else the first cable. A choice of a device
+  // that's gone is as none.
+  const auto current = std::find_if(choices.begin(), choices.end(),
+                                    [&](const audio::AudioDevice& device) { return SameId(device.id, sends_to.id); });
+  if (current != choices.end()) {
+    view.default_choice = number(*current);
+  } else if (!cables.empty()) {
+    view.default_choice = number(cables.front());
+  }
+  if (!chosen) chosen = view.default_choice != 0;
+  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonNext, "&Next", chosen)};
+
+  if (cables.empty()) {
+    view.waiting = true;
+    switch (WhyNoCable(snapshot)) {
+      case NoCable::kOff: {
+        const std::string name = EscapeMarkup(ShortDeviceName(Cables(snapshot.disabled_outputs).front().name));
+        view.instruction = "Turn on your virtual cable";
+        view.content = std::format("{} is installed, but it's turned off in Windows' Sound settings.", name);
+        // ms-settings:sound-devices: All sound devices on Windows 11, where a
+        // device's page says "Allow", and Manage sound devices on Windows 10,
+        // where the device says "Enable".
+        view.steps = {"Click <b>Open Sound settings</b>, below.",
+                      std::format("Under Output devices, {} <b>{}</b>.", windows11 ? "choose" : "click", name),
+                      windows11 ? "Next to Audio, click <b>Allow</b>." : "Click <b>Enable</b>."};
+        view.status = std::format("Waiting for a virtual cable. {} shows it here as soon as it's on.", kDisplayName);
+        view.buttons.insert(view.buttons.begin() + 1, Button(kButtonOpenSoundSettings, "&Open Sound settings"));
+        view.default_button = kButtonOpenSoundSettings;
+        return view;
+      }
+      case NoCable::kRestart:
+        // VB-Cable's setup says to restart, and on some PCs its devices only
+        // appear after one.
+        view.instruction = "Restart Windows to finish installing VB-Cable";
+        view.content = std::format("VB-Cable is installed, but Windows hasn't added its devices yet. Restart Windows, "
+                                   "and {} opens again after the restart to carry on here.",
+                                   kDisplayName);
+        view.status = std::format("Waiting for VB-Cable. {} shows it here as soon as it appears.", kDisplayName);
+        view.resume_after_restart = true;
+        return view;
+      case NoCable::kNone:
+        break;
     }
-  };
-  if (VirtualCables(snapshot).empty() && WhyNoCable(snapshot) == NoCable::kOff) {
-    // Turned off in Sound settings, which says "Allow" for a device that's
-    // off, in All sound devices (ms-settings:sound-devices).
-    const std::string name = EscapeMarkup(ShortDeviceName(Cables(snapshot.disabled_outputs).front().name));
-    view.instruction = "Turn on your virtual cable";
-    view.content = std::format("{} is installed, but it's turned off in Windows' Sound settings.", name);
-    view.steps = {"Click <b>Open Sound settings</b>, below.",
-                  std::format("Under Output devices, choose <b>{}</b>.", name),
-                  "Next to Audio, click <b>Allow</b>."};
-    view.waiting = true;
-    view.status = std::format("Waiting for a virtual cable. {} moves on as soon as one is on.", kDisplayName);
-    view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonOpenSoundSettings, "&Open Sound settings")};
-    keep();
-    view.default_button = kButtonOpenSoundSettings;
-    return view;
-  }
-  if (VirtualCables(snapshot).empty() && WhyNoCable(snapshot) == NoCable::kRestart) {
-    // VB-Cable's setup says to restart, and on some PCs its devices only
-    // appear after one.
-    view.instruction = "Restart Windows to finish installing VB-Cable";
-    view.content = std::format("VB-Cable is installed, but Windows hasn't added its devices yet. Restart Windows, "
-                               "and {} opens again after the restart to carry on here.",
-                               kDisplayName);
-    view.waiting = true;
-    view.status = std::format("Waiting for VB-Cable. {} moves on as soon as it appears.", kDisplayName);
-    view.resume_after_restart = true;
-    view.buttons = {Button(kButtonBack, "&Back")};
-    keep();
-    return view;
-  }
-  if (VirtualCables(snapshot).empty()) {
     view.instruction = "Install a virtual cable";
     view.content = "There's no virtual cable on this PC yet. To install VB-Cable:";
-    // VB-Audio's driver pack (VBCABLE_Driver_Pack45.zip) and its setup.
+    // VB-Audio's driver pack (VBCABLE_Driver_Pack45.zip) and its setup. Its
+    // devices don't wait for a restart; when they do, this page says so.
     view.steps = {
         std::format("Download its driver pack from <a href=\"{}\"><code>vb-audio.com/Cable</code></a>.", kVbCableUrl),
         "Right-click the zip and choose <b>Extract All</b>.",
         "In the extracted folder, right-click <code>VBCABLE_Setup_x64.exe</code>, choose <b>Run as "
         "administrator</b>, then <b>Yes</b>.",
-        "Click <b>Install Driver</b>.",
-        std::format("Restart Windows, then open {} again.", kDisplayName),
-        "After the restart, open <b>Settings › System › Sound</b> and check that Output is still your speakers or "
-        "headphones, not CABLE Input."};
+        "Click <b>Install Driver</b>."};
     view.walkthrough = PageWalkthrough{"vb-cable-setup",
                                        "A walkthrough in Windows: the driver pack extracted with Extract All, VBCABLE_Setup_x64 "
                                        "run as administrator, then Install Driver clicked in VB-Cable's setup"};
-    view.waiting = true;
-    view.status = std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName);
-    view.buttons = {Button(kButtonBack, "&Back")};
-    keep();
+    view.status = std::format("Waiting for a virtual cable. {} shows it here as soon as one appears.", kDisplayName);
     return view;
   }
   view.instruction = std::format("Where should {} send your mic?", kDisplayName);
   if (snapshot.state == State::kNeedsSetup && snapshot.setup == SetupNeed::kCable) {
-    // knobs follows OBS's monitoring device until a cable is chosen here,
-    // but not to the default device.
     view.content = std::format("Choose the virtual cable {0} sends your mic to. {0} doesn't send it where OBS monitors "
                                "it, your default playback device, which is usually your speakers.",
                                kDisplayName);
@@ -691,20 +712,12 @@ PageView Cable(const core::Snapshot& snapshot) {
                                EscapeMarkup(ShortDeviceName(sends_to.name)),
                                EscapeMarkup(ShortDeviceName(sends_to.name)));
   } else {
-    view.content =
-        std::format("{} sends your mic to {}.", kDisplayName, EscapeMarkup(ShortDeviceName(sends_to.name)));
+    view.content = std::format("Choose the virtual cable {} sends your mic to. Your other apps then use it as their "
+                               "mic.",
+                               kDisplayName);
   }
-  view.footer = "Other playback devices are under Cable in the tray menu.";
-  for (size_t i = 0; i < choices.size(); ++i) {
-    std::string text = ShortDeviceName(choices[i].name);
-    if (SameId(choices[i].id, snapshot.obs_cable.id)) text += "\nOBS's monitoring device";
-    view.choices.push_back(Button(kChoiceFirst + static_cast<int>(i), std::move(text)));
-  }
-  const auto current = std::find_if(choices.begin(), choices.end(),
-                                    [&](const audio::AudioDevice& device) { return SameId(device.id, sends_to.id); });
-  view.default_choice = kChoiceFirst + static_cast<int>(current == choices.end() ? 0 : current - choices.begin());
-  view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonNext, "&Next")};
   view.default_button = kButtonNext;
+  NoteSoundIntoCable(snapshot, view);
   return view;
 }
 
@@ -762,6 +775,7 @@ PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool 
   }
   view.buttons = {Button(kButtonBack, "&Back"), Button(kButtonDone, "&Done")};
   view.default_button = kButtonDone;
+  NoteSoundIntoCable(snapshot, view);
   return view;
 }
 
@@ -803,21 +817,26 @@ bool AnyFilters(const core::Snapshot& snapshot) {
 
 std::vector<audio::AudioDevice> CableChoices(const core::Snapshot& snapshot) {
   std::vector<audio::AudioDevice> choices = VirtualCables(snapshot);
-  const audio::AudioDevice sends_to = SendsTo(snapshot);
-  if (const audio::AudioDevice* connected = FindById(snapshot.outputs, sends_to.id);
-      connected && !IsVirtualCable(connected->name)) {
-    choices.push_back(*connected);
+  for (const audio::AudioDevice& device : snapshot.outputs) {
+    if (!IsVirtualCable(device.name)) choices.push_back(device);
   }
   return choices;
 }
 
+std::optional<FirstRunPage> PageFor(const core::Snapshot& snapshot) {
+  if (const auto blocking = Blocking(snapshot)) return blocking;
+  if (NeedsCable(snapshot)) return Page::kCable;
+  return std::nullopt;
+}
+
 FirstRun::FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page, FinishChoices now,
-                   bool can_install_updates)
+                   bool can_install_updates, bool windows11)
     : progress_(progress),
       finish_{.start_with_windows = !progress.done || now.start_with_windows,
               .check_for_updates = now.check_for_updates,
               .install_updates = now.install_updates},
-      can_install_updates_(can_install_updates) {
+      can_install_updates_(can_install_updates),
+      windows11_(windows11) {
   if (!page) return;
   switch (*page) {
     case Page::kWelcome:
@@ -842,7 +861,9 @@ FirstRunPage FirstRun::Page(const core::Snapshot& snapshot) const {
   const auto unanswered = [this](FirstRunPage page) { return progress_.reached <= page; };
   if (unanswered(Page::kMic) && snapshot.mics.size() > 1) return Page::kMic;
   if (unanswered(Page::kFilters) && snapshot.chain && snapshot.chain->filters.empty()) return Page::kFilters;
-  if (NeedsCable(snapshot) || (unanswered(Page::kCable) && CableUnconfirmed(snapshot))) return Page::kCable;
+  // Asked even when OBS monitors to a cable, or there's only one: the cable
+  // is the user's to choose, and stays theirs.
+  if (NeedsCable(snapshot) || unanswered(Page::kCable)) return Page::kCable;
   if (unanswered(Page::kWarnings) && !HeadsUp(snapshot).empty()) return Page::kWarnings;
   return Page::kDone;
 }
@@ -879,7 +900,7 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, const CheckS
       view = Filters(snapshot);
       break;
     case Page::kCable:
-      view = Cable(snapshot);
+      view = Cable(snapshot, choice, windows11_, [this](const audio::AudioDevice& device) { return DeviceChoice(device); });
       break;
     case Page::kWarnings:
       view = Warnings(snapshot);
@@ -891,9 +912,10 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, const CheckS
   view.page = page;
   view.stage = StageOf(page, snapshot);
   view.stages = StageViews(snapshot);
-  if (std::any_of(view.choices.begin(), view.choices.end(), [choice](const PageButton& c) { return c.id == choice; })) {
-    view.default_choice = choice;
-  }
+  const auto offered = [choice](const std::vector<PageButton>& choices) {
+    return std::any_of(choices.begin(), choices.end(), [choice](const PageButton& c) { return c.id == choice; });
+  };
+  if (offered(view.choices) || offered(view.more_choices)) view.default_choice = choice;
   for (PageCheck& check : view.checks) {
     if (const auto it = checks.find(check.id); it != checks.end()) check.checked = it->second;
   }
@@ -947,13 +969,11 @@ FirstRunAction FirstRun::Click(int button, int choice, const CheckStates& checks
       return {.kind = FirstRunAction::Kind::kRestart};
     case kButtonOpenSoundSettings:
       return {.kind = FirstRunAction::Kind::kOpenSoundSettings};
+    case kButtonOpenSoundOutput:
+      return {.kind = FirstRunAction::Kind::kOpenSoundOutput};
     case kButtonSkipFilters:
       Leave(page);
       progress_.reached = std::max(progress_.reached, Page::kCable);
-      return {};
-    case kButtonKeepDevice:
-      Leave(page);
-      progress_.reached = std::max(progress_.reached, Page::kWarnings);
       return {};
     case kButtonDone: {
       progress_.done = true;
@@ -985,15 +1005,17 @@ FirstRunAction FirstRun::Click(int button, int choice, const CheckStates& checks
       if (index < snapshot.mics.size()) settings.mic = snapshot.mics.size() == 1 ? "" : snapshot.mics[index].name;
       return apply();
     case Page::kCable: {
+      // The device the choice was given to, as the page numbered them.
+      const std::vector<audio::AudioDevice> choices = CableChoices(snapshot);
+      const auto picked = std::find_if(choices.begin(), choices.end(),
+                                       [&](const audio::AudioDevice& device) { return DeviceChoice(device) == choice; });
+      if (picked == choices.end()) return {};
       Leave(page);
       progress_.reached = std::max(progress_.reached, Page::kWarnings);
-      const std::vector<audio::AudioDevice> choices = CableChoices(snapshot);
-      if (index < choices.size()) {
-        // OBS's own device is no pick: knobs follows OBS's choice.
-        const bool obs = SameId(choices[index].id, snapshot.obs_cable.id);
-        settings.cable = obs ? "" : choices[index].id;
-        settings.cable_name = obs ? "" : choices[index].name;
-      }
+      // A pick of the user's, even OBS's own device: OBS monitoring to
+      // another one later doesn't change it.
+      settings.cable = picked->id;
+      settings.cable_name = picked->name;
       return apply();
     }
     case Page::kWarnings:
@@ -1006,28 +1028,25 @@ FirstRunAction FirstRun::Click(int button, int choice, const CheckStates& checks
 }
 
 FirstRunAction FirstRun::Changed(const core::Snapshot& before, const core::Snapshot& after) {
-  if (progress_.door == Door::kNewToObs) {
-    // OBS saved the user's work as it closed, and the core imported it.
-    if (before.obs_running && !after.obs_running && AnyFilters(after)) {
-      Leave(Page::kSteps);
-      progress_.door = Door::kObsUser;
-      progress_.reached = Page::kMic;
-    }
-    return {};
+  // A cable appearing on the cable page makes it the choice of cables, and
+  // the user chooses, even with one.
+  if (progress_.door != Door::kNewToObs) return {};
+  // OBS saved the user's work as it closed, and the core imported it.
+  if (before.obs_running && !after.obs_running && AnyFilters(after)) {
+    Leave(Page::kSteps);
+    progress_.door = Door::kObsUser;
+    progress_.reached = Page::kMic;
   }
-  if (progress_.door != Door::kObsUser || Page(before) != Page::kCable || !VirtualCables(before).empty()) return {};
-  // Waiting for a cable: one has appeared. If it's the only one, it's the
-  // one, and the first run moves on with it.
-  const std::vector<audio::AudioDevice> cables = VirtualCables(after);
-  if (cables.size() != 1 || Page(after) != Page::kCable) return {};
-  Leave(Page::kCable);
-  progress_.reached = std::max(progress_.reached, Page::kWarnings);
-  core::Settings settings = after.settings;
-  const bool obs = SameId(cables[0].id, after.obs_cable.id);
-  settings.cable = obs ? "" : cables[0].id;
-  settings.cable_name = obs ? "" : cables[0].name;
-  if (settings == after.settings) return {};
-  return {.kind = FirstRunAction::Kind::kApply, .settings = settings};
+  return {};
+}
+
+int FirstRun::DeviceChoice(const audio::AudioDevice& device) const {
+  // Numbered as first seen, the cables first: the order the page lists them.
+  const auto known = std::find_if(numbered_.begin(), numbered_.end(),
+                                  [&](const std::string& id) { return SameId(id, device.id); });
+  if (known != numbered_.end()) return kChoiceFirst + static_cast<int>(known - numbered_.begin());
+  numbered_.push_back(device.id);
+  return kChoiceFirst + static_cast<int>(numbered_.size() - 1);
 }
 
 void FirstRun::Leave(FirstRunPage page) {

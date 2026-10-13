@@ -10,8 +10,8 @@
 
 namespace knobs {
 
-Status StartProcess(const std::filesystem::path& exe, std::wstring_view arguments,
-                    const std::filesystem::path& folder) {
+Result<HANDLE> StartProcessToWait(const std::filesystem::path& exe, std::wstring_view arguments,
+                                  const std::filesystem::path& folder) {
   std::wstring command = std::format(L"\"{}\"", exe.native());
   if (!arguments.empty()) command += std::format(L" {}", arguments);
   STARTUPINFOW startup = {sizeof(startup)};
@@ -21,7 +21,14 @@ Status StartProcess(const std::filesystem::path& exe, std::wstring_view argument
     return Error{DescribeWinError(GetLastError())};
   }
   CloseHandle(process.hThread);
-  CloseHandle(process.hProcess);
+  return process.hProcess;
+}
+
+Status StartProcess(const std::filesystem::path& exe, std::wstring_view arguments,
+                    const std::filesystem::path& folder) {
+  auto process = StartProcessToWait(exe, arguments, folder);
+  if (!process) return Error{process.error()};
+  CloseHandle(*process);
   return Ok{};
 }
 

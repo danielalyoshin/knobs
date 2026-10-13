@@ -2,7 +2,9 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "core/state.h"
 #include "tray/first_run.h"
@@ -28,13 +30,23 @@
 //   Check=true
 //   Install=true
 //   Checked=1791763200
-//   Latest=0.3.0
+//   Latest=0.3.1
+//   Seen=1791763200
+//   Reminded=0.3.1
+//   Failures=1
+//   Failed=1791766800
 //   Tried=0.3.0
+//   Installing=0.3.0
+//   [Notices]
+//   Warned=vst {…}\nunknown {…}
 //
-// Checked is when a check last got an answer, in seconds since 1970 (UTC).
-// Keys left out keep their defaults (core::Settings, FirstRunProgress).
-// Values are escaped as libobs's INI parser unescapes them (\\, \n, \r), and
-// read with that parser (import::ObsIni).
+// Checked, Seen and Failed are times in seconds since 1970 (UTC): when a
+// check last got an answer, when it first found Latest, and when getting
+// Latest last failed (UpdateSettings). Warned is the pre-flight warnings
+// already said, one a line (Notifier::Options::warned). Keys left out keep
+// their defaults (core::Settings, FirstRunProgress). Values are escaped as
+// libobs's INI parser unescapes them (\\, \n, \r), and read with that parser
+// (import::ObsIni).
 namespace knobs::tray {
 
 struct SavedSettings {
@@ -42,6 +54,7 @@ struct SavedSettings {
   // How far the first run got: Door and Page while it's unfinished.
   FirstRunProgress first_run;
   UpdateSettings updates;
+  std::optional<std::vector<std::string>> warned;
 
   friend bool operator==(const SavedSettings&, const SavedSettings&) = default;
 };

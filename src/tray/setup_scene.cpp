@@ -409,7 +409,7 @@ float LayoutDoors(const PageView& view, Builder& build, Scene& scene, float y) {
   return y - 8;
 }
 
-float LayoutChoices(const PageView& view, int choice, Builder& build, float y) {
+float LayoutChoices(const PageView& view, int choice, bool more_open, Builder& build, float y) {
   const float x = kContent.left;
   const float width = Width(kContent);
   // The group's box and the rules between its rows, under the radios.
@@ -423,37 +423,78 @@ float LayoutChoices(const PageView& view, int choice, Builder& build, float y) {
   group.name = FromUtf8(view.instruction);
   const int group_index = build.Add(std::move(group));
   const float top = y;
-  for (const PageButton& option : view.choices) {
-    const auto [title, note] = Lines(option.text);
-    const Text t = MakeText(title, Style(14, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width - 58, true, false);
-    const Text n = MakeText(note, Style(13, 18), width - 58, true, false);
-    const float height = 10 + t.height + (note.empty() ? 0 : n.height) + 10;
-    if (y > top) {
-      Item rule;
-      rule.kind = Item::Kind::kRule;
-      rule.rect = Rect(x + 1, y, width - 2, 1);
-      rule.in_panel = true;
-      build.AddItem(rule);
+  const auto rule = [&] {
+    if (y <= top) return;
+    Item line;
+    line.kind = Item::Kind::kRule;
+    line.rect = Rect(x + 1, y, width - 2, 1);
+    line.in_panel = true;
+    build.AddItem(line);
+  };
+  const auto radios = [&](const std::vector<PageButton>& options) {
+    for (const PageButton& option : options) {
+      const auto [title, note] = Lines(option.text);
+      const Text t = MakeText(title, Style(14, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width - 58, true, false);
+      const Text n = MakeText(note, Style(13, 18), width - 58, true, false);
+      const float height = 10 + t.height + (note.empty() ? 0 : n.height) + 10;
+      rule();
+      Element radio;
+      radio.role = Role::kRadio;
+      radio.id = option.id;
+      radio.parent = group_index;
+      radio.bounds = Rect(x + 1, y + 1, width - 2, height - 1);
+      radio.in_panel = true;
+      radio.focusable = true;
+      radio.enabled = option.enabled;
+      radio.selected = option.id == choice;
+      radio.name = FromUtf8(title);
+      radio.help = FromUtf8(note);
+      radio.label = t.layout;
+      radio.label_at = {x + 44, y + 10};
+      if (!note.empty()) {
+        radio.note = n.layout;
+        radio.note_at = {x + 44, y + 10 + t.height};
+      }
+      build.Add(std::move(radio));
+      y += height;
     }
-    Element radio;
-    radio.role = Role::kRadio;
-    radio.id = option.id;
-    radio.parent = group_index;
-    radio.bounds = Rect(x + 1, y + 1, width - 2, height - 1);
-    radio.in_panel = true;
-    radio.focusable = true;
-    radio.enabled = option.enabled;
-    radio.selected = option.id == choice;
-    radio.name = FromUtf8(title);
-    radio.help = FromUtf8(note);
-    radio.label = t.layout;
-    radio.label_at = {x + 44, y + 10};
-    if (!note.empty()) {
-      radio.note = n.layout;
-      radio.note_at = {x + 44, y + 10 + t.height};
+  };
+  radios(view.choices);
+  if (!view.more_choices.empty()) {
+    // The dropdown: its label, and while it's closed, which of its devices
+    // is chosen, if one is, as a closed list shows its value.
+    std::string chosen;
+    if (!more_open) {
+      for (const PageButton& option : view.more_choices) {
+        if (option.id == choice) chosen = Lines(option.text).first;
+      }
     }
-    build.Add(std::move(radio));
+    const Text t = MakeText(view.more_label, Style(14, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), width - 58, true, false);
+    const Text n = MakeText(chosen, Style(13, 18), width - 58, true, false);
+    const float height = 10 + t.height + (chosen.empty() ? 0 : n.height) + 10;
+    rule();
+    Element dropdown;
+    dropdown.role = Role::kDropdown;
+    dropdown.id = kMoreChoicesId;
+    dropdown.parent = group_index;
+    dropdown.bounds = Rect(x + 1, y + 1, width - 2, height - 1);
+    dropdown.in_panel = true;
+    dropdown.focusable = true;
+    // As its choices are: not while a choice is being applied.
+    dropdown.enabled = std::any_of(view.more_choices.begin(), view.more_choices.end(),
+                                   [](const PageButton& option) { return option.enabled; });
+    dropdown.selected = more_open;
+    dropdown.name = FromUtf8(view.more_label);
+    dropdown.help = chosen.empty() ? L"" : FromUtf8(chosen);
+    dropdown.label = t.layout;
+    dropdown.label_at = {x + 16, y + 10};
+    if (!chosen.empty()) {
+      dropdown.note = n.layout;
+      dropdown.note_at = {x + 16, y + 10 + t.height};
+    }
+    build.Add(std::move(dropdown));
     y += height;
+    if (more_open) radios(view.more_choices);
   }
   build.ItemAt(box_index).rect = Rect(x, top, width, y - top);
   build.At(group_index).bounds = Rect(x, top, width, y - top);
@@ -695,7 +736,7 @@ D2D1_COLOR_F Color(const SetupPalette& palette, Ink ink) {
 }
 
 ID2D1Geometry* CachedIcon(Icon icon, bool crisp) {
-  static std::array<ComPtr<ID2D1Geometry>, 14> cache;
+  static std::array<ComPtr<ID2D1Geometry>, 2 * kIconCount> cache;
   ComPtr<ID2D1Geometry>& slot = cache[static_cast<size_t>(icon) * 2 + (crisp ? 1 : 0)];
   if (!slot) slot = crisp ? CrispIconGeometry(icon) : IconGeometry(icon);
   return slot.Get();
@@ -975,7 +1016,7 @@ int Scene::HitTest(D2D1_POINT_2F point, float scroll) const {
   return -1;
 }
 
-Scene LayoutScene(const PageView& view, int choice) {
+Scene LayoutScene(const PageView& view, int choice, bool more_open) {
   Scene scene;
   scene.panel = kPanel;
   scene.content = kContent;
@@ -1002,8 +1043,9 @@ Scene LayoutScene(const PageView& view, int choice) {
     y += text.height;
   }
   if (view.command_links) y = LayoutDoors(view, build, scene, y + 20);
-  if (!view.choices.empty()) y = LayoutChoices(view, choice, build, y + 16);
+  // A guide's steps come first, and the choices after them are another way.
   if (!view.steps.empty()) y = LayoutGuide(view, build, scene, y + 14);
+  if (!view.choices.empty() || !view.more_choices.empty()) y = LayoutChoices(view, choice, more_open, build, y + 16);
   if (!view.notes.empty()) y = LayoutNotes(view, build, y + 16);
   if (!view.checks.empty()) y = LayoutChecks(view, build, y + 18);
   scene.content_height = y - kContent.top;
@@ -1230,6 +1272,15 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         }
         if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(e.enabled ? palette.ink : palette.disabled));
         if (e.note) target->DrawTextLayout(e.note_at, e.note.Get(), p.Brush(palette.text2));
+        if (focused) p.FocusRing(Grown(r, -3), kControlRadius);
+        break;
+      }
+      case Role::kDropdown: {
+        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(e.enabled ? palette.ink : palette.disabled));
+        if (e.note) target->DrawTextLayout(e.note_at, e.note.Get(), p.Brush(palette.text2));
+        p.DrawIcon(e.selected ? Icon::kChevronUp : Icon::kChevronDown,
+                   Rect(r.right - 30, (r.top + r.bottom) / 2 - 8, 16, 16),
+                   !e.enabled ? palette.disabled : hover ? palette.ink : palette.text3);
         if (focused) p.FocusRing(Grown(r, -3), kControlRadius);
         break;
       }

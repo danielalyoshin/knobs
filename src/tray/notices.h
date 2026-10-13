@@ -32,6 +32,7 @@ struct Notice {
     kFilterWarnings,  // New pre-flight warnings: filters knobs can't run.
     kRestarted,       // The copy before this one restarted to follow OBS.
     kOtherObs,        // OBS opened in another Windows session.
+    kSoundIntoCable,  // Windows plays the PC's sound into a virtual cable.
     kUpdateAvailable,  // A new version is out (updates.h).
     kUpdated,          // This copy is the version an update installed.
     kUpdateFailed,     // An update didn't install by itself.
@@ -65,19 +66,18 @@ std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name);
 //   others at once. A restart that's needed gets none: the tray restarts by
 //   itself. While paused, nothing is missing.
 // - A problem's notification is taken down when it ends.
-// - The mic or its chain changing in OBS, and new pre-flight warnings, get
-//   one after the first import, but a change knobs's own settings made gets
-//   none.
+// - The mic or its chain changing in OBS gets one after the first import,
+//   and new pre-flight warnings do even at it, if Options::warned says which
+//   are known. A change knobs's own settings made gets none.
 // - After a restart to follow OBS, the new copy says why, and after an
-//   update, what it did.
-// - OBS opening in another Windows session gets one, unless one of the
-//   above is shown at the same time, and it's taken down when that OBS
-//   closes.
-// - Nothing shows while `quiet`: the first run is unfinished or open, and
-//   shows the state itself. What it would have said isn't said later, but
-//   for what an update did and what Say was given, which the first run
-//   doesn't show: that shows once it isn't quiet, unless something else
-//   shows then.
+//   update, what it did, after anything shown at the same time.
+// - OBS opening in another Windows session, and Windows starting to play the
+//   PC's sound into a virtual cable, get one, unless one of the above is
+//   shown at the same time, and it's taken down when it ends.
+// - Nothing shows while `quiet`: the setup window is open, and shows the
+//   state itself. A problem that began meanwhile shows once it isn't quiet,
+//   if it's still there, and so do what an update did and what Say was
+//   given. News of the chain and its warnings doesn't: the window showed it.
 class Notifier {
  public:
   using Clock = std::chrono::steady_clock;
@@ -94,10 +94,15 @@ class Notifier {
     Clock::duration mic_back_after = std::chrono::seconds(5);
     // Why the copy before this one restarted it, if it did.
     core::RestartNeed restarted_for = core::RestartNeed::kNone;
-    // What an update did, said as the restart is, by the copy it started
-    // (UpdatedNotice).
+    // What an update did, said as the restart is, by the first copy that
+    // runs after it (UpdatedNotice).
     std::optional<Notice> updated;
-    // Notices held while quiet show one at a time, this far apart.
+    // The pre-flight warnings already said, by what each is about, as
+    // warnings() last had them, in this copy or one before: the first
+    // import says the others. Unknown, it says none.
+    std::optional<std::vector<std::string>> warned;
+    // Notices held while quiet, or behind another, show one at a time, this
+    // far apart.
     Clock::duration held_apart = std::chrono::seconds(8);
   };
 
@@ -126,13 +131,18 @@ class Notifier {
   const std::optional<Notice>& shown() const { return shown_; }
   // It was clicked, and Windows took it down.
   void Clicked() { shown_.reset(); }
+  // The warnings said, for Options::warned, once an import has found the
+  // mic.
+  const std::optional<std::vector<std::string>>& warnings() const { return warned_; }
 
  private:
   // A mic or cable missing, from the first snapshot that said so.
   struct Missing {
     Clock::time_point since;
-    // Past the grace: notified, unless quiet then.
+    // Past the grace: the icon says so.
     bool due = false;
+    // The notification was shown, or isn't due while quiet.
+    bool notified = false;
     // A mic only: its device is connected, and the chain stalled.
     bool stalled = false;
     // A stalled mic only: running again since, but not for long enough to
@@ -143,8 +153,12 @@ class Notifier {
   // `stalled` is whether a missing mic's device is connected.
   void Follow(std::optional<Missing>& missing, bool now_missing, bool stalled, bool running,
               Clock::time_point now) const;
-  // Shows what `missing` is due to say, once.
+  // Shows what `missing` is due to say, once, when it isn't quiet.
   void Due(std::optional<Missing>& missing, Notice::Kind kind, bool quiet, Clock::time_point now, Update& update);
+  // Shows the problem's notification, if it waits and it isn't quiet.
+  void ShowProblem(bool quiet, Update& update);
+  // Shows `notice` now, or after what's quiet or shown now.
+  void ShowOrHold(Notice notice, bool quiet, Update& update);
   void Show(Notice notice, bool quiet, Update& update);
   // Takes down the notification showing if it's a `kind`.
   void Hide(Notice::Kind kind, Update& update);
@@ -158,15 +172,18 @@ class Notifier {
   bool started_ = false;
   std::optional<Missing> mic_;
   std::optional<Missing> cable_;
-  // The problem other than a missing device that was last notified, as its
-  // state and setup need.
+  // The problem other than a missing device, as its state and setup need,
+  // and its notification while it waits for quiet to end.
   std::optional<std::pair<core::State, core::SetupNeed>> problem_;
+  std::optional<Notice> problem_waiting_;
   // What the last import that found the mic found.
   uint32_t chain_revision_ = 0;
-  // Its warnings, by what each is about (WarningKey).
-  std::vector<std::string> warnings_;
+  // Its warnings, by what each is about (WarningKey), once known.
+  std::optional<std::vector<std::string>> warned_;
   std::string mic_name_;
   std::vector<core::OtherObs> other_obs_;
+  // The cable Windows plays the PC's sound into, if any.
+  std::string sound_into_;
   runtime::ObsVersion obs_version_;
   std::optional<Notice> shown_;
   // What Say got while quiet, and the update's notice: the latest of each

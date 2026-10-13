@@ -26,7 +26,6 @@ enum MenuId : unsigned {
   kIdMicMenu,
   kIdMicSameAsObs,
   kIdCableMenu,
-  kIdCableSameAsObs,
   kIdOtherDevicesMenu,
   kIdReimport,
   kIdPauseForObs,
@@ -43,6 +42,8 @@ enum MenuId : unsigned {
   kIdRestart,
   kIdTryAgain,
   kIdOtherObs,  // A line under the status: OBS open in another account.
+  // Another: Windows plays the PC's sound into a cable. Opens Sound settings.
+  kIdSoundIntoCable,
   // The update check (updates.h).
   kIdGetUpdate,     // Opens a new version's page.
   kIdInstallUpdate,  // Installs the new version downloaded.
@@ -69,7 +70,7 @@ struct MenuItem {
 struct Menu {
   std::vector<MenuItem> items;
   // What each pick sets: a mic's name for Settings::mic, and a playback
-  // device for Settings::cable.
+  // device for Settings::cable, which then stays whatever OBS monitors to.
   std::vector<std::string> mics;
   std::vector<audio::AudioDevice> cables;
   // The version Get… and Update to are for, as the menu showed it.
@@ -96,6 +97,15 @@ std::string ShortCableName(const core::Snapshot& snapshot);
 // Whether a playback device is a virtual cable (VB-Cable, VoiceMeeter, VB's
 // Hi-Fi Cable, Virtual Audio Cable), going by its name.
 bool IsVirtualCable(std::string_view name);
+
+// "OBS has 2 mics", or "1 mic".
+std::string MicCount(const core::Snapshot& snapshot);
+
+// The short name of Windows' default playback device if it's the cable knobs
+// sends to, or another input of it, else "": Windows plays the PC's sound
+// into the cable, as installing one can make it do. Then the user hears
+// nothing, and the cable's apps hear it with the mic.
+std::string DefaultOutputCable(const core::Snapshot& snapshot);
 
 // The recording side of a virtual cable's playback device, which other apps
 // choose as their mic, by its short name: CABLE Input and CABLE In 16ch go

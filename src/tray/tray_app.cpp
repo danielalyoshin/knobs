@@ -37,6 +37,9 @@ constexpr UINT kFirstRunMessage = WM_APP + 4;
 // The update check: a job is done (wParam 1), or it's time to look.
 constexpr UINT kUpdateMessage = WM_APP + 5;
 constexpr UINT kErrorMessage = WM_APP + 6;  // Show later_error_.
+// The installer this copy started ended without closing it, with its exit
+// code in wParam.
+constexpr UINT kInstallerMessage = WM_APP + 7;
 constexpr UINT_PTR kNoticeTimer = 1;   // Notifier::NextDeadline.
 constexpr UINT_PTR kRestartTimer = 2;  // RestartByItself, while a window is open.
 constexpr UINT_PTR kUpdateTimer = 3;   // Updater::NextDeadline.
@@ -96,6 +99,22 @@ void CopyField(wchar_t (&field)[N], std::string_view text) {
   field[wide.size()] = L'\0';
 }
 
+// When `file` was last written, by the system clock. From its FILETIME, not
+// std::chrono's clock_cast, which goes through leap seconds and so ICU, which
+// Windows 10 before 1903 doesn't have.
+std::optional<std::chrono::system_clock::time_point> LastWritten(const std::filesystem::path& file) {
+  WIN32_FILE_ATTRIBUTE_DATA data = {};
+  if (!GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &data)) return std::nullopt;
+  const uint64_t ticks =
+      (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+  // FILETIME counts 100 ns from 1601, and the system clock from 1970.
+  constexpr uint64_t kTicksTo1970 = 116'444'736'000'000'000;
+  if (ticks < kTicksTo1970) return std::nullopt;
+  using Ticks = std::chrono::duration<uint64_t, std::ratio<1, 10'000'000>>;
+  return std::chrono::system_clock::time_point(
+      std::chrono::duration_cast<std::chrono::system_clock::duration>(Ticks(ticks - kTicksTo1970)));
+}
+
 Updater MakeUpdater(const UpdateHooks& hooks, const UpdateSettings& settings) {
   return Updater(Updater::Options{.current = hooks.current,
                                   .can_install = hooks.can_install,
@@ -131,15 +150,20 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
       app->settings_ = std::move(loaded->core);
       app->first_run_ = loaded->first_run;
       app->updater_ = MakeUpdater(opts.updates, loaded->updates);
+      app->warned_ = std::move(loaded->warned);
     } else {
       settings_error = loaded.error();
     }
   }
   if (app->HasUpdateCheck()) app->PrepareUpdates();
-  if (opts.updated) {
-    app->notifier_ = Notifier({.restarted_for = opts.restarted_for,
-                               .updated = UpdatedNotice(app->updater_.settings(), opts.updates.current)});
+  // An installer was started, by this copy or the one before: whether it
+  // installed is said by the first copy that runs after it, whichever that is.
+  const std::optional<Notice> updated = UpdatedNotice(app->updater_.settings(), opts.updates.current);
+  if (app->updater_.settings().installing) {
+    app->updater_.Reported();
+    app->Save();
   }
+  app->notifier_ = Notifier({.restarted_for = opts.restarted_for, .updated = updated, .warned = app->warned_});
 
   WNDCLASSEXW window_class = {sizeof(window_class)};
   window_class.lpfnWndProc = WindowProc;
@@ -174,7 +198,9 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
                                kDisplayName, settings_error));
   }
   // Once Run pumps messages: the dialog's loop needs Run's to end with it.
+  // Meanwhile, what it will show isn't notified.
   if (opts.resume_first_run || (opts.open_first_run && !app->first_run_.done)) {
+    app->setup_due_ = true;
     PostMessageW(app->window_, kFirstRunMessage, opts.resume_first_run, 0);
   }
   if (app->HasUpdateCheck()) PostMessageW(app->window_, kUpdateMessage, 0, 0);
@@ -185,11 +211,11 @@ TrayApp::TrayApp(TrayOptions options)
     : options_(std::move(options)),
       settings_(options_.settings),
       first_run_(options_.first_run),
-      notifier_({.restarted_for = options_.restarted_for}),
       updater_(MakeUpdater(options_.updates, options_.update_settings)) {}
 
 TrayApp::~TrayApp() {
   Quit();
+  StopWaitingForInstaller();
   DestroyIcons();
 }
 
@@ -289,6 +315,8 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         if (RestartByItself()) return 0;
         if (setup_window_) setup_window_->Changed(before);
         Notify(notifier_.Changed(snapshot_, Quiet(), Clock::now()));
+        SaveWarned();
+        KeepCable();
         if (options_.on_snapshot) options_.on_snapshot(snapshot_);
         RunUpdates();
       }
@@ -326,16 +354,26 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       } else if (!first_run_.done || wparam) {
         // Started again before setup was finished, or after a restart it
         // asked for: that's what's wanted.
-        ShowFirstRun(false);
+        ShowFirstRun(false, wparam && first_run_.done ? std::optional(FirstRunPage::kCable) : std::nullopt);
       } else {
         ShowMenu(IconPoint());
       }
       return 0;
     case kFirstRunMessage:
-      if (!first_run_.done || wparam) ShowFirstRun(false);
+      // After a restart for VB-Cable, or once the installer installed it, a
+      // finished first run opens at the cable, to choose it.
+      setup_due_ = false;
+      if (!first_run_.done || wparam) {
+        ShowFirstRun(false, wparam && first_run_.done ? std::optional(FirstRunPage::kCable) : std::nullopt);
+      } else {
+        Notify(notifier_.Tick(Quiet(), Clock::now()));
+      }
       return 0;
     case kErrorMessage:
       if (!later_error_.empty()) ShowError(std::exchange(later_error_, {}));
+      return 0;
+    case kInstallerMessage:
+      InstallerEnded(static_cast<DWORD>(wparam));
       return 0;
     case WM_SETTINGCHANGE:
       if (wparam == SPI_SETHIGHCONTRAST ||
@@ -477,7 +515,28 @@ void TrayApp::HideBalloon() {
   ModifyIcon(data);
 }
 
-bool TrayApp::Quiet() const { return !first_run_.done || setup_window_ != nullptr; }
+bool TrayApp::Quiet() const { return setup_window_ != nullptr || setup_due_; }
+
+void TrayApp::KeepCable() {
+  // Only once the first run is finished, and not while it's open or about to
+  // open, where the cable page asks.
+  if (!first_run_.done || Quiet() || !settings_.cable.empty() || snapshot_.state == core::State::kStarting) return;
+  const audio::AudioDevice& obs = snapshot_.obs_cable;
+  if (obs.id.empty() || audio::SameId(obs.id, audio::kDefaultDevice)) return;
+  core::Settings settings = settings_;
+  settings.cable = obs.id;
+  const audio::AudioDevice* connected = audio::FindById(snapshot_.outputs, obs.id);
+  settings.cable_name = connected ? connected->name : obs.name;
+  Log(std::format("Keeping {} as the cable: OBS monitoring to another device no longer moves it.",
+                  settings.cable_name.empty() ? settings.cable : settings.cable_name));
+  ApplySettings(settings);
+}
+
+void TrayApp::SaveWarned() {
+  if (notifier_.warnings() == warned_) return;
+  warned_ = notifier_.warnings();
+  Save();
+}
 
 bool TrayApp::RestartByItself() {
   if (snapshot_.state != core::State::kRestartNeeded) {
@@ -554,6 +613,9 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
     return;
   }
   switch (id) {
+    case kIdSoundIntoCable:
+      OpenUrl("ms-settings:sound");
+      break;
     case kIdPause:
       if (core_) core_->Pause();
       break;
@@ -579,8 +641,8 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
     case kIdFinishSetup:
     case kIdChooseMic:
     case kIdChooseCable:
-      // Opens at the page for it: the state calls for it.
-      ShowFirstRun(false);
+      // Opens at the page for it, even before the first run's doors.
+      ShowFirstRun(false, PageFor(snapshot_));
       break;
     case kIdFindObs:
       FindObs();
@@ -630,7 +692,8 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
   const UpdateSettings& updates = updater_.settings();
   const FinishChoices now{
       .start_with_windows = starts, .check_for_updates = updates.check, .install_updates = updates.install};
-  SetupWindow dialog(*this, options_.instance, FirstRun(progress, page, now, HasUpdateCheck() && updater_.can_install()),
+  SetupWindow dialog(*this, options_.instance,
+                     FirstRun(progress, page, now, HasUpdateCheck() && updater_.can_install(), options_.windows11),
                      options_.theme, options_.setup_zoom, options_.setup_walk_at);
   setup_window_ = &dialog;
   dialog.Show();
@@ -638,6 +701,7 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
   if (RestartByItself()) return;
   // What waited for it to close.
   Notify(notifier_.Tick(Quiet(), Clock::now()));
+  KeepCable();
   RunUpdates();
 }
 
@@ -691,7 +755,8 @@ void TrayApp::ResumeAfterRestart(bool on) {
 
 void TrayApp::Save() {
   if (options_.settings_file.empty()) return;
-  if (const Status saved = SaveSettings(options_.settings_file, {settings_, first_run_, updater_.settings()}); !saved) {
+  if (const Status saved = SaveSettings(options_.settings_file, {settings_, first_run_, updater_.settings(), warned_});
+      !saved) {
     ShowError(std::format("Couldn't save the change, so it lasts only until {} quits.\n\n{}", kDisplayName,
                           saved.error()));
   }
@@ -721,7 +786,8 @@ bool TrayApp::Restart() {
   // Once by itself: if it fails, the menu and the first run offer it.
   restart_tried_ = true;
   if (!options_.restart) return false;
-  if (const Status started = options_.restart(snapshot_.restart); !started) {
+  // Paused, the new copy is too: a restart doesn't put the mic back live.
+  if (const Status started = options_.restart(snapshot_.restart, Paused()); !started) {
     ShowError(std::format("{}\n\nQuit {}, then start it again.", started.error(), kDisplayName));
     return false;
   }
@@ -764,7 +830,7 @@ void TrayApp::Log(std::string line) {
 }
 
 Status TrayApp::StartCore() {
-  auto core = options_.start_core(*this, settings_);
+  auto core = options_.start_core(*this, settings_, options_.start_paused);
   if (!core) return Error{core.error()};
   core_ = std::move(*core);
   return Ok{};
@@ -772,17 +838,25 @@ Status TrayApp::StartCore() {
 
 void TrayApp::ReleaseCore() {
   if (!holding_core_ || quitting_) return;
-  holding_core_ = false;
   KillTimer(window_, kCoreTimer);
+  // Not while an installer runs, which closes this copy: the mic would only
+  // start to stop again. One that ends first releases it (InstallerEnded).
+  if (installer_) return;
+  holding_core_ = false;
   if (const Status started = StartCore(); !started) {
     failed_ = started.error();
     Quit();
   }
 }
 
+bool TrayApp::Paused() const {
+  // Before the core says otherwise, as this copy was started: an update at
+  // start comes before it.
+  return snapshot_.paused_by_user || (snapshot_.state == core::State::kStarting && options_.start_paused);
+}
+
 bool TrayApp::CanRestart() const {
-  return snapshot_.state != core::State::kRunning && !snapshot_.paused_by_user && !Quiet() && !in_menu_ &&
-         !OpenDialog();
+  return snapshot_.state != core::State::kRunning && !Paused() && !Quiet() && !in_menu_ && !OpenDialog();
 }
 
 // --- Updates ------------------------------------------------------------------------
@@ -792,22 +866,38 @@ std::filesystem::path TrayApp::InstallerFile(const update::Version& version) con
 }
 
 void TrayApp::PrepareUpdates() {
-  if (TidyUpdates()) updater_.Found();
+  if (!TidyUpdates()) return;
+  // Waiting since it downloaded, for the day before a notification offers it.
+  updater_.Found(LastWritten(InstallerFile(*updater_.installable())).value_or(Updater::Clock::now()));
+}
+
+std::filesystem::path TrayApp::UnverifiedFile(const update::Version& version) const {
+  return options_.updates.folder / L"unverified" / FromUtf8(update::InstallerName(version));
 }
 
 bool TrayApp::TidyUpdates() {
   // Another copy, as a build or an unzipped copy that shares the folder,
   // leaves the installed copy's installer alone.
   if (!updater_.can_install()) return false;
-  // The installer for the version that's installable is kept, and nothing
-  // else: the update it was for is done, given up on, or another came out.
-  std::filesystem::path keep;
-  if (const auto version = updater_.installable()) keep = InstallerFile(*version);
+  // The installer for the version that's installable is kept, or one
+  // downloaded whose signature Windows couldn't finish checking, and
+  // nothing else: the update it was for is done, given up on, or another
+  // came out.
+  std::filesystem::path keep, unverified;
+  if (const auto version = updater_.installable()) {
+    keep = InstallerFile(*version);
+    unverified = UnverifiedFile(*version);
+  }
   std::error_code ec;
   std::vector<std::filesystem::path> old;
-  for (auto it = std::filesystem::directory_iterator(options_.updates.folder, ec);
-       !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
-    if (it->path() != keep) old.push_back(it->path());
+  for (const std::filesystem::path& folder : {options_.updates.folder, options_.updates.folder / L"unverified"}) {
+    for (auto it = std::filesystem::directory_iterator(folder, ec); !ec && it != std::filesystem::directory_iterator();
+         it.increment(ec)) {
+      if (it->path() != keep && it->path() != unverified && it->path() != unverified.parent_path()) {
+        old.push_back(it->path());
+      }
+    }
+    ec.clear();
   }
   // One in use stays until the next start.
   for (const std::filesystem::path& path : old) std::filesystem::remove_all(path, ec);
@@ -829,7 +919,11 @@ void TrayApp::RunUpdates() {
     NotOffered(*asked);
   }
   const Updater::Clock::time_point now = Updater::Clock::now();
-  if (auto waiting = updater_.Waiting(now)) Notify(notifier_.Say(std::move(*waiting), Quiet()));
+  if (auto waiting = updater_.Waiting(now)) {
+    // Once a version: the next start knows it was said.
+    Save();
+    Notify(notifier_.Say(std::move(*waiting), Quiet()));
+  }
   if (const Updater::Job job = updater_.Due(now, CanRestart()); job != Updater::Job::kNone) {
     StartUpdateJob(job);
     return;
@@ -850,17 +944,23 @@ void TrayApp::StartUpdateJob(Updater::Job job, bool asked) {
   work->version = latest;
   update_work_ = work;
   const std::filesystem::path file = latest ? InstallerFile(*latest) : std::filesystem::path();
+  const std::filesystem::path unverified = latest ? UnverifiedFile(*latest) : std::filesystem::path();
+  std::error_code ec;
+  // One downloaded before whose signature Windows couldn't finish checking
+  // is checked again, not downloaded again.
+  const bool kept = job == Updater::Job::kDownload && std::filesystem::is_regular_file(unverified, ec);
   switch (job) {
     case Updater::Job::kCheck:
       Log("Asking GitHub for the latest release.");
       break;
     case Updater::Job::kDownload:
-      Log(std::format("Downloading {}.", update::InstallerUrl(*latest)));
+      Log(kept ? std::format("Checking the signature of {} again.", ToUtf8(unverified))
+               : std::format("Downloading {}.", update::InstallerUrl(*latest)));
       break;
     default:
       break;
   }
-  update_thread_ = std::thread([work, hooks = options_.updates, file, window = window_] {
+  update_thread_ = std::thread([work, hooks = options_.updates, file, unverified, kept, window = window_] {
     if (work->job == Updater::Job::kCheck) {
       if (auto found = hooks.latest(work->cancel)) {
         work->latest = *found;
@@ -870,19 +970,29 @@ void TrayApp::StartUpdateJob(Updater::Job job, bool asked) {
     } else if (work->job == Updater::Job::kDownload) {
       // Into a folder of its own, until its signature has been checked.
       std::error_code ec;
-      const std::filesystem::path part = file.parent_path() / L"download" / file.filename();
-      std::filesystem::create_directories(part.parent_path(), ec);
-      if (const update::DownloadResult got = hooks.download(*work->version, part, work->cancel); !got.ok()) {
-        if (got.outcome == update::DownloadResult::Outcome::kUnusable) {
+      const std::filesystem::path download = file.parent_path() / L"download";
+      const std::filesystem::path part = kept ? unverified : download / file.filename();
+      std::optional<update::DownloadResult> got;
+      if (!kept) {
+        std::filesystem::create_directories(download, ec);
+        got = hooks.download(*work->version, part, work->cancel);
+      }
+      if (got && !got->ok()) {
+        if (got->outcome == update::DownloadResult::Outcome::kUnusable) {
           work->downloaded = Updater::Downloaded::kUnusable;
         }
-        work->error = got.error;
+        work->error = got->error;
       } else if (const update::SignatureCheck verified = hooks.verify(part); !verified.ok()) {
-        // One Windows couldn't finish checking is downloaded again later.
+        work->error = verified.error;
         if (verified.verdict == update::SignatureCheck::Verdict::kRejected) {
           work->downloaded = Updater::Downloaded::kRejected;
+          std::filesystem::remove(part, ec);
+        } else if (!kept) {
+          // Windows couldn't finish the check: kept for the next one, which
+          // doesn't download it again.
+          std::filesystem::create_directories(unverified.parent_path(), ec);
+          std::filesystem::rename(part, unverified, ec);
         }
-        work->error = verified.error;
       } else {
         std::filesystem::rename(part, file, ec);
         if (ec) {
@@ -892,7 +1002,7 @@ void TrayApp::StartUpdateJob(Updater::Job job, bool asked) {
           work->downloaded = Updater::Downloaded::kDone;
         }
       }
-      std::filesystem::remove_all(part.parent_path(), ec);
+      std::filesystem::remove_all(download, ec);
     } else if (work->job == Updater::Job::kInstall) {
       // Again, just before it runs.
       work->verified = hooks.verify(file);
@@ -958,14 +1068,17 @@ void TrayApp::FinishUpdateJob() {
         }
         notice = updater_.NotVerified(now, lost);
         if (asked) {
-          // Offered still, or not: then the menu offers its page, as a link
-          // here would be cut short.
+          // Offered still, or not: then the menu offers its page, if it
+          // offers the version at all, as a link here would be cut short.
           const auto offer = updater_.offer();
-          error = std::format("Couldn't update to {} {}. {}\n\n{}", kDisplayName, version.ToString(),
-                              offer && offer->install && offer->version == version
-                                  ? std::string("Try again later.")
-                                  : std::format("Get {} {}… in the menu opens its page, to download it yourself.",
-                                                kDisplayName, version.ToString()),
+          std::string next = "Try again later.";
+          if (!offer || offer->version != version) {
+            next = std::format("{} {} isn't the latest version any more.", kDisplayName, version.ToString());
+          } else if (!offer->install) {
+            next = std::format("Get {} {}… in the menu opens its page, to download it yourself.", kDisplayName,
+                               version.ToString());
+          }
+          error = std::format("Couldn't update to {} {}. {}\n\n{}", kDisplayName, version.ToString(), next,
                               work->verified.error);
           // The error says it.
           notice.reset();
@@ -979,15 +1092,25 @@ void TrayApp::FinishUpdateJob() {
       Log(std::format("Updating to {} {}.", kDisplayName, version.ToString()));
       updater_.Installing();
       Save();
-      if (const Status started = options_.updates.install(file); !started) {
+      // Paused, the new copy is too.
+      auto started = options_.updates.install(file, Paused());
+      if (!started) {
         Log(std::format("Couldn't start the installer: {}", started.error()));
         notice = UpdatedNotice(updater_.settings(), options_.updates.current);
+        updater_.Reported();
         break;
       }
-      // The installer closes this copy too, once it's ready to: going now
-      // spares it the wait.
-      Quit();
-      return;
+      if (!*started) {
+        // Nothing to wait on: the installer closes this copy, once it's
+        // ready to, and going now spares it the wait.
+        Quit();
+        return;
+      }
+      // The installer closes this copy as it's ready to install. Until then
+      // knobs runs on, so one that ends first, as an antivirus can make it,
+      // doesn't leave it closed.
+      WaitForInstaller(*started, version);
+      break;
     }
     case Updater::Job::kNone:
       break;
@@ -1035,16 +1158,62 @@ void TrayApp::InstallUpdate(const update::Version& asked) {
 
 void TrayApp::NotOffered(const update::Version& asked) {
   // A check that ended while the menu or the notification was up found a
-  // newer version, which isn't downloaded yet, or the installer was lost.
+  // newer version, which isn't downloaded yet, or none newer than this copy,
+  // as when a release is taken back, or the installer was lost.
   const auto offer = updater_.offer();
   if (offer && offer->version != asked) {
     ShowError(std::format("{} {} is out now, so the menu offers that instead.", kDisplayName,
                           offer->version.ToString()));
+  } else if (!offer) {
+    ShowError(std::format("{} {} isn't the latest version any more, so it isn't installed.", kDisplayName,
+                          asked.ToString()));
   } else {
     ShowError(std::format("{} {} isn't ready to install any more. Get {} {}… in the menu opens its page, to download "
                           "it yourself.",
                           kDisplayName, asked.ToString(), kDisplayName, asked.ToString()));
   }
+}
+
+void TrayApp::WaitForInstaller(HANDLE process, const update::Version& version) {
+  StopWaitingForInstaller();
+  installer_ = process;
+  installer_version_ = version;
+  installer_stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  installer_thread_ = std::thread([process, stop = installer_stop_, window = window_] {
+    const HANDLE handles[] = {stop, process};
+    if (WaitForMultipleObjects(2, handles, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) return;
+    DWORD code = 0;
+    GetExitCodeProcess(process, &code);
+    PostMessageW(window, kInstallerMessage, code, 0);
+  });
+}
+
+void TrayApp::InstallerEnded(DWORD exit_code) {
+  if (!installer_ || quitting_) return;
+  const update::Version version = installer_version_;
+  StopWaitingForInstaller();
+  // It never closed this copy, so it didn't install. It isn't tried again
+  // by itself: its page is where to get it.
+  Log(std::format("The installer for {} {} ended without updating it (exit code {}).", kDisplayName,
+                  version.ToString(), exit_code));
+  updater_.Reported();
+  Save();
+  Notify(notifier_.Say(NotUpdatedNotice(version), Quiet()));
+  // An update at start held the mic back for it.
+  ReleaseCore();
+  if (quitting_) return;
+  RunUpdates();
+}
+
+void TrayApp::StopWaitingForInstaller() {
+  if (installer_thread_.joinable()) {
+    SetEvent(installer_stop_);
+    installer_thread_.join();
+  }
+  if (installer_stop_) CloseHandle(installer_stop_);
+  if (installer_) CloseHandle(installer_);
+  installer_stop_ = nullptr;
+  installer_ = nullptr;
 }
 
 void TrayApp::StopUpdates() {

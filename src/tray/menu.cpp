@@ -120,24 +120,14 @@ MenuItem CableMenu(const core::Snapshot& snapshot, const core::Settings& setting
     submenu.enabled = false;
     return submenu;
   }
-  const audio::AudioDevice& obs = snapshot.obs_cable;
-  if (!obs.id.empty() && !SameId(obs.id, kDefaultDevice)) {
-    const audio::AudioDevice* connected = FindById(snapshot.outputs, obs.id);
-    const std::string& name = connected ? connected->name : obs.name.empty() ? obs.id : obs.name;
-    // Offered when OBS monitors to a cable, and shown whenever it's the
-    // choice, so the check mark has somewhere to go.
-    if (IsVirtualCable(name) || settings.cable.empty()) {
-      const std::string label = connected
-                                    ? std::format("&Same as OBS ({})", Escape(ShortDeviceName(name)))
-                                    : std::format("&Same as OBS ({}, not connected)", Escape(ShortDeviceName(name)));
-      submenu.items.push_back(Choice(kIdCableSameAsObs, label, settings.cable.empty()));
-      submenu.items.push_back(Separator());
-    }
-  }
-
+  // Where knobs sends the mic: the user's pick, or until there's one, what
+  // OBS monitors to. A pick stays whatever OBS does, so there's no "Same as
+  // OBS" to pick.
+  audio::AudioDevice sends_to{settings.cable_name, settings.cable};
+  if (settings.cable.empty() && !SameId(snapshot.obs_cable.id, kDefaultDevice)) sends_to = snapshot.obs_cable;
   bool picked_connected = false;
   const auto pick = [&](const audio::AudioDevice& device) {
-    const bool picked = !settings.cable.empty() && SameId(device.id, settings.cable);
+    const bool picked = !sends_to.id.empty() && SameId(device.id, sends_to.id);
     picked_connected |= picked;
     menu.cables.push_back(device);
     return Choice(kIdCableFirst + static_cast<unsigned>(menu.cables.size() - 1), Escape(device.name), picked);
@@ -155,8 +145,8 @@ MenuItem CableMenu(const core::Snapshot& snapshot, const core::Settings& setting
     if (menu.cables.size() >= kMaxCables) break;
     if (!IsVirtualCable(device.name)) others.items.push_back(pick(device));
   }
-  if (!settings.cable.empty() && !picked_connected) {
-    const std::string& name = settings.cable_name.empty() ? settings.cable : settings.cable_name;
+  if (!sends_to.id.empty() && !picked_connected) {
+    const std::string& name = sends_to.name.empty() ? sends_to.id : sends_to.name;
     MenuItem missing = Choice(0, Escape(std::format("{} (not connected)", name)), true);
     missing.enabled = false;
     submenu.items.push_back(std::move(missing));
@@ -199,7 +189,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
         case SetupNeed::kNoMic:
           return "No mic in OBS yet";
         case SetupNeed::kPickMic:
-          return std::format("OBS has {} mics", snapshot.mics.size());
+          return MicCount(snapshot);
         case SetupNeed::kCable:
           return with_chain("No cable chosen");
         case SetupNeed::kNone:
@@ -246,9 +236,29 @@ std::string ShortCableName(const core::Snapshot& snapshot) {
   return snapshot.chain ? ShortDeviceName(snapshot.chain->cable) : "";
 }
 
+std::string MicCount(const core::Snapshot& snapshot) {
+  const size_t count = snapshot.mics.size();
+  return std::format("OBS has {} mic{}", count, count == 1 ? "" : "s");
+}
+
 bool IsVirtualCable(std::string_view name) {
   const std::string lower = AsciiLower(name);
   return lower.find("vb-audio") != std::string::npos || lower.find("virtual audio cable") != std::string::npos;
+}
+
+std::string DefaultOutputCable(const core::Snapshot& snapshot) {
+  if (snapshot.default_output.empty()) return "";
+  const audio::AudioDevice* output = FindById(snapshot.outputs, snapshot.default_output);
+  if (!output || !IsVirtualCable(output->name)) return "";
+  // Only the cable knobs sends to, by either of its inputs: another, such as
+  // VoiceMeeter's, may be Output on purpose, and its apps don't get the mic.
+  audio::AudioDevice cable{snapshot.settings.cable_name, snapshot.settings.cable};
+  if (cable.id.empty()) cable = snapshot.obs_cable;
+  if (cable.id.empty() || SameId(cable.id, kDefaultDevice)) return "";
+  if (const audio::AudioDevice* connected = FindById(snapshot.outputs, cable.id)) cable.name = connected->name;
+  const std::string side = CableRecordingSide(output->name);
+  if (!SameId(output->id, cable.id) && (side.empty() || side != CableRecordingSide(cable.name))) return "";
+  return ShortDeviceName(output->name);
 }
 
 std::string CableRecordingSide(std::string_view name) {
@@ -277,6 +287,10 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
                                                              cable.empty() ? "your cable" : cable)));
     other.enabled = false;
     items.push_back(std::move(other));
+  }
+  // A click opens Sound settings, where Output is set back.
+  if (const std::string cable = DefaultOutputCable(snapshot); !cable.empty()) {
+    items.push_back(Command(kIdSoundIntoCable, Escape(std::format("Windows plays your PC's sound into {}…", cable))));
   }
   if (updates.version) {
     menu.update = updates.version;
@@ -325,9 +339,6 @@ std::optional<core::Settings> SettingsForPick(const Menu& menu, unsigned id, con
     picked.mic.clear();
   } else if (id >= kIdMicFirst && id - kIdMicFirst < menu.mics.size()) {
     picked.mic = menu.mics[id - kIdMicFirst];
-  } else if (id == kIdCableSameAsObs) {
-    picked.cable.clear();
-    picked.cable_name.clear();
   } else if (id >= kIdCableFirst && id - kIdCableFirst < menu.cables.size()) {
     picked.cable = menu.cables[id - kIdCableFirst].id;
     picked.cable_name = menu.cables[id - kIdCableFirst].name;

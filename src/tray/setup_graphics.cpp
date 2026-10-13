@@ -269,6 +269,10 @@ ComPtr<ID2D1Geometry> IconGeometry(Icon icon) {
                    0.5f);
     case Icon::kChevron:
       return PathGeometry("m5.875 3.75 4.25 4.25-4.25 4.25");
+    case Icon::kChevronDown:
+      return PathGeometry("m3.75 5.875 4.25 4.25 4.25-4.25");
+    case Icon::kChevronUp:
+      return PathGeometry("m3.75 10.125 4.25-4.25 4.25 4.25");
     case Icon::kBoxCheck:
       return PathGeometry("m3.5 8.25 3 3 6-6.5");
   }

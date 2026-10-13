@@ -155,7 +155,7 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
           return notice;
         case SetupNeed::kPickMic:
           notice.page = FirstRunPage::kMic;
-          notice.title = std::format("OBS has {} mics", snapshot.mics.size());
+          notice.title = MicCount(snapshot);
           notice.text =
               snapshot.settings.mic.empty()
                   ? std::format("{} stopped until you choose the one it runs. Click to choose.", kDisplayName)
@@ -268,16 +268,32 @@ Notice OtherObs(const core::Snapshot& snapshot) {
   return notice;
 }
 
+// Windows plays the PC's sound into `cable` (DefaultOutputCable).
+Notice SoundIntoCable(std::string_view cable) {
+  return {.kind = Kind::kSoundIntoCable,
+          .title = std::format("Windows plays your PC's sound into {}", cable),
+          .text = "So you can't hear it, and your other apps hear it with your mic. Click to set Output back to your "
+                  "speakers or headphones.",
+          .sound = true,
+          .url = "ms-settings:sound"};
+}
+
 std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& snapshot) {
+  // A copy restarted while paused stays paused.
+  const std::string_view paused = snapshot.paused_by_user ? " It's still paused." : "";
   switch (why) {
     case core::RestartNeed::kObsUpdated:
       return Notice{.kind = Kind::kRestarted,
                     .title = std::format("OBS was updated to {}", snapshot.obs.version.ToString()),
-                    .text = std::format("{} restarted to use it.", kDisplayName)};
+                    .text = std::format("{} restarted to use it.{}", kDisplayName, paused)};
+    case core::RestartNeed::kObsChanged:
+      return Notice{.kind = Kind::kRestarted,
+                    .title = std::format("OBS changed to {}", snapshot.obs.version.ToString()),
+                    .text = std::format("{} restarted to use it.{}", kDisplayName, paused)};
     case core::RestartNeed::kAudioChanged:
       return Notice{.kind = Kind::kRestarted,
                     .title = "OBS's sample rate or channels changed",
-                    .text = std::format("{} restarted to follow them, as OBS does.", kDisplayName)};
+                    .text = std::format("{} restarted to follow them, as OBS does.{}", kDisplayName, paused)};
     case core::RestartNeed::kNone:
       break;
   }
@@ -292,6 +308,8 @@ std::string_view RestartNeedName(core::RestartNeed need) {
       return "obs-updated";
     case core::RestartNeed::kAudioChanged:
       return "audio-changed";
+    case core::RestartNeed::kObsChanged:
+      return "obs-changed";
     case core::RestartNeed::kNone:
       break;
   }
@@ -299,13 +317,14 @@ std::string_view RestartNeedName(core::RestartNeed need) {
 }
 
 std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name) {
-  for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged}) {
+  for (const core::RestartNeed need :
+       {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged, core::RestartNeed::kObsChanged}) {
     if (RestartNeedName(need) == name) return need;
   }
   return std::nullopt;
 }
 
-Notifier::Notifier(Options options) : options_(std::move(options)) {}
+Notifier::Notifier(Options options) : options_(std::move(options)), warned_(options_.warned) {}
 
 Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, Clock::time_point now) {
   Update update;
@@ -331,8 +350,15 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
       });
   if (snapshot.other_obs.empty()) Hide(Kind::kOtherObs, update);
   other_obs_ = snapshot.other_obs;
+  // Windows starting to play the PC's sound into a cable, as installing one
+  // can make it do. As knobs starts, the first run or the menu says so.
+  const std::string sound_into = DefaultOutputCable(snapshot);
+  const bool sound_started = !first && !sound_into.empty() && sound_into != sound_into_;
+  if (sound_into.empty()) Hide(Kind::kSoundIntoCable, update);
+  sound_into_ = sound_into;
 
-  // Other problems, as they begin.
+  // Other problems, as they begin, or once it isn't quiet if they're still
+  // there.
   std::optional<std::pair<State, SetupNeed>> problem;
   if (OtherProblem(snapshot.state)) problem = std::pair{snapshot.state, snapshot.setup};
   if (problem != problem_) {
@@ -340,50 +366,59 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
       Hide(kind, update);
     }
     problem_ = problem;
-    if (problem) {
-      if (auto notice = ProblemNotice(snapshot, obs_version_)) Show(std::move(*notice), quiet, update);
-    }
+    problem_waiting_.reset();
+    if (problem) problem_waiting_ = ProblemNotice(snapshot, obs_version_);
   }
+  ShowProblem(quiet, update);
 
-  // Changes in OBS, after the first import. A problem says more.
+  // Changes in OBS, after the first import, and warnings not said before. A
+  // problem says more.
   if (snapshot.chain) {
     std::vector<std::string> warnings;
-    std::vector<std::string> added;
+    std::vector<std::string> added, added_keys;
     for (const import::ImportNote& note : snapshot.notes) {
       if (!note.warning) continue;
       const std::string& key = WarningKey(note);
-      if (std::find(warnings_.begin(), warnings_.end(), key) == warnings_.end()) added.push_back(note.text);
+      if (warned_ && std::find(warned_->begin(), warned_->end(), key) == warned_->end()) {
+        added.push_back(note.text);
+        added_keys.push_back(key);
+      }
       warnings.push_back(key);
     }
     // A mic picked in knobs, or a new cable, isn't news.
     const bool changed =
         chain_revision_ > 0 && snapshot.chain_revision != chain_revision_ && snapshot.settings == before.settings;
-    if (!first && !update.show) {
+    if (!update.show) {
       if (!added.empty()) {
         Show(FilterWarnings(snapshot, added), quiet, update);
-      } else if (changed) {
+      } else if (!first && changed) {
         Show(ChainChanged(snapshot, mic_name_), quiet, update);
       }
+    } else {
+      // Behind a problem, they're news next time.
+      std::erase_if(warnings, [&added_keys](const std::string& key) {
+        return std::find(added_keys.begin(), added_keys.end(), key) != added_keys.end();
+      });
     }
     chain_revision_ = snapshot.chain_revision;
-    warnings_ = std::move(warnings);
+    warned_ = std::move(warnings);
     mic_name_ = snapshot.chain->mic;
   }
 
-  if (first && !update.show && !Stopped(snapshot.state)) {
-    if (auto notice = Restarted(options_.restarted_for, snapshot)) Show(std::move(*notice), quiet, update);
+  // After a restart or an update, the new copy says so, after anything shown
+  // now. A problem says more than the restart.
+  if (first && !Stopped(snapshot.state)) {
+    if (auto notice = Restarted(options_.restarted_for, snapshot)) ShowOrHold(std::move(*notice), quiet, update);
   }
-  // What an update did waits for the first run, as Say's notices do.
-  if (first && !update.show && options_.updated) {
-    if (quiet) {
-      Hold(*options_.updated);
-    } else {
-      Show(*options_.updated, quiet, update);
-    }
+  if (first && options_.updated) {
+    Notice notice = *options_.updated;
+    if (snapshot.paused_by_user) notice.text = "It's still paused. " + notice.text;
+    ShowOrHold(std::move(notice), quiet, update);
   }
-  // OBS in another session, unless something above was said: that says more
-  // about the mic, and the menu says this too.
+  // OBS in another session, and the PC's sound, unless something above was
+  // said: that says more about the mic, and the menu says these too.
   if (other_opened && !update.show) Show(OtherObs(snapshot), quiet, update);
+  if (sound_started && !update.show) Show(SoundIntoCable(sound_into), quiet, update);
   ShowHeld(quiet, now, update);
   if (!snapshot.obs.root.empty()) obs_version_ = snapshot.obs.version;
   return update;
@@ -407,6 +442,7 @@ Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   }
   Due(mic_, Kind::kMicMissing, quiet, now, update);
   Due(cable_, Kind::kCableMissing, quiet, now, update);
+  ShowProblem(quiet, update);
   ShowHeld(quiet, now, update);
   return update;
 }
@@ -461,11 +497,28 @@ void Notifier::Follow(std::optional<Missing>& missing, bool now_missing, bool st
 
 void Notifier::Due(std::optional<Missing>& missing, Notice::Kind kind, bool quiet, Clock::time_point now,
                    Update& update) {
-  if (!missing || missing->due || now - missing->since < options_.device_grace) return;
+  if (!missing || missing->notified || now - missing->since < options_.device_grace) return;
   const State state = kind == Kind::kMicMissing ? State::kMicMissing : State::kCableMissing;
   if (snapshot_.state != state) return;
   missing->due = true;
+  // While quiet, it waits: still missing then, it's said.
+  if (quiet) return;
+  missing->notified = true;
   Show(kind == Kind::kMicMissing ? MicMissing(snapshot_) : CableMissing(snapshot_), quiet, update);
+}
+
+void Notifier::ShowProblem(bool quiet, Update& update) {
+  if (quiet || !problem_waiting_ || update.show) return;
+  Show(std::move(*problem_waiting_), quiet, update);
+  problem_waiting_.reset();
+}
+
+void Notifier::ShowOrHold(Notice notice, bool quiet, Update& update) {
+  if (quiet || update.show) {
+    Hold(std::move(notice));
+  } else {
+    Show(std::move(notice), quiet, update);
+  }
 }
 
 void Notifier::Show(Notice notice, bool quiet, Update& update) {
@@ -483,7 +536,12 @@ void Notifier::Hold(Notice notice) {
 void Notifier::ShowHeld(bool quiet, Clock::time_point now, Update& update) {
   // Past, it's no deadline: while quiet, the timer would keep firing.
   if (held_after_ && now >= *held_after_) held_after_.reset();
-  if (quiet || held_.empty() || update.show || held_after_) return;
+  if (quiet || held_.empty() || held_after_) return;
+  if (update.show) {
+    // Something shows now: what's held follows it.
+    held_after_ = now + options_.held_apart;
+    return;
+  }
   Show(std::move(held_.front()), quiet, update);
   held_.erase(held_.begin());
   held_after_ = now + options_.held_apart;

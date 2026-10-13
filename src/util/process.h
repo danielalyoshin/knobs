@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+#include <windows.h>
+
 #include <filesystem>
 #include <string_view>
 
@@ -13,5 +15,10 @@ namespace knobs {
 // caller to say what it was starting.
 Status StartProcess(const std::filesystem::path& exe, std::wstring_view arguments,
                     const std::filesystem::path& folder);
+
+// As StartProcess, but returns the process's handle, to wait on, which the
+// caller closes.
+Result<HANDLE> StartProcessToWait(const std::filesystem::path& exe, std::wstring_view arguments,
+                                  const std::filesystem::path& folder);
 
 }  // namespace knobs

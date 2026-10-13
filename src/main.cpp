@@ -9,16 +9,19 @@
 //               run.
 //   --resume-setup
 //               Started by Windows at sign-in after a restart the first run
-//               or the installer asked for (a RunOnce entry): as --startup,
-//               but the first run opens, even if it was finished since. If a
+//               or the installer asked for (a RunOnce entry), or by the
+//               installer once it installed VB-Cable: the first run opens,
+//               even if it was finished since, at the cable page then. If a
 //               copy is already running, it opens it there.
 //   --restart   Started by a copy that's quitting to restart: wait for it.
 //   --restarted-for <reason>
-//               Why: obs-updated or audio-changed. The new copy says so in a
-//               notification.
+//               Why: obs-updated, obs-changed or audio-changed. The new copy
+//               says so in a notification.
+//   --paused    The copy that restarted it, or started the update, was
+//               paused: start paused.
 //   --updated   Started by the installer of an update this copy's
-//               predecessor started: as --restart, and say in a notification
-//               whether it updated.
+//               predecessor started: as --restart. Whether it updated is
+//               said by whichever copy runs first after it.
 
 #include <windows.h>
 #include <objbase.h>
@@ -93,21 +96,33 @@ bool InstalledByInstaller(const std::filesystem::path& folder) {
 }
 
 // Starts an update's installer, with no window: it closes this copy, installs
-// over it, and starts the new copy with --updated, or this one again if it
-// fails (packaging/knobs.iss). Its log goes in knobs's log folder.
-Status StartInstaller(const std::filesystem::path& installer, const std::filesystem::path& logs) {
+// over it, and starts the new copy with --updated, and --paused if `paused`,
+// or this one again if it fails (packaging/knobs.iss). Its log goes in knobs's
+// log folder. Returns its process, to wait on.
+Result<HANDLE> StartInstaller(const std::filesystem::path& installer, const std::filesystem::path& logs, bool paused) {
   std::error_code ec;
   std::filesystem::create_directories(logs, ec);
   const std::wstring arguments =
-      std::format(L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /update=1 /LOG=\"{}\"", (logs / L"update.txt").native());
-  if (const Status started = StartProcess(installer, arguments, installer.parent_path()); !started) {
-    return Error{std::format("Couldn't start {}: {}", ToUtf8(installer.filename()), started.error())};
-  }
-  return Ok{};
+      std::format(L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /update=1{} /LOG=\"{}\"", paused ? L" /paused=1" : L"",
+                  (logs / L"update.txt").native());
+  auto started = StartProcessToWait(installer, arguments, installer.parent_path());
+  if (!started) return Error{std::format("Couldn't start {}: {}", ToUtf8(installer.filename()), started.error())};
+  return *started;
+}
+
+// Windows 11, whose Sound settings word things otherwise than Windows 10's:
+// build 22000 or later, as RtlGetVersion says, which compatibility settings
+// don't change.
+bool IsWindows11() {
+  using RtlGetVersion = LONG(WINAPI*)(OSVERSIONINFOW*);
+  const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  const auto get = ntdll ? reinterpret_cast<RtlGetVersion>(GetProcAddress(ntdll, "RtlGetVersion")) : nullptr;
+  OSVERSIONINFOW version = {sizeof(version)};
+  return !get || get(&version) != 0 || version.dwBuildNumber >= 22000;
 }
 
 int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core::RestartNeed restarted_for,
-        bool updated) {
+        bool paused, bool updated) {
   const std::wstring window_class = std::format(L"{}.tray", kDisplayNameW);
   auto lock = tray::SingleInstance::Acquire(window_class, restart ? kRestartWait : 0ms);
   if (!lock) {
@@ -138,9 +153,10 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   std::shared_ptr<runtime::ObsLog> log;
   if (auto opened = runtime::OpenNewLog(dirs->Logs(), std::format(L"{} ", kDisplayNameW), 20)) {
     log = std::move(*opened);
-    log->Write(LOG_INFO, std::format("{} {} started{}{}{}{}", kDisplayName, KNOBS_VERSION, startup ? ", at sign-in" : "",
-                                     resume_setup ? ", after a restart setup asked for" : "",
-                                     restart ? ", to restart" : "", updated ? ", after an update" : ""));
+    log->Write(LOG_INFO, std::format("{} {} started{}{}{}{}{}", kDisplayName, KNOBS_VERSION,
+                                     startup ? ", at sign-in" : "", resume_setup ? ", to carry on with setup" : "",
+                                     restart ? ", to restart" : "", updated ? ", after an update" : "",
+                                     paused ? ", paused" : ""));
   }
   const tray::RunEntry run{std::wstring(kDisplayNameW), std::format(L"\"{}\" --startup", exe.native())};
 
@@ -152,13 +168,19 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   // it asked for, it comes back even if it was finished since.
   options.open_first_run = !startup;
   options.resume_first_run = resume_setup;
+  options.start_paused = paused;
+  options.windows11 = IsWindows11();
   options.log_folder = dirs->Logs();
   if (log) options.log = [log](std::string_view line) { log->Write(LOG_INFO, line); };
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };
-  options.restart = [exe](core::RestartNeed why) {
-    if (why == core::RestartNeed::kNone) return StartCopy(exe, L"--restart");
-    return StartCopy(exe, std::format(L"--restart --restarted-for {}", FromUtf8(tray::RestartNeedName(why))));
+  options.restart = [exe](core::RestartNeed why, bool paused) {
+    std::wstring arguments = L"--restart";
+    if (why != core::RestartNeed::kNone) {
+      arguments += std::format(L" --restarted-for {}", FromUtf8(tray::RestartNeedName(why)));
+    }
+    if (paused) arguments += L" --paused";
+    return StartCopy(exe, arguments);
   };
   options.restarted_for = restarted_for;
   options.resume_after_restart = [exe](bool on) {
@@ -176,20 +198,20 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     return update::Download(update::InstallerUrl(version), file, update::kMaxInstallerBytes, cancel);
   };
   options.updates.verify = [](const std::filesystem::path& file) { return update::CheckReleaseSignature(file); };
-  options.updates.install = [logs = dirs->Logs()](const std::filesystem::path& file) {
-    return StartInstaller(file, logs);
+  options.updates.install = [logs = dirs->Logs()](const std::filesystem::path& file, bool paused) {
+    return StartInstaller(file, logs, paused);
   };
   options.updates.folder = dirs->local / L"updates";
   options.updates.current = {KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
   options.updates.can_install = !dirs->portable && InstalledByInstaller(exe.parent_path());
-  options.updated = updated;
-  options.start_core = [log](core::Observer& observer, const core::Settings& settings) {
+  options.start_core = [log](core::Observer& observer, const core::Settings& settings, bool paused) {
     core::ObsBackendOptions backend;
     backend.log = log;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
     backend.prune_runtime = true;
     core::CoreOptions core_options;
     core_options.settings = settings;
+    core_options.paused = paused;
     return core::Core::Start(std::make_unique<core::ObsBackend>(std::move(backend)), observer,
                              std::move(core_options));
   };
@@ -214,6 +236,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   bool startup = false;
   bool resume_setup = false;
   bool restart = false;
+  bool paused = false;
   bool updated = false;
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
   int argc = 0;
@@ -223,6 +246,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       startup |= arg == L"--startup";
       resume_setup |= arg == L"--resume-setup";
       restart |= arg == L"--restart";
+      paused |= arg == L"--paused";
       updated |= arg == L"--updated";
       if (arg == L"--restarted-for" && i + 1 < argc) {
         restarted_for = tray::RestartNeedNamed(ToUtf8(argv[++i])).value_or(core::RestartNeed::kNone);
@@ -238,7 +262,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     return 1;
   }
   // An update's new copy waits for the old one, as a restart's does.
-  const int code = Run(instance, startup, resume_setup, restart || updated, restarted_for, updated);
+  const int code = Run(instance, startup, resume_setup, restart || updated, restarted_for, paused, updated);
   CoUninitialize();
   return code;
 }

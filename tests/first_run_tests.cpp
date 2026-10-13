@@ -17,6 +17,7 @@
 #include "test_harness.h"
 #include "tray/first_run.h"
 #include "tray/rich_text.h"
+#include "tray/setup_scene.h"
 
 namespace {
 
@@ -149,9 +150,23 @@ TEST(WelcomeSaysWhatWasFound) {
 // --- The first door -----------------------------------------------------------------
 
 TEST(FirstDoorShowsOnlyWhatsNeeded) {
-  // Everything's in place: straight to the last page.
+  // Everything's in place: the cable, then the last page. The cable is asked
+  // even though OBS monitors to one, and the answer is the user's own pick,
+  // even of OBS's device.
   FirstRun first_run = ObsUser(Running());
-  CHECK(first_run.progress().door == Door::kObsUser && first_run.Page(Running()) == Page::kDone);
+  CHECK(first_run.progress().door == Door::kObsUser && first_run.Page(Running()) == Page::kCable);
+  const PageView cable = first_run.View(Running());
+  CHECK(cable.instruction == std::format("Where should {} send your mic?", kDisplayName));
+  CHECK(cable.content == std::format("Choose the virtual cable {} sends your mic to. Your other apps then use it as "
+                                     "their mic.",
+                                     kDisplayName));
+  CHECK(Texts(cable.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch\nOBS's monitoring device"}));
+  CHECK(Texts(cable.more_choices) == (std::vector<std::string>{"Speakers"}));
+  CHECK(cable.more_label == "Other playback devices" && cable.footer.empty());
+  CHECK(cable.default_choice == kChoiceFirst + 1 && cable.default_button == kButtonNext);
+  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, Running());
+  CHECK(picked.kind == Kind::kApply && picked.settings.cable == kCable16Id && picked.settings.cable_name == kCable16);
+  CHECK(first_run.Page(Running()) == Page::kDone);
   const PageView done = first_run.View(Running());
   CHECK(done.instruction == "Your mic is set up");
   CHECK((done.chain == core::ChainSummary{"Mic/Aux", kFourFilters, "CABLE In 16ch"}));
@@ -226,13 +241,13 @@ TEST(SeveralMicsAskWhichOne) {
   // Until the core has it, the state still asks for a mic.
   CHECK(first_run.Page(snapshot) == Page::kMic);
 
-  // Picked, the page is a question answered.
+  // Picked, the page is a question answered: on to the cable.
   snapshot = Running();
   snapshot.mics = PickMic().mics;
   snapshot.picked_mic = 2;
   snapshot.chain = core::ChainSummary{"Podcast Mic", {"Gain"}, kCable16};
   snapshot.settings.mic = "Podcast Mic";
-  CHECK(first_run.Page(snapshot) == Page::kDone);
+  CHECK(first_run.Page(snapshot) == Page::kCable);
   CHECK(ObsUser(snapshot).Page(snapshot) == Page::kMic);
   CHECK(ObsUser(snapshot).View(snapshot).default_choice == kChoiceFirst + 2);
   FirstRun again = ObsUser(snapshot);
@@ -263,6 +278,8 @@ TEST(NoFiltersOffersTheSteps) {
   first_run.Click(kButtonBack, 0, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kFilters);
   first_run.Click(kButtonSkipFilters, 0, {}, snapshot);
+  CHECK(first_run.Page(snapshot) == Page::kCable);
+  first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
   CHECK(first_run.Page(snapshot) == Page::kDone);
   CHECK((first_run.View(snapshot).chain == core::ChainSummary{"Mic/Aux", {}, "CABLE In 16ch"}));
 
@@ -306,7 +323,7 @@ TEST(CableWhenOBSMonitorsToTheDefaultDevice) {
   CHECK(first_run.Page(running) == Page::kDone);
 }
 
-TEST(CableAppearsAndTheFirstRunMovesOn) {
+TEST(CableAppearsAndTheUserChoosesIt) {
   core::Snapshot none = Running();
   none.state = State::kNeedsSetup;
   none.setup = SetupNeed::kCable;
@@ -314,26 +331,40 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   none.obs_cable = {"", "default"};
   none.outputs = {{kSpeakers, kSpeakersId}};
   FirstRun first_run = ObsUser(none);
-  const PageView view = first_run.View(none);
+  PageView view = first_run.View(none);
   CHECK(view.page == Page::kCable && view.waiting && view.instruction == "Install a virtual cable");
-  // The guide to installing VB-Cable, with a walkthrough of it.
+  // The guide to installing VB-Cable, with a walkthrough of it. Its devices
+  // don't wait for a restart: when they do, the page says so.
   CHECK(view.content == "There's no virtual cable on this PC yet. To install VB-Cable:");
-  CHECK(view.steps.size() == 6);
+  CHECK(view.steps.size() == 4);
   CHECK(view.steps[0] == "Download its driver pack from <a href=\"https://vb-audio.com/Cable/\"><code>vb-audio.com/"
                          "Cable</code></a>.");
   CHECK(Contains(view.steps[2], "right-click <code>VBCABLE_Setup_x64.exe</code>, choose <b>Run as administrator</b>, "
                                 "then <b>Yes</b>"));
   CHECK(view.steps[3] == "Click <b>Install Driver</b>.");
-  CHECK(Contains(view.steps[5], "not CABLE Input."));
   CHECK(view.walkthrough && view.walkthrough->name == "vb-cable-setup");
-  CHECK(view.status == std::format("Waiting for a virtual cable. {} moves on as soon as one appears.", kDisplayName));
+  CHECK(view.status ==
+        std::format("Waiting for a virtual cable. {} shows it here as soon as one appears.", kDisplayName));
   CHECK(view.stage == Stage::kCable);
-  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back"}));
+  // Or another playback device, from a dropdown, such as a cable knobs
+  // doesn't know by name: Next goes on with the one chosen.
+  CHECK(view.choices.empty() && Texts(view.more_choices) == (std::vector<std::string>{"Speakers"}));
+  CHECK(view.more_label == "Use another playback device" && view.default_choice == 0);
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Next"}) && !FindButton(view, kButtonNext)->enabled);
+  CHECK(FindButton(first_run.View(none, kChoiceFirst), kButtonNext)->enabled);
 
-  // VB-Cable installs: its one input appears, and that's the cable.
+  // VB-Cable installs: its one input appears, and the page turns into the
+  // choice, with it chosen, for the user to go on with. Speakers keeps its
+  // choice: one stays with its device as devices come and go.
   core::Snapshot installed = none;
   installed.outputs.push_back({kCableInput, kCableInputId});
-  const FirstRunAction picked = first_run.Changed(none, installed);
+  CHECK(first_run.Changed(none, installed).kind == Kind::kNone);
+  view = first_run.View(installed, kChoiceFirst);
+  CHECK(view.page == Page::kCable && !view.waiting && Texts(view.choices) == (std::vector<std::string>{"CABLE Input"}));
+  CHECK(Texts(view.more_choices) == (std::vector<std::string>{"Speakers"}) && view.more_choices[0].id == kChoiceFirst);
+  CHECK(view.default_choice == kChoiceFirst && view.choices[0].id == kChoiceFirst + 1);
+  CHECK(first_run.View(installed).default_choice == kChoiceFirst + 1);
+  const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, installed);
   CHECK(picked.kind == Kind::kApply && picked.settings.cable == kCableInputId);
   installed.settings = picked.settings;
   installed.state = State::kRunning;
@@ -342,13 +373,21 @@ TEST(CableAppearsAndTheFirstRunMovesOn) {
   first_run.Click(kButtonBack, 0, {}, installed);
   CHECK(first_run.Page(installed) == Page::kCable);
 
-  // Two at once: the choice is the user's.
+  // Another playback device, from the dropdown.
   first_run = ObsUser(none);
-  core::Snapshot two = none;
-  two.outputs.push_back({kCableInput, kCableInputId});
-  two.outputs.push_back({kCable16, kCable16Id});
-  CHECK(first_run.Changed(none, two).kind == Kind::kNone);
-  CHECK(first_run.Page(two) == Page::kCable && !first_run.View(two).waiting);
+  const FirstRunAction speakers = first_run.Click(kButtonNext, kChoiceFirst, {}, none);
+  CHECK(speakers.kind == Kind::kApply && speakers.settings.cable == kSpeakersId);
+
+  // A choice of a device that's gone is as none: the page's own choice, and
+  // Next goes on with that, not with nothing.
+  first_run = ObsUser(installed);
+  CHECK(first_run.View(installed, kChoiceFirst + 1).default_choice == kChoiceFirst + 1);
+  // CABLE Input, gone again.
+  view = first_run.View(none, kChoiceFirst);
+  CHECK(view.default_choice == 0 && !FindButton(view, kButtonNext)->enabled);
+  CHECK(first_run.Click(kButtonNext, kChoiceFirst, {}, none).kind == Kind::kNone);
+  view = first_run.View(installed, kChoiceFirst + 7);
+  CHECK(view.default_choice == kChoiceFirst && FindButton(view, kButtonNext)->enabled);
 }
 
 TEST(CableThatsOffOrWaitsForARestart) {
@@ -359,24 +398,33 @@ TEST(CableThatsOffOrWaitsForARestart) {
   none.obs_cable = {"", "default"};
   none.outputs = {{kSpeakers, kSpeakersId}};
 
-  // Installed, but turned off in Windows' Sound settings: how to turn it on.
+  // Installed, but turned off in Windows' Sound settings: how to turn it on,
+  // in Windows 11's words or Windows 10's.
   core::Snapshot off = none;
   off.disabled_outputs = {{kSpeakers, kSpeakersId}, {kCableInput, kCableInputId}};
   FirstRun first_run = ObsUser(off);
   PageView view = first_run.View(off);
   CHECK(view.page == Page::kCable && view.waiting && view.instruction == "Turn on your virtual cable");
   CHECK(view.content == "CABLE Input is installed, but it's turned off in Windows' Sound settings.");
-  CHECK(view.steps.size() == 3 && Contains(view.steps[1], "<b>CABLE Input</b>"));
+  CHECK((view.steps == std::vector<std::string>{"Click <b>Open Sound settings</b>, below.",
+                                                 "Under Output devices, choose <b>CABLE Input</b>.",
+                                                 "Next to Audio, click <b>Allow</b>."}));
+  const PageView windows10 = FirstRun({.door = Door::kObsUser}, std::nullopt, {}, false, false).View(off);
+  CHECK((windows10.steps == std::vector<std::string>{"Click <b>Open Sound settings</b>, below.",
+                                                      "Under Output devices, click <b>CABLE Input</b>.",
+                                                      "Click <b>Enable</b>."}));
   CHECK(!view.walkthrough && !view.resume_after_restart);
   CHECK(view.default_button == kButtonOpenSoundSettings);
-  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open Sound settings"}));
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open Sound settings", "Next"}));
   CHECK(first_run.Click(kButtonOpenSoundSettings, 0, {}, off).kind == Kind::kOpenSoundSettings);
   CHECK(view.stages[static_cast<size_t>(Stage::kCable)].value == "CABLE Input\nTurned off");
-  // Turned on, it's the cable.
+  // Turned on, it's the choice, and it stays the user's to make: a pick
+  // that's missing isn't replaced by itself.
   core::Snapshot on = off;
   on.disabled_outputs = {{kSpeakers, kSpeakersId}};
   on.outputs.push_back({kCableInput, kCableInputId});
-  CHECK(first_run.Changed(off, on).settings.cable == kCableInputId);
+  CHECK(first_run.Changed(off, on).kind == Kind::kNone);
+  CHECK(first_run.View(on).default_choice == kChoiceFirst + 1 && !first_run.View(on).waiting);
 
   // VB-Cable is installed, but its devices wait for Windows to restart, as
   // they may after its setup or the installer's: knobs opens again after it.
@@ -388,18 +436,20 @@ TEST(CableThatsOffOrWaitsForARestart) {
   CHECK(view.instruction == "Restart Windows to finish installing VB-Cable");
   CHECK(Contains(view.content, std::format("{} opens again after the restart", kDisplayName)));
   CHECK(view.resume_after_restart && view.steps.empty());
-  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back"}));
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Next"}));
   CHECK(view.stages[static_cast<size_t>(Stage::kCable)].value == "VB-Cable\nWaits for a restart");
   core::Snapshot started = restart;
   started.outputs.push_back({kCableInput, kCableInputId});
-  CHECK(first_run.Changed(restart, started).settings.cable == kCableInputId);
+  CHECK(first_run.Changed(restart, started).kind == Kind::kNone && first_run.Page(started) == Page::kCable);
 
-  // A device to keep is still offered.
+  // The device knobs sends to is chosen in the dropdown, to go on with.
   core::Snapshot keep = restart;
   keep.obs_cable = {kHeadphones, kHeadphonesId};
   keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
   keep.state = State::kRunning;
-  CHECK(Texts(ObsUser(keep).View(keep).buttons) == (std::vector<std::string>{"Back", "Keep Headphones"}));
+  view = ObsUser(keep).View(keep);
+  CHECK(Texts(view.more_choices) == (std::vector<std::string>{"Speakers", "Headphones\nOBS's monitoring device"}));
+  CHECK(view.default_choice == kChoiceFirst + 1 && FindButton(view, kButtonNext)->enabled);
 }
 
 TEST(LastPageAsksAboutUpdates) {
@@ -452,27 +502,22 @@ TEST(CableThatIsntACable) {
   const PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kCable);
   CHECK(Contains(view.content, "OBS monitors your mic to Headphones, which isn't a virtual cable."));
-  CHECK(Texts(view.choices) ==
-        (std::vector<std::string>{"CABLE Input", "CABLE In 16ch", "Headphones\nOBS's monitoring device"}));
-  CHECK(view.default_choice == kChoiceFirst + 2);
-  // Keeping it is an answer, and no change.
-  CHECK(first_run.Click(kButtonNext, kChoiceFirst + 2, {}, snapshot).kind == Kind::kNone);
+  CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch"}));
+  CHECK(Texts(view.more_choices) == (std::vector<std::string>{"Speakers", "Headphones\nOBS's monitoring device"}));
+  CHECK(view.default_choice == kChoiceFirst + 3);
+  // Keeping it is the user's pick too: OBS monitoring elsewhere later
+  // doesn't move it.
+  const FirstRunAction kept = first_run.Click(kButtonNext, kChoiceFirst + 3, {}, snapshot);
+  CHECK(kept.kind == Kind::kApply && kept.settings.cable == kHeadphonesId);
+  snapshot.settings = kept.settings;
   CHECK(first_run.Page(snapshot) == Page::kDone);
   CHECK(first_run.View(snapshot).content.starts_with(
       "In your other apps, choose the recording side of Headphones as your mic."));
 
-  // A cable of knobs's own is no question.
-  snapshot.settings.cable = kCable16Id;
-  CHECK(ObsUser(snapshot).Page(snapshot) == Page::kDone);
-
-  // No cable installed, but a device to keep.
-  snapshot = Running();
-  snapshot.obs_cable = {kHeadphones, kHeadphonesId};
-  snapshot.outputs = {{kSpeakers, kSpeakersId}, snapshot.obs_cable};
-  first_run = ObsUser(snapshot);
-  CHECK(Texts(first_run.View(snapshot).buttons) == (std::vector<std::string>{"Back", "Keep Headphones"}));
-  CHECK(first_run.Click(kButtonKeepDevice, 0, {}, snapshot).kind == Kind::kNone);
-  CHECK(first_run.Page(snapshot) == Page::kDone);
+  // A cable picked before is asked about as any other, chosen.
+  snapshot.settings = {.cable = kCable16Id, .cable_name = kCable16};
+  CHECK(ObsUser(snapshot).Page(snapshot) == Page::kCable);
+  CHECK(ObsUser(snapshot).View(snapshot).default_choice == kChoiceFirst + 1);
 }
 
 TEST(CableMissingAlwaysAsks) {
@@ -485,14 +530,64 @@ TEST(CableMissingAlwaysAsks) {
   CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input"}));
   const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst, {}, snapshot);
   CHECK(picked.kind == Kind::kApply && picked.settings.cable == kCableInputId);
-  // Back to OBS's own: no pick of knobs's.
+  // OBS's own device is a pick of the user's too.
   snapshot.settings = picked.settings;
   snapshot.outputs.push_back({kCable16, kCable16Id});
   first_run = FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, Page::kCable);
   const PageView again = first_run.View(snapshot);
   CHECK(again.choices.back().text == "CABLE In 16ch\nOBS's monitoring device");
   const FirstRunAction obs = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
-  CHECK(obs.kind == Kind::kApply && obs.settings.cable.empty() && obs.settings.cable_name.empty());
+  CHECK(obs.kind == Kind::kApply && obs.settings.cable == kCable16Id && obs.settings.cable_name == kCable16);
+}
+
+TEST(TheDropdownShowsTheOtherDevices) {
+  // Laid out closed, it's one row after the cables, saying which of its
+  // devices is chosen, if one is; open, its devices follow it as radios.
+  core::Snapshot snapshot = Running();
+  snapshot.obs_cable = {kHeadphones, kHeadphonesId};
+  snapshot.outputs.push_back(snapshot.obs_cable);
+  const PageView view = ObsUser(snapshot).View(snapshot);
+  const auto roles = [](const Scene& scene, Role role) {
+    std::vector<std::wstring> names;
+    for (const Element& element : scene.elements) {
+      if (element.role == role) names.push_back(element.name);
+    }
+    return names;
+  };
+  Scene closed = LayoutScene(view, kChoiceFirst, false);
+  CHECK((roles(closed, Role::kRadio) == std::vector<std::wstring>{L"CABLE Input", L"CABLE In 16ch"}));
+  CHECK((roles(closed, Role::kDropdown) == std::vector<std::wstring>{L"Other playback devices"}));
+  const auto dropdown = [](const Scene& scene) {
+    return *std::find_if(scene.elements.begin(), scene.elements.end(),
+                         [](const Element& element) { return element.role == Role::kDropdown; });
+  };
+  CHECK(dropdown(closed).id == kMoreChoicesId && !dropdown(closed).selected && dropdown(closed).help.empty());
+  closed = LayoutScene(view, view.default_choice, false);
+  CHECK(dropdown(closed).help == L"Headphones");
+  const Scene open = LayoutScene(view, view.default_choice, true);
+  CHECK((roles(open, Role::kRadio) ==
+         std::vector<std::wstring>{L"CABLE Input", L"CABLE In 16ch", L"Speakers", L"Headphones"}));
+  CHECK(dropdown(open).selected && dropdown(open).help.empty());
+  // Its radios are in the same group, and the one chosen is selected.
+  const auto headphones = std::find_if(open.elements.begin(), open.elements.end(),
+                                       [](const Element& element) { return element.name == L"Headphones"; });
+  CHECK(headphones->selected && headphones->parent == dropdown(open).parent);
+}
+
+TEST(SoundIntoACableIsNoted) {
+  // Installing a cable can make it Windows' Output: the user hears nothing,
+  // and the cable's apps hear the PC with the mic.
+  core::Snapshot snapshot = Running();
+  snapshot.default_output = kCableInputId;
+  const std::string note = "Windows plays your PC's sound into CABLE Input, so you can't hear it, and your other apps "
+                           "hear it with your mic. In Sound settings, set Output to your speakers or headphones.";
+  for (const Page page : {Page::kCable, Page::kDone}) {
+    const PageView view = FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, page).View(snapshot);
+    CHECK(view.page == page && view.notes.size() == 1 && view.notes[0].warning && view.notes[0].text == note);
+    CHECK(Texts(view.buttons)[1] == "Open Sound settings");
+  }
+  snapshot.default_output = kSpeakersId;
+  CHECK(FirstRun({.door = Door::kObsUser, .reached = Page::kDone}).View(snapshot).notes.empty());
 }
 
 TEST(WarningsShowWhatChangesExpectations) {
@@ -500,7 +595,9 @@ TEST(WarningsShowWhatChangesExpectations) {
   snapshot.notes = {{true, "Filter \"VST\" is a VST plugin."},
                     {false, "Filter \"Gate\" is off in OBS, and stays off."},
                     {false, "The mic is on push-to-talk in OBS.", true}};
+  // After the cable.
   FirstRun first_run = ObsUser(snapshot);
+  first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
   PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kWarnings && view.instruction == "Before you start");
   CHECK((view.notes == std::vector<PageNote>{{true, "Filter \"VST\" is a VST plugin."},
@@ -514,14 +611,14 @@ TEST(WarningsShowWhatChangesExpectations) {
   named.notes = {{.warning = true,
                   .text = "Filter \"VST <3\" is a VST plugin (Pro-Q 3.dll).",
                   .file = "Pro-Q 3.dll"}};
-  CHECK(ObsUser(named).View(named).notes[0].text ==
-        "Filter \"VST &lt;3\" is a VST plugin (<code>Pro-Q 3.dll</code>).");
+  const FirstRun past_cable({.door = Door::kObsUser, .reached = Page::kWarnings});
+  CHECK(past_cable.View(named).notes[0].text == "Filter \"VST &lt;3\" is a VST plugin (<code>Pro-Q 3.dll</code>).");
 
   snapshot.notes.erase(snapshot.notes.begin());
-  view = ObsUser(snapshot).View(snapshot);
+  view = past_cable.View(snapshot);
   CHECK(view.page == Page::kWarnings && view.notes.size() == 1 && !view.notes[0].warning);
   snapshot.notes.pop_back();
-  CHECK(ObsUser(snapshot).Page(snapshot) == Page::kDone);
+  CHECK(past_cable.Page(snapshot) == Page::kDone);
 }
 
 TEST(ProblemsWithObsComeFirst) {
@@ -690,14 +787,14 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   // Closed with filters: on to the first door's pages.
   core::Snapshot tuned = Running();
   first_run.Changed(open, tuned);
-  CHECK(first_run.progress().door == Door::kObsUser && first_run.Page(tuned) == Page::kDone);
+  CHECK(first_run.progress().door == Door::kObsUser && first_run.Page(tuned) == Page::kCable);
   first_run.Click(kButtonBack, 0, {}, tuned);
   CHECK(first_run.Page(tuned) == Page::kSteps);
   // Filters there already, and OBS closed: Next goes on.
   view = first_run.View(tuned);
   CHECK(FindButton(view, kButtonNext)->enabled);
   first_run.Click(kButtonNext, 0, {}, tuned);
-  CHECK(first_run.Page(tuned) == Page::kDone);
+  CHECK(first_run.Page(tuned) == Page::kCable);
   first_run.Click(kButtonBack, 0, {}, tuned);
   first_run.Click(kButtonBack, 0, {}, tuned);
   CHECK(first_run.Page(tuned) == Page::kWelcome);
@@ -829,10 +926,14 @@ TEST(EveryButtonHasItsOwnAccessKey) {
   for (const core::Snapshot& snapshot : {missing, settings, no_filters, keep, restart}) {
     CHECK(keys_ok(ObsUser(snapshot).View(snapshot)));
   }
-  // A name keeps its "&"s.
+  // The page that notes the PC's sound going into the cable.
+  core::Snapshot sound = Running();
+  sound.default_output = kCableInputId;
+  for (const Page page : {Page::kCable, Page::kDone}) CHECK(keys_ok(FirstRun({}, page, {}, true).View(sound)));
+  // A choice's name keeps its "&"s: a choice has no access key.
   keep.obs_cable = {"Speakers & Headphones", kHeadphonesId};
   keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
-  CHECK(Texts(ObsUser(keep).View(keep).buttons).back() == "Keep Speakers & Headphones");
+  CHECK(ObsUser(keep).View(keep).more_choices.back().text == "Speakers & Headphones\nOBS's monitoring device");
 }
 
 TEST(RichTextReadsThePagesMarkup) {
@@ -907,15 +1008,26 @@ TEST(AnyPageCanBeAskedFor) {
   }
   CHECK(!PageNamed("elsewhere"));
   // A page the state doesn't call for is still shown when asked for.
-  FirstRun first_run({}, Page::kCable);
+  FirstRun first_run({.done = true, .door = Door::kObsUser, .reached = Page::kDone}, Page::kCable);
   CHECK(first_run.Page(Running()) == Page::kCable);
-  CHECK(Contains(first_run.View(Running()).content, " sends your mic to CABLE In 16ch."));
+  CHECK(first_run.View(Running()).default_choice == kChoiceFirst + 1);
   first_run.Click(kButtonNext, kChoiceFirst + 1, {}, Running());
   CHECK(first_run.Page(Running()) == Page::kDone);
+  // A menu's fix opens the page for what's needed, even before the doors.
+  core::Snapshot needs = Running();
+  needs.state = State::kCableMissing;
+  CHECK(PageFor(needs) == Page::kCable && FirstRun({}, PageFor(needs)).Page(needs) == Page::kCable);
+  needs = PickMic();
+  CHECK(PageFor(needs) == Page::kMic && FirstRun({.door = Door::kNewToObs}, PageFor(needs)).Page(needs) == Page::kMic);
+  needs.state = State::kObsUnsupported;
+  CHECK(PageFor(needs) == Page::kObsUnsupported);
+  CHECK(!PageFor(Running()));
   CHECK(FirstRun({}, Page::kMic).Page(Running()) == Page::kMic);
-  // One that doesn't apply gives way.
-  CHECK(FirstRun({}, Page::kWarnings).Page(Running()) == Page::kDone);
-  CHECK(FirstRun({}, Page::kFindObs).Page(Running()) == Page::kDone);
+  // One that doesn't apply gives way, to the cable until it's answered.
+  CHECK(FirstRun({}, Page::kWarnings).Page(Running()) == Page::kCable);
+  const FirstRunProgress answered{.door = Door::kObsUser, .reached = Page::kDone};
+  CHECK(FirstRun(answered, Page::kWarnings).Page(Running()) == Page::kDone);
+  CHECK(FirstRun(answered, Page::kFindObs).Page(Running()) == Page::kDone);
 }
 
 }  // namespace

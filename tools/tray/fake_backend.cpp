@@ -167,6 +167,8 @@ const std::vector<FakeScenario>& FakeScenarios() {
          world.config.audio.monitoring_device_id = kHeadphonesId;
          world.config.audio.monitoring_device_name = kHeadphonesName;
        }},
+      {"sound-into-cable", "Windows plays the PC's sound into CABLE Input, as installing VB-Cable can make it",
+       [](FakeWorld& world, FakeScript&) { world.devices.default_output = kCableInputId; }},
       {"warnings", "Mic/Aux has a VST filter and push-to-talk",
        [](FakeWorld& world, FakeScript&) {
          world.collection.front().notes = {

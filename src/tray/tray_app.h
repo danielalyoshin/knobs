@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "core/core.h"
 #include "core/state.h"
@@ -50,8 +51,11 @@ struct UpdateHooks {
   // it's downloaded, and again before it runs. On the same thread.
   std::function<update::SignatureCheck(const std::filesystem::path& file)> verify;
   // Starts an installer that updates this copy: it closes this copy and
-  // starts the new one with --updated.
-  std::function<Status(const std::filesystem::path& file)> install;
+  // starts the new one with --updated, and --paused if `paused`. Returns the
+  // installer's process, which the tray waits on and closes: one that ends
+  // before it has closed this copy didn't update it. Null: there's none to
+  // wait on, and the tray quits.
+  std::function<Result<HANDLE>(const std::filesystem::path& file, bool paused)> install;
   // Where installers are downloaded to.
   std::filesystem::path folder;
   update::Version current;  // This copy's version.
@@ -69,10 +73,15 @@ struct TrayOptions {
   // Names the hidden window's class, so another copy can find it
   // (ActivateTray).
   std::wstring window_class;
-  // Starts the core, which reports to `observer`. A null core leaves the
-  // tray starting for good (knobs-tray does that to show the state).
-  std::function<Result<std::unique_ptr<core::Core>>(core::Observer& observer, const core::Settings& settings)>
+  // Starts the core, which reports to `observer`, paused if `paused`. A null
+  // core leaves the tray starting for good (knobs-tray does that to show the
+  // state).
+  std::function<Result<std::unique_ptr<core::Core>>(core::Observer& observer, const core::Settings& settings,
+                                                    bool paused)>
       start_core;
+  // The copy before this one was paused, and restarted: the core starts
+  // paused.
+  bool start_paused = false;
   // Where the settings are kept. Empty: `settings` and `first_run` are used
   // and nothing is saved.
   std::filesystem::path settings_file;
@@ -81,23 +90,25 @@ struct TrayOptions {
   UpdateSettings update_settings;
   // Opens the first run once the tray runs, unless it was finished before.
   bool open_first_run = false;
-  // Opens it even if it was: Windows started this copy after a restart the
-  // first run asked for (resume_after_restart).
+  // Opens it even if it was, at the cable page then: Windows started this
+  // copy after a restart the first run or the installer asked for
+  // (resume_after_restart), or the installer did, having installed VB-Cable.
   bool resume_first_run = false;
+  // Windows 11, whose Sound settings use other words than Windows 10's.
+  bool windows11 = true;
   // Start with Windows.
   std::function<bool()> starts_with_windows;
   std::function<Status(bool on)> set_start_with_windows;
   // Has Windows open knobs at the next sign-in, to carry on with the first
   // run after a restart it asked for, or not.
   std::function<Status(bool on)> resume_after_restart;
-  // Starts a new copy, which waits for this one to quit, and says why. The
-  // tray restarts by itself when the core needs it to follow OBS.
-  std::function<Status(core::RestartNeed why)> restart;
+  // Starts a new copy, which waits for this one to quit, says why, and starts
+  // paused if `paused`. The tray restarts by itself when the core needs it
+  // to follow OBS.
+  std::function<Status(core::RestartNeed why, bool paused)> restart;
   // Why the copy before this one restarted it, if it did.
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
   UpdateHooks updates;
-  // An update's installer started this copy: say whether it updated.
-  bool updated = false;
   // Starts OBS from its install, for the first run. Default: OpenObs.
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
   std::filesystem::path log_folder;
@@ -174,11 +185,18 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void Notify(const Notifier::Update& update);
   void ShowBalloon(const Notice& notice);
   void HideBalloon();
-  // The first run shows the state while it's unfinished or open.
+  // The setup window shows the state while it's open, or about to open.
   bool Quiet() const;
   // Restarts to follow OBS, when the core needs it and nothing's open, or
-  // once what's open closes. Returns whether this copy is quitting.
+  // once what's open closes, paused if the user paused this copy. Returns
+  // whether this copy is quitting.
   bool RestartByItself();
+  // A finished first run with no cable picked, as one from before knobs
+  // asked for it: what OBS monitors to becomes the pick, so OBS monitoring
+  // elsewhere later doesn't move it.
+  void KeepCable();
+  // Saves the warnings the notifications have said, if they changed.
+  void SaveWarned();
   POINT IconPoint() const;
   void Execute(unsigned id, const Menu& menu);
   void Save();
@@ -188,9 +206,11 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void OpenUrl(const std::string& url);
   // A line for knobs's log.
   void Log(std::string line);
-  // An update restarts knobs, so it waits until knobs isn't sending the mic
-  // to the cable and the user hasn't paused it, which a new copy wouldn't
-  // be, and nothing of knobs's is open.
+  // The user paused knobs, or the copy before this one, if this one restarted.
+  bool Paused() const;
+  // An update by itself restarts knobs, so it waits until knobs isn't
+  // sending the mic to the cable, the user hasn't paused it, and nothing of
+  // knobs's is open.
   bool CanRestart() const;
   // Starts the core, which sends the mic.
   Status StartCore();
@@ -220,7 +240,15 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void NotOffered(const update::Version& asked);
   // Stops the job running, and waits a moment for it.
   void StopUpdates();
+  // The installer started for `version`: knobs runs on until it closes this
+  // copy. One that ends first didn't update it, which InstallerEnded says.
+  void WaitForInstaller(HANDLE process, const update::Version& version);
+  void InstallerEnded(DWORD exit_code);
+  void StopWaitingForInstaller();
   std::filesystem::path InstallerFile(const update::Version& version) const;
+  // Where a download is kept whose signature Windows couldn't finish
+  // checking, to check again without downloading it again.
+  std::filesystem::path UnverifiedFile(const update::Version& version) const;
   UpdateMenu MenuUpdates() const;
   void ShowAbout();
   void ShowError(std::string_view text);
@@ -256,7 +284,10 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   core::Snapshot snapshot_;
   std::unique_ptr<core::Core> core_;
   SetupWindow* setup_window_ = nullptr;  // While it's open.
+  bool setup_due_ = false;               // Asked to open, by kFirstRunMessage.
   Notifier notifier_;
+  // The warnings the notifications have said, as last saved.
+  std::optional<std::vector<std::string>> warned_;
   bool restart_tried_ = false;  // Since the core said it needs a restart.
   // The update check's plan, and its settings, which are kept even without
   // the check (HasUpdateCheck).
@@ -270,6 +301,12 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   std::string later_error_;
   // The core waits for an update downloaded before to install, or not.
   bool holding_core_ = false;
+  // An installer that's running, for the version, until it closes this copy
+  // or ends: a thread waits on it, and on the event that stops the wait.
+  update::Version installer_version_;
+  HANDLE installer_ = nullptr;
+  HANDLE installer_stop_ = nullptr;
+  std::thread installer_thread_;
 
   std::mutex pending_mutex_;  // Guards pending_.
   std::optional<core::Snapshot> pending_;

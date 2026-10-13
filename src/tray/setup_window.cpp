@@ -92,7 +92,7 @@ bool IsWebLink(std::string_view url) { return url.starts_with("https://") || url
 
 bool IsControl(Role role) {
   return role == Role::kButton || role == Role::kDoor || role == Role::kRadio || role == Role::kCheckBox ||
-         role == Role::kToggle || role == Role::kLink;
+         role == Role::kToggle || role == Role::kLink || role == Role::kDropdown;
 }
 
 }  // namespace
@@ -446,9 +446,8 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (wparam == kWalkTimer) WalkStep();
       return 0;
     case WM_CLOSE:
-      // The close button, Esc and Alt+F4: knobs stays in the tray, and the
-      // first run resumes here next time.
-      if (!in_button_) Close();
+      // The close button and Alt+F4, as Esc.
+      if (!in_button_) CloseAsked();
       return 0;
     case WM_DESTROY:
       KillTimer(window_, kRenderTimer);
@@ -520,6 +519,7 @@ void SetupWindow::Render() {
     view = view_;
     for (PageButton& button : view.buttons) button.enabled = false;
     for (PageButton& choice : view.choices) choice.enabled = false;
+    for (PageButton& choice : view.more_choices) choice.enabled = false;
     for (PageCheck& check : view.checks) check.enabled = false;
     view.waiting = true;
     if (view.status.empty()) view.status = "Applying your choice…";
@@ -557,6 +557,11 @@ void SetupWindow::ShowView(PageView view) {
   choice_ = view_.default_choice;
   checks_.clear();
   for (const PageCheck& check : view_.checks) checks_[check.id] = check.checked;
+  // A page opens its dropdown if what's chosen is in it, and keeps it as the
+  // user leaves it.
+  const bool chosen_more = std::any_of(view_.more_choices.begin(), view_.more_choices.end(),
+                                       [this](const PageButton& choice) { return choice.id == choice_; });
+  if (new_page) more_open_ = chosen_more;
   Layout();
   const bool rebuilt = Parts(scene_) != parts_before;
   if (rebuilt) ++layout_generation_;
@@ -596,7 +601,7 @@ void SetupWindow::ShowView(PageView view) {
 }
 
 void SetupWindow::Layout() {
-  scene_ = LayoutScene(view_, choice_);
+  scene_ = LayoutScene(view_, choice_, more_open_);
   if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = walk_playing_;
 }
 
@@ -634,6 +639,23 @@ void SetupWindow::Activate(int index) {
     case Role::kToggle:
       SetWalkPlaying(!walk_playing_);
       break;
+    case Role::kDropdown: {
+      more_open_ = !more_open_;
+      // The same page, laid out again with it open or closed: the focus
+      // stays on it.
+      ShowView(view_);
+      int dropdown = -1, last = -1;
+      for (size_t i = 0; i < scene_.elements.size(); ++i) {
+        if (scene_.elements[i].role == Role::kDropdown) dropdown = static_cast<int>(i);
+        if (scene_.elements[i].role == Role::kRadio) last = static_cast<int>(i);
+      }
+      if (dropdown < 0) break;
+      uia_->Expanded(dropdown, more_open_);
+      // Opened, what it opened, as far as it fits below it.
+      if (more_open_ && last > dropdown) ScrollIntoView(last);
+      ScrollIntoView(dropdown);
+      break;
+    }
     case Role::kLink:
       if (IsWebLink(element.url)) {
         ShellExecuteW(window_, L"open", FromUtf8(element.url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -681,8 +703,13 @@ void SetupWindow::Click(int id) {
       }
       break;
     case FirstRunAction::Kind::kOpenSoundSettings:
-      if (reinterpret_cast<INT_PTR>(ShellExecuteW(window_, L"open", L"ms-settings:sound-devices", nullptr, nullptr,
-                                                  SW_SHOWNORMAL)) <= 32) {
+    case FirstRunAction::Kind::kOpenSoundOutput:
+      // The list of devices, to turn one on, or Sound settings' first page,
+      // where Output is.
+      if (reinterpret_cast<INT_PTR>(ShellExecuteW(
+              window_, L"open",
+              action.kind == FirstRunAction::Kind::kOpenSoundOutput ? L"ms-settings:sound" : L"ms-settings:sound-devices",
+              nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
         ShowError("Couldn't open Windows' Sound settings. Open Settings, then System, then Sound.");
       }
       break;
@@ -733,6 +760,19 @@ void SetupWindow::Close() {
   if (window_) DestroyWindow(window_);
 }
 
+void SetupWindow::CloseAsked() {
+  // The last page says the mic is set up, with its choices ticked as they'll
+  // be: closing it is Done. Elsewhere knobs stays in the tray, and the first
+  // run resumes there next time.
+  const auto done = std::find_if(view_.buttons.begin(), view_.buttons.end(),
+                                 [](const PageButton& button) { return button.id == kButtonDone; });
+  if (view_.page == FirstRunPage::kDone && done != view_.buttons.end() && done->enabled) {
+    Click(kButtonDone);
+    return;
+  }
+  Close();
+}
+
 // --- Keyboard and focus ------------------------------------------------------------------
 
 void SetupWindow::OnKey(WPARAM key, bool repeat) {
@@ -775,14 +815,14 @@ void SetupWindow::OnKey(WPARAM key, bool repeat) {
       show_focus_ = true;
       // The control with the focus, or else the page's default button.
       if (focused && (focused->role == Role::kButton || focused->role == Role::kDoor || focused->role == Role::kLink ||
-                      focused->role == Role::kToggle)) {
+                      focused->role == Role::kToggle || focused->role == Role::kDropdown)) {
         Activate(focus_);
       } else if (scene_.default_element >= 0) {
         Activate(scene_.default_element);
       }
       break;
     case VK_ESCAPE:
-      Close();
+      CloseAsked();
       return;
     default:
       return;

@@ -102,7 +102,11 @@ Options:
                          --first-run is given.
   --start-with-windows   Start with "Start with Windows" checked.
   --restarted-for <why>  Start as the copy {0} starts to follow OBS, which says
-                         why in a notification: obs-updated or audio-changed.
+                         why in a notification: obs-updated, obs-changed or
+                         audio-changed.
+  --paused               Start paused, as the copy does that a paused copy
+                         restarted or updated.
+  --windows10            Word Windows' Sound settings as Windows 10 does.
   --updates <how>        The update check: off, check (once a day, the first
                          right away) or install (and update by itself).
                          Default: off. A made-up GitHub answers it.
@@ -120,8 +124,9 @@ Options:
                          install before a notification offers it. Default:
                          a day.
   --portable             Run as a portable copy, which can't update itself.
-  --updated <version>    Start as the copy an update to <version> started,
-                         which says how the update went in a notification.
+  --updated <version>    Start as the first copy after an installer for
+                         <version> was started, which says how the update went
+                         in a notification.
   --first-run <page>     Open the first run: "resume" opens it as {0} does, a
                          page's name opens that page. Pages: {1}.
   --press <keys>         Press these keys (below) one at a time once it has
@@ -150,9 +155,10 @@ v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
 and q quits. Changes in OBS are seen when it closes or at a re-import. In the
 first run: y and n click the doors ("I set up my mic in OBS", "I'm new to OBS"),
 x Next, b Back, d Done, p Open OBS (which only says so: OBS would open the
-mic), 1 to 9 pick a choice, k, j and l click the last page's check boxes (Start
-with Windows, the update check and updating by itself), and h holds Alt down,
-so the access keys show.
+mic), 1 to 9 pick a choice, r opens or closes the dropdown of other playback
+devices, k, j and l click the last page's check boxes (Start with Windows, the
+update check and updating by itself), and h holds Alt down, so the access keys
+show.
 
 States:
 {3})",
@@ -187,6 +193,8 @@ struct Options {
   bool downloaded = false;
   std::optional<std::chrono::seconds> remind_after;
   std::optional<update::Version> updated;
+  bool paused = false;
+  bool windows10 = false;
 };
 
 std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
@@ -199,6 +207,14 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     }
     if (arg == L"--portable") {
       options.portable = true;
+      continue;
+    }
+    if (arg == L"--paused") {
+      options.paused = true;
+      continue;
+    }
+    if (arg == L"--windows10") {
+      options.windows10 = true;
       continue;
     }
     if (arg == L"--downloaded") {
@@ -475,6 +491,8 @@ void Press(wchar_t key) {
           SendMessageW(setup, WM_SYSKEYDOWN, VK_MENU, 1 << 29);
         } else if (key >= L'1' && key <= L'9') {
           click(tray::kChoiceFirst + (key - L'1'));
+        } else if (key == L'r') {
+          click(tray::kMoreChoicesId);
         }
       }
       break;
@@ -782,9 +800,10 @@ int Run(const Options& options) {
   tray_options.instance = GetModuleHandleW(nullptr);
   tray_options.window_class = std::format(L"{}.tray-fake", kDisplayNameW);
   if (options.settings) tray_options.settings_file = *options.settings;
-  // Notifications wait for the first run to be finished.
   tray_options.first_run.done = !options.first_run;
   tray_options.restarted_for = options.restarted_for;
+  tray_options.start_paused = options.paused;
+  tray_options.windows11 = !options.windows10;
   tray_options.settings.obs_config = options.import_args.config_dir;
   tray_options.settings.mic = options.import_args.pick;
   if (const auto dirs = GetAppDirs()) tray_options.log_folder = dirs->Logs();
@@ -797,10 +816,10 @@ int Run(const Options& options) {
     Print(std::format("Start with Windows {}\n", on ? "on" : "off"));
     return Status(Ok{});
   };
-  tray_options.restart = [](core::RestartNeed why) {
-    Print(std::format("{0} would restart now{1}{2}\n", kDisplayName,
+  tray_options.restart = [](core::RestartNeed why, bool paused) {
+    Print(std::format("{0} would restart now{1}{2}{3}\n", kDisplayName,
                       why == core::RestartNeed::kNone ? "" : ", and say why: knobs-tray --restarted-for ",
-                      tray::RestartNeedName(why)));
+                      tray::RestartNeedName(why), paused ? " --paused" : ""));
     return Status(Ok{});
   };
   tray_options.resume_after_restart = [](bool on) {
@@ -813,8 +832,8 @@ int Run(const Options& options) {
   tray_options.update_settings.check = options.check_updates;
   tray_options.update_settings.install = options.install_updates;
   if (options.updated) {
-    tray_options.updated = true;
     tray_options.update_settings.tried = options.updated;
+    tray_options.update_settings.installing = options.updated;
   }
   tray_options.updates.latest = [latest = options.latest.value_or(current)](update::Cancel&) {
     Print(std::format("GitHub would say the latest release is {}\n", latest.ToString()));
@@ -843,9 +862,10 @@ int Run(const Options& options) {
                              verdict == Verdict::kUnknown ? "Windows couldn't check whether its certificate was revoked"
                                                           : "it isn't signed")};
   };
-  tray_options.updates.install = [](const fs::path& file) {
-    Print(std::format("{} would run, close {} and start the new one\n", ToUtf8(file.filename()), kDisplayName));
-    return Status(Ok{});
+  tray_options.updates.install = [](const fs::path& file, bool paused) {
+    Print(std::format("{} would run, close {} and start the new one{}\n", ToUtf8(file.filename()), kDisplayName,
+                      paused ? ", paused" : ""));
+    return Result<HANDLE>(static_cast<HANDLE>(nullptr));
   };
   tray_options.updates.folder = fs::temp_directory_path() / std::format(L"knobs-tray-updates-{}", GetCurrentProcessId());
   tray_options.updates.current = current;
@@ -868,12 +888,13 @@ int Run(const Options& options) {
     Print(std::format("OBS would open from {}\n", ToUtf8(install_root)));
     return Status(Ok{});
   };
-  tray_options.start_core = [fixture](core::Observer& observer,
-                                      const core::Settings& settings) -> Result<std::unique_ptr<core::Core>> {
-    Print(std::format("settings: {}\n", DescribeSettings(settings)));
+  tray_options.start_core = [fixture](core::Observer& observer, const core::Settings& settings,
+                                      bool paused) -> Result<std::unique_ptr<core::Core>> {
+    Print(std::format("settings: {}{}\n", DescribeSettings(settings), paused ? ", paused" : ""));
     if (g_session->script.no_core) return std::unique_ptr<core::Core>();
     core::CoreOptions core_options;
     core_options.settings = settings;
+    core_options.paused = paused;
     core_options.obs_running = [] { return g_session->obs_running.load(); };
     core_options.other_obs = [] {
       if (!g_session->other_obs) return std::vector<core::OtherObs>();

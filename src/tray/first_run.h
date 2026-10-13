@@ -32,8 +32,9 @@ enum class FirstRunPage {
   // Then, each only when it's needed, or until it's answered.
   kMic,       // Which mic, when OBS has several. Needed while none is picked.
   kFilters,   // The mic has no filters. Needed while OBS has no mic.
-  kCable,     // Which cable, when OBS doesn't monitor to one. Needed while
-              // none is chosen or the chosen one isn't connected.
+  kCable,     // Which cable, until it's answered, even when OBS monitors to
+              // one. Needed while none can be used or the chosen one isn't
+              // connected.
   kWarnings,  // Pre-flight warnings, and notes that change what to expect.
   kDone,      // The chain, where to find knobs, and Start with Windows.
 };
@@ -75,10 +76,10 @@ enum FirstRunId : int {
   kButtonRestart,
   kButtonShowSteps,      // To the second door.
   kButtonSkipFilters,    // Go on with a mic that has no filters.
-  kButtonKeepDevice,     // Go on with a playback device that isn't a cable.
   kButtonLookForObs,     // Drop the picked install folder and look for OBS.
   kButtonOwnObsSettings,  // Drop the picked settings folder for OBS's own.
   kButtonOpenSoundSettings,  // Windows' list of sound devices, to turn a cable on.
+  kButtonOpenSoundOutput,    // Windows' Sound settings, to set Output back.
   kChoiceFirst = 200,
   // The last page's check boxes.
   kCheckStartWithWindows = 300,
@@ -187,6 +188,12 @@ struct PageView {
   std::vector<PageButton> buttons;
   int default_button = 0;
   std::vector<PageButton> choices;
+  // More choices behind a dropdown after `choices`, labelled `more_label`,
+  // numbered on from them. It opens with the page if one of them is the
+  // default.
+  std::vector<PageButton> more_choices;
+  std::string more_label;
+  // A choice from either list, or 0 for none.
   int default_choice = 0;
   std::vector<PageCheck> checks;
   // The page waits for something and moves on by itself, and `status` says
@@ -212,6 +219,7 @@ struct FirstRunAction {
     kChooseObsSettings,  // Ask for OBS's settings folder (Settings::obs_config).
     kRestart,          // Restart knobs.
     kOpenSoundSettings,  // Open Windows' list of sound devices.
+    kOpenSoundOutput,    // Open Windows' Sound settings, where Output is.
     kFinish,           // Done: close, and set Start with Windows.
   };
   Kind kind = Kind::kNone;
@@ -231,9 +239,10 @@ class FirstRun {
   // was finished is opened again, so that Done changes nothing the user
   // didn't, and the update check as it is: off until the user turns it on.
   // Updating by itself is only offered if `can_install_updates`: the
-  // installer installed this copy.
+  // installer installed this copy. `windows11` picks the words for Windows'
+  // Sound settings, which differ on Windows 10.
   explicit FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page = std::nullopt,
-                    FinishChoices now = {}, bool can_install_updates = false);
+                    FinishChoices now = {}, bool can_install_updates = false, bool windows11 = true);
 
   const FirstRunProgress& progress() const { return progress_; }
 
@@ -246,20 +255,26 @@ class FirstRun {
   // A button was clicked on the page View showed for `snapshot`.
   FirstRunAction Click(int button, int choice, const CheckStates& checks, const core::Snapshot& snapshot);
   // The core moved on from `before` to `after`: OBS closing on the second
-  // door, or a cable appearing on the cable page, moves the first run on.
+  // door with filters on the mic moves the first run on.
   FirstRunAction Changed(const core::Snapshot& before, const core::Snapshot& after);
 
  private:
   void Leave(FirstRunPage page);
   void Back(const core::Snapshot& snapshot);
+  // The cable page's choice for a playback device: numbered as it's first
+  // seen, so a choice stays with its device as devices come and go.
+  int DeviceChoice(const audio::AudioDevice& device) const;
 
   FirstRunProgress progress_;
   // The last page's check boxes, as it offers them.
   FinishChoices finish_;
   bool can_install_updates_ = false;
+  bool windows11_ = true;
   // A page shown out of turn: one gone Back to, or asked for.
   std::optional<FirstRunPage> focus_;
   std::vector<FirstRunPage> history_;
+  // Playback devices by ID, in the order DeviceChoice first numbered them.
+  mutable std::vector<std::string> numbered_;
 };
 
 // A button's or check box's text without its access key's "&".
@@ -268,8 +283,12 @@ std::string WithoutAccessKey(std::string_view text);
 // Whether any of the collection's mics has a filter that's on.
 bool AnyFilters(const core::Snapshot& snapshot);
 
-// The playback devices the cable page offers: virtual cables, then the
-// device knobs sends to if it's connected and not a cable.
+// The playback devices the cable page offers, in the order it lists them:
+// virtual cables, then every other one that's connected.
 std::vector<audio::AudioDevice> CableChoices(const core::Snapshot& snapshot);
+
+// The page for what the state needs the user for, if a page shows it: what
+// blocks the rest, or the cable. What a menu's fix opens.
+std::optional<FirstRunPage> PageFor(const core::Snapshot& snapshot);
 
 }  // namespace knobs::tray

@@ -24,11 +24,25 @@ struct UpdateSettings {
   bool install = false;
   // When a check last got an answer.
   std::optional<std::chrono::system_clock::time_point> checked;
-  // The latest release it found.
+  // The latest release it found, and when it first did, for the day an
+  // update waits before a notification says so (Updater::Waiting), and the
+  // version that notification was given for. Kept, so a PC that's switched
+  // off every night still gets to a day.
   std::optional<update::Version> latest;
+  std::optional<std::chrono::system_clock::time_point> seen;
+  std::optional<update::Version> reminded;
+  // How many times in a row a download or an install of `latest` failed in
+  // a way trying again won't help (Updater::Options::tries), and when one
+  // last failed, in any way. Kept, so restarts don't start them over.
+  int failures = 0;
+  std::optional<std::chrono::system_clock::time_point> failed;
   // The version an update last tried to install. An update doesn't try it
   // again by itself.
   std::optional<update::Version> tried;
+  // The version an installer was started for, until a copy of knobs has
+  // said whether it's installed (UpdatedNotice): the one the installer
+  // starts, or the next to start, if the installer never got that far.
+  std::optional<update::Version> installing;
 
   friend bool operator==(const UpdateSettings&, const UpdateSettings&) = default;
 };
@@ -110,24 +124,26 @@ class Updater {
   std::optional<Notice> Checked(Clock::time_point now, std::optional<update::Version> latest);
   // The download for latest(). Returns what to say about it.
   std::optional<Notice> DownloadDone(Clock::time_point now, Downloaded outcome);
-  // An installer for latest() was downloaded before: it can be installed,
-  // once its signature is checked again.
-  void Found();
+  // An installer for latest() was downloaded before, at `downloaded`: it can
+  // be installed, once its signature is checked again.
+  void Found(Clock::time_point downloaded);
   // The installer for latest() didn't pass the check of its signature just
   // before it ran. `lost`: it was changed, or is gone, and is downloaded
   // again, which counts toward Options::tries; otherwise Windows couldn't
   // finish the check, which is tried again later. Returns what to say.
   std::optional<Notice> NotVerified(Clock::time_point now, bool lost);
   // The installer for latest() is starting, which quits knobs. The copy it
-  // starts sees settings().tried.
+  // starts sees settings().installing.
   void Installing();
+  // What the installer did was said, or found to be nothing to say.
+  void Reported() { settings_.installing.reset(); }
   // An update that installs by itself has waited Options::remind_after:
   // ready, with no moment to install, it says so, with a click that
   // installs it now; not downloaded yet, it says the version is out. Once a
   // version.
   std::optional<Notice> Waiting(Clock::time_point now);
   // The version Waiting last said so for.
-  const std::optional<update::Version>& reminded() const { return reminded_; }
+  const std::optional<update::Version>& reminded() const { return settings_.reminded; }
 
   // What the menu offers when a version newer than this one is out: to
   // install it now, once it's downloaded and installs by itself, else to
@@ -157,21 +173,18 @@ class Updater {
   Clock::time_point started_;
   // The last check that failed.
   std::optional<Clock::time_point> check_failed_;
-  // The last download or install of latest() that failed, and how many have
-  // in a row.
-  std::optional<Clock::time_point> try_failed_;
-  int failures_ = 0;
-  // The version whose installer is downloaded and checked, since when, and
-  // the one Waiting said so for.
+  // The version whose installer is downloaded and checked, and since when.
   std::optional<update::Version> ready_;
   std::optional<Clock::time_point> ready_since_;
-  std::optional<update::Version> reminded_;
-  // When latest() was first known, this run.
-  std::optional<Clock::time_point> latest_since_;
 };
 
-// What the copy an update's installer started says (main.cpp's --updated):
-// that it's the version tried, or that the update didn't happen.
+// What the first copy to run after an installer was started says
+// (UpdateSettings::installing): that it's the version installed, or that the
+// update didn't happen.
 std::optional<Notice> UpdatedNotice(const UpdateSettings& settings, const update::Version& current);
+
+// What a copy says when the installer it started ended without closing it:
+// the update didn't happen.
+Notice NotUpdatedNotice(const update::Version& version);
 
 }  // namespace knobs::tray

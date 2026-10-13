@@ -137,12 +137,20 @@ TEST(NoticesStayQuietOnAColdBoot) {
   open.ObsCloses();
   CHECK(open.state() == State::kRunning && open.events == kNone && open.notifier.badge() == Badge::kNone);
 
-  // Warnings found at start were the first run's to show.
+  // Warnings found at start were the first run's to show...
   FakeWorld warned = tools::DefaultWorld();
   tools::ToggleVstFilter(warned);
   Fixture warnings(warned);
   warnings.Start();
   CHECK(warnings.events == kNone);
+  // ...unless it's known what was said before, as the settings keep it:
+  // then a new one is said, as one added while knobs wasn't running.
+  Fixture known(warned, {}, {.warned = std::vector<std::string>{}});
+  known.Start();
+  CHECK(known.events == std::vector<std::string>{std::format("Mic/Aux has a filter {} can't run", kDisplayName)});
+  Fixture said(warned, {}, {.warned = known.notifier.warnings()});
+  said.Start();
+  CHECK(said.events == kNone);
 }
 
 TEST(NoticesStayQuietWhenObsOpensAndClosesUnchanged) {
@@ -160,7 +168,10 @@ TEST(NoticesStayQuietWhenObsOpensAndClosesUnchanged) {
   CHECK(f.events == kNone);
 }
 
-TEST(NoticesWaitForTheFirstRun) {
+TEST(NoticesWaitForTheSetupWindow) {
+  // While the setup window is open, it shows the state itself. A problem that
+  // began meanwhile is said once the window closes, if it's still there, as
+  // the tray ticks the notifier then.
   Fixture f;
   f.quiet = true;
   f.Start();
@@ -169,12 +180,44 @@ TEST(NoticesWaitForTheFirstRun) {
   CHECK(f.state() == State::kCableMissing && f.events == kNone);
   // The icon still says so.
   CHECK(f.notifier.badge() == Badge::kAttention);
-  // Not said later either.
   f.quiet = false;
-  f.Advance(1min);
-  CHECK(f.events == kNone);
+  f.Apply(f.notifier.Tick(false, f.now));
+  CHECK(f.events == std::vector<std::string>{"Cable missing"});
   f.Devices(tools::ToggleCables);
-  CHECK(f.state() == State::kRunning && f.events == kNone && f.notifier.badge() == Badge::kNone);
+  CHECK(f.state() == State::kRunning && f.notifier.badge() == Badge::kNone);
+  CHECK((f.events == std::vector<std::string>{"Cable missing", "-"}));
+
+  // Gone before the window closes: nothing to say.
+  Fixture gone;
+  gone.quiet = true;
+  gone.Start();
+  gone.Devices(tools::ToggleCables);
+  gone.Advance(10s);
+  gone.Devices(tools::ToggleCables);
+  gone.quiet = false;
+  gone.Apply(gone.notifier.Tick(false, gone.now));
+  CHECK(gone.events == kNone);
+
+  // Another problem the same way.
+  Fixture obs;
+  obs.quiet = true;
+  obs.Start();
+  obs.ObsOpens();
+  obs.ObsCloses([](FakeWorld& world) { world.obs = {core::ObsFound::kMissing, {}, "OBS Studio isn't installed."}; });
+  CHECK(obs.state() == State::kObsMissing && obs.events == kNone);
+  obs.quiet = false;
+  obs.Apply(obs.notifier.Tick(false, obs.now));
+  CHECK(obs.events == std::vector<std::string>{"Can't find OBS Studio"});
+
+  // News of the chain the window showed isn't said again.
+  Fixture chain;
+  chain.quiet = true;
+  chain.Start();
+  chain.ObsOpens();
+  chain.ObsCloses(tools::EditChain);
+  chain.quiet = false;
+  chain.Apply(chain.notifier.Tick(false, chain.now));
+  CHECK(chain.events == kNone);
 }
 
 // --- Missing devices ----------------------------------------------------------------
@@ -627,6 +670,52 @@ TEST(NoticesSayKnobsRestartedForAnObsUpdate) {
   format.Start();
   CHECK(format.events == std::vector<std::string>{"OBS's sample rate or channels changed"});
   CHECK(format.last.text == std::format("{} restarted to follow them, as OBS does.", kDisplayName));
+
+  // For an OBS that isn't an update: an older one, or another folder's.
+  Fixture other(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kObsChanged});
+  other.Start();
+  CHECK(other.events == std::vector<std::string>{"OBS changed to 32.2.2"});
+
+  // Restarted while paused: it still is, and says so.
+  Fixture paused(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kAudioChanged});
+  paused.controller.Start(false, paused.now, true);
+  paused.Feed();
+  CHECK(paused.state() == State::kPausedByUser && paused.notifier.badge() == Badge::kPaused);
+  CHECK(paused.last.text == std::format("{} restarted to follow them, as OBS does. It's still paused.", kDisplayName));
+
+  // A filter knobs can't run, added in the OBS that updated: said after the
+  // restart, then why it restarted.
+  Fixture before;
+  before.Start();
+  FakeWorld added = f.world->Get();
+  tools::ToggleVstFilter(added);
+  Fixture after(added, {}, {.restarted_for = core::RestartNeed::kObsUpdated, .warned = before.notifier.warnings()});
+  after.Start();
+  CHECK(after.events == std::vector<std::string>{std::format("Mic/Aux has a filter {} can't run", kDisplayName)});
+  after.Advance(8s);
+  CHECK((after.events == std::vector<std::string>{std::format("Mic/Aux has a filter {} can't run", kDisplayName),
+                                                  "OBS was updated to 32.2.3"}));
+}
+
+TEST(NoticesSayWindowsPlaysThePcIntoTheCable) {
+  // Installing a cable can make it Windows' Output: the user hears nothing,
+  // and the cable's apps hear the PC with the mic. A click opens Sound
+  // settings; it's taken down when Output is back.
+  const auto output = [](std::string_view name) {
+    return [name](FakeWorld& world) {
+      for (const audio::AudioDevice& device : world.devices.outputs) {
+        if (device.name.starts_with(name)) world.devices.default_output = device.id;
+      }
+    };
+  };
+  Fixture f;
+  f.Start();
+  f.Devices(output("CABLE Input"));
+  CHECK(f.state() == State::kRunning && f.events == std::vector<std::string>{"Windows plays your PC's sound into "
+                                                                             "CABLE Input"});
+  CHECK(f.last.url == "ms-settings:sound" && !f.last.problem && f.notifier.badge() == Badge::kNone);
+  f.Devices(output("Speakers"));
+  CHECK((f.events == std::vector<std::string>{"Windows plays your PC's sound into CABLE Input", "-"}));
 }
 
 TEST(NoticesSayKnobsStoppedForAnUnsupportedObs) {
@@ -746,9 +835,11 @@ TEST(NoticesSayWhatStopsKnobs) {
 }
 
 TEST(RestartReasonsHaveNames) {
-  for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged}) {
+  for (const core::RestartNeed need :
+       {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged, core::RestartNeed::kObsChanged}) {
     CHECK(RestartNeedNamed(RestartNeedName(need)) == need);
   }
+  CHECK(RestartNeedName(core::RestartNeed::kObsChanged) == "obs-changed");
   CHECK(RestartNeedName(core::RestartNeed::kObsUpdated) == "obs-updated");
   CHECK(!RestartNeedNamed("") && !RestartNeedNamed("OBS-UPDATED"));
 }

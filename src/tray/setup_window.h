@@ -97,6 +97,8 @@ class SetupWindow final : private SetupUiaHost {
   void Save();
   void ShowError(const std::string& text);
   void Close();
+  // The close button, Esc or Alt+F4: on the last page, as Done.
+  void CloseAsked();
 
   // Keyboard and focus.
   void OnKey(WPARAM key, bool repeat);
@@ -158,6 +160,7 @@ class SetupWindow final : private SetupUiaHost {
   PageView view_;
   int choice_ = 0;
   CheckStates checks_;
+  bool more_open_ = false;  // The page's dropdown of more choices.
   Scene scene_;
   // Goes up when a layout changes the scene's parts, so an activation posted
   // for one layout can't land on another's.
