@@ -35,7 +35,7 @@ If you tuned your mic in OBS and send it to a virtual cable, OBS has to stay ope
 
 Other tools don't sound the same. Equalizer APO, VoiceMeeter and NVIDIA Broadcast have their own DSP, so a chain tuned in OBS has to be rebuilt by ear, and it can't match exactly. OBS plugins that send audio elsewhere still need OBS open.
 
-knobs runs OBS's own filter code, from your OBS install, with your OBS settings. Nothing else touches the audio.
+knobs runs OBS's own filter code, from your OBS install, with your OBS settings. Nothing else touches the audio, apart from the VST plugins and NVIDIA noise removal your OBS chain already runs.
 
 ## Measured against OBS
 
@@ -176,8 +176,8 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 ## Known limits
 
 - **One mic.** With several mics in OBS, knobs runs the one you choose.
-- **VST plugins run without their windows.** knobs runs a VST filter as OBS does, with the settings OBS saved, but never opens the plugin's window, even when OBS's **Open interface when active** is on. A plugin that crashes takes knobs down, as it takes OBS down.
-- **NVIDIA's noise removal is costly, and not bit-identical.** It runs on your GPU through NVIDIA's runtime, which takes about 800 MB of memory and a fifth of a CPU core while the mic runs. Its output is close to OBS's, but not exactly the same, since it depends on what it heard before, in OBS too. For its first moment after the mic starts, it lets the mic through untouched while it loads, as it does when OBS starts. Without NVIDIA's Audio Effects SDK or a GPU that runs it, the filter passes audio through, and knobs says why.
+- **VST plugins run without their windows.** knobs runs a VST filter as OBS does, with the settings OBS saved, but never opens the plugin's window, even when OBS's **Open interface when active** is on. A plugin that crashes takes knobs down, as it takes OBS down. knobs keeps the plugin's file in use while it runs, so pause knobs before you update a plugin. On a mono OBS profile, a stereo plugin can sound slightly different from run to run, in OBS too, since OBS's VST host feeds its second input from memory it never clears.
+- **NVIDIA's noise removal is costly, and not bit-identical.** It runs on your GPU through NVIDIA's runtime, which takes about 800 MB of memory and a fifth of a CPU core while the mic runs. Its output is close to OBS's, but not exactly the same, since it depends on what it heard before, in OBS too. For its first moment after the mic starts, it lets the mic through untouched while it loads, as it does when OBS starts. Without NVIDIA's Audio Effects SDK or a GPU that runs it, the filter passes audio through, and knobs says why. Once knobs has loaded it, it keeps NVIDIA's runtime in use until you quit knobs, so quit knobs before you update NVIDIA's Audio Effects SDK.
 - **No sidechain.** With a sidechain source, OBS's compressor ducks the mic when that source plays. knobs runs no other sources, so it runs the compressor as OBS does while the sidechain is silent: as a gain at the compressor's output gain. It warns you.
 - **Mute and push-to-talk don't silence the cable.** OBS's monitoring ignores them too. The first run says so.
 - **The cable is quiet while OBS is open**, unless OBS monitors your mic to it. Turn off **Pause while OBS is open** to keep knobs running then.
@@ -186,7 +186,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 
 ## Privacy
 
-knobs collects nothing and has no telemetry and no account. It makes no network connections unless you turn on its update check: the links in its first run open in your browser when you click them, and the installer carries VB-Cable rather than downloading it. Your mic's audio goes from the mic, through OBS's filters, to the virtual cable, and stays on your PC.
+knobs collects nothing and has no telemetry and no account. It makes no network connections unless you turn on its update check: the links in its first run open in your browser when you click them, and the installer carries VB-Cable rather than downloading it. A VST plugin in your OBS chain runs inside knobs as it does inside OBS, though, so a plugin that goes online, to check its license, say, does so from knobs. Your mic's audio goes from the mic, through OBS's filters, to the virtual cable, and stays on your PC.
 
 **The update check** is off until you turn it on, on the setup's last page or in the tray menu. Then, once a day, knobs asks GitHub for `github.com/danielalyoshin/knobs/releases/latest`, which redirects to the latest release, and reads only which version that is. It sends nothing about you or your PC, though GitHub sees your IP address, as any website does. If you also turn on **Automatically update**, knobs downloads the new version's installer from that release on GitHub, checks that it's signed by Daniel Alyoshin as every release is, and runs it. Windows may ask Microsoft whether the installer's certificate was revoked, as it can for any signed program. If it can't tell, knobs tries again an hour later, and after three tries it stops and says so, with a link to download the new version yourself.
 

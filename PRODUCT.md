@@ -56,7 +56,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 
 ## Evidence on Hand
 
-- knobs's output is bit-identical to OBS's on test signals, on VST plugins and on a recording of real voice (docs/design.md, Same output as OBS). NVIDIA's noise removal is close to OBS's, but no two runs of it match, in OBS either (docs/design.md, NVIDIA's noise removal).
+- knobs's output is bit-identical to OBS's on test signals, on VST plugins and on a recording of real voice (docs/design.md, Same output as OBS), apart from a stereo VST plugin on a mono profile, which isn't repeatable in OBS either. NVIDIA's noise removal is close to OBS's, but no two runs of it match, in OBS either (docs/design.md, NVIDIA's noise removal).
 - Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (Audient iD4; docs/design.md, Mic-to-cable latency).
 - On real hardware (docs/design.md, On real hardware): running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB. After a cold boot, the filtered mic was on the cable 9.5 s after signing in, with nothing clicked.
 - [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
