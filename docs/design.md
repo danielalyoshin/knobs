@@ -364,8 +364,9 @@ knobs's output through the same plugins is the same with OBS 32.2.2 and 33.0.0-r
 On the test PC's RTX 4080 SUPER, with NVIDIA's Audio Effects SDK 1.6.1.2:
 
 - knobs's output is bit-identical from run to run once the model has loaded, in packets of 480 or 4096 frames, with OBS 32.2.2 and 33.0.0-rc1.
-- Half a second more silence before the same speech leaves a residual 68.8 dB below the signal, and starting 120 samples later, one 16.9 dB below.
-- Against OBS, lined up by hand, stretches of speech match to 48–90 dB. OBS's recording of it also jumped 1024 frames once, partway through. `knobs-compare`'s alignment, made for chains that match bit for bit, follows neither, so it says to expect a residual.
+- Half a second more silence before the same speech leaves a residual 68.8 dB below the signal. Starting 60 to 420 samples later, which moves where its 10 ms frames fall, leaves one 36–43 dB below, at the same loudness (95% of the 100 ms stretches of speech within 1.2 dB, and the few further apart below −70 dBFS) and with the same tone (third-octave bands within 0.6 dB). OBS against itself, started 120 samples later, differs as much.
+- Against OBS from the same start, lined up stretch by stretch, speech matches to 71–73 dB (43–90 dB a half-second stretch), loudness to within 0.06 dB and third-octave bands to within 0.13 dB. Each of OBS's recordings of it also jumped 1024 frames once, partway through. `knobs-compare`'s alignment, made for chains that match bit for bit, follows neither, so it says to expect a residual.
+- Live, the mic starts at a moment of its own each time, in OBS and in knobs, so knobs's output differs from OBS's as OBS's differs from itself from one start to the next.
 
 The cost, measured over 15 s while `knobs-live --measure-output` pushed audio through the chain into the cable (Release):
 
