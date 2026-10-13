@@ -32,6 +32,7 @@ namespace knobs::runtime {
   /* Modules and data files */                \
   X(obs_open_module)                          \
   X(obs_init_module)                          \
+  X(obs_get_module)                           \
   X(obs_post_load_modules)                    \
   X(obs_find_module_file)                     \
   X(obs_module_get_locale_string)             \

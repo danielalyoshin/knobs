@@ -39,7 +39,7 @@ struct HostOptions {
 
 // libobs up and running: finds the OBS install, makes sure its runtime copy
 // is intact, opens a log or joins one, loads obs.dll from the copy and starts a session
-// with the two modules. Tears down in reverse. ObsSession's threading rule
+// with the modules it always loads. Tears down in reverse. ObsSession's threading rule
 // applies: create and destroy the host on the same thread.
 class ObsHost {
  public:

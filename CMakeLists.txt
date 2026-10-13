@@ -42,6 +42,7 @@ add_library(knobs_runtime STATIC
   src/runtime/obs_session.cpp
   src/runtime/obs_version.cpp
   src/runtime/pe_imports.cpp
+  src/runtime/qt_app.cpp
   src/runtime/runtime_copy.cpp
   src/util/app_dirs.cpp
   src/util/json.cpp

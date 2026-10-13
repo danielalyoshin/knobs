@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -10,6 +12,7 @@
 #include <vector>
 
 #include "runtime/obs_runtime.h"
+#include "runtime/qt_app.h"
 #include "util/result.h"
 
 namespace knobs::runtime {
@@ -32,7 +35,8 @@ struct SessionOptions {
   VideoMode video = VideoMode::kNone;
 };
 
-// A started libobs with win-wasapi and obs-filters loaded. libobs is a
+// A started libobs with the modules knobs always loads (kObsModules), and the
+// optional ones a chain has needed so far (LoadOptionalModule). libobs is a
 // process-wide singleton, so there's at most one of these at a time.
 // `runtime` must outlive the session.
 //
@@ -53,6 +57,15 @@ class ObsSession {
   // A loaded module by name (see kObsModules), or null.
   obs_module_t* module(std::string_view name) const;
 
+  // Loads an optional module (kOptionalObsModules) from the runtime copy, the
+  // first time a chain needs it. A module never unloads, so later calls
+  // return the first's outcome. For obs-vst it also starts the Qt application
+  // obs-vst's filters need (QtApp). Fails, saying why, if the install has no
+  // such module or it doesn't load. Call it on the session's thread.
+  Status LoadOptionalModule(std::string_view name);
+  // The optional modules that didn't load so far, by name, with why.
+  const std::map<std::string, std::string, std::less<>>& module_errors() const { return module_errors_; }
+
   const SessionOptions& options() const { return options_; }
 
   // Waits until every source released so far is destroyed. The graphics and
@@ -61,7 +74,9 @@ class ObsSession {
   // This mirrors obs_wait_for_destroy_queue() (obs.c): let each running
   // thread finish its tick, then wait for the destroy queue. The libobs
   // function itself returns early when there's no video thread, and
-  // obs_shutdown() only waits through it.
+  // obs_shutdown() only waits through it. Then, with obs-vst loaded, has Qt
+  // delete the VST filters' objects, which their destroy callbacks can only
+  // ask for (QtApp). Call it on the session's thread.
   void DrainDestroyQueue();
 
   // Shuts libobs down. Returns the number of libobs allocations still live
@@ -78,6 +93,10 @@ class ObsSession {
   bool audio_running_ = false;
   bool video_running_ = false;
   std::vector<std::pair<std::string, obs_module_t*>> modules_;
+  // Why an optional module didn't load, by name.
+  std::map<std::string, std::string, std::less<>> module_errors_;
+  // Destroyed after obs_shutdown(), on this thread.
+  std::unique_ptr<QtApp> qt_;
 };
 
 }  // namespace knobs::runtime

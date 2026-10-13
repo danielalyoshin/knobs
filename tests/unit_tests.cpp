@@ -260,11 +260,13 @@ fs::path MakeFakeInstall(const fs::path& root) {
   WriteFile(bin / L"obs.pdb", "symbols");
   fs::copy_file(self, plugins / L"win-wasapi.dll");
   fs::copy_file(self, plugins / L"obs-filters.dll");
-  fs::copy_file(self, plugins / L"obs-vst.dll");  // Not a module knobs loads.
+  fs::copy_file(self, plugins / L"obs-vst.dll");      // An optional module; nv-filters isn't there.
+  fs::copy_file(self, plugins / L"obs-browser.dll");  // Not a module knobs loads.
   WriteFile(root / L"data" / L"libobs" / L"default.effect", "effect");
   WriteFile(root / L"data" / L"obs-plugins" / L"win-wasapi" / L"locale" / L"en-US.ini", "a=b");
   WriteFile(root / L"data" / L"obs-plugins" / L"obs-filters" / L"locale" / L"en-US.ini", "c=d");
   WriteFile(root / L"data" / L"obs-plugins" / L"obs-vst" / L"locale" / L"en-US.ini", "e=f");
+  WriteFile(root / L"data" / L"obs-plugins" / L"obs-browser" / L"locale" / L"en-US.ini", "g=h");
   return root;
 }
 
@@ -285,10 +287,12 @@ TEST(PlanCoversImportClosureAndData) {
   CHECK(ContainsPath(files, L"data/libobs/default.effect"));
   CHECK(ContainsPath(files, L"data/obs-plugins/win-wasapi/locale/en-US.ini"));
   CHECK(ContainsPath(files, L"data/obs-plugins/obs-filters/locale/en-US.ini"));
+  CHECK(ContainsPath(files, L"obs-plugins/64bit/obs-vst.dll"));
+  CHECK(ContainsPath(files, L"data/obs-plugins/obs-vst/locale/en-US.ini"));
   CHECK(!ContainsPath(files, L"bin/64bit/unrelated.dll"));
-  CHECK(!ContainsPath(files, L"obs-plugins/64bit/obs-vst.dll"));
-  CHECK(!ContainsPath(files, L"data/obs-plugins/obs-vst/locale/en-US.ini"));
-  CHECK(files.size() == 9);
+  CHECK(!ContainsPath(files, L"obs-plugins/64bit/obs-browser.dll"));
+  CHECK(!ContainsPath(files, L"data/obs-plugins/obs-browser/locale/en-US.ini"));
+  CHECK(files.size() == 11);
 
   CHECK(ContainsName(plan->system_dlls, "kernel32.dll"));
   CHECK(!ContainsName(plan->system_dlls, "version.dll"));
@@ -303,7 +307,7 @@ fs::path MakeFakeCoreInstall(const fs::path& root) {
   fs::copy_file(self, bin / L"obs.dll");
   fs::copy_file(self, bin / L"libobs-d3d11.dll");
   WriteFile(root / L"data" / L"libobs" / L"default.effect", "effect");
-  for (const std::wstring module : {L"win-wasapi", L"obs-filters", L"obs-vst"}) {
+  for (const std::wstring module : {L"win-wasapi", L"obs-filters", L"nv-filters", L"obs-browser"}) {
     const fs::path dir = root / L"core" / module;
     fs::create_directories(dir);
     fs::copy_file(self, dir / (module + L".dll"));
@@ -330,9 +334,11 @@ TEST(PlanFindsObs33sCoreModules) {
   CHECK(ContainsPath(files, L"data/libobs/default.effect"));
   CHECK(ContainsPath(files, L"core/win-wasapi/data/locale/en-US.ini"));
   CHECK(ContainsPath(files, L"core/obs-filters/data/locale/en-US.ini"));
-  CHECK(!ContainsPath(files, L"core/obs-vst/obs-vst.dll"));
-  CHECK(!ContainsPath(files, L"core/obs-vst/data/locale/en-US.ini"));
-  CHECK(files.size() == 8);
+  CHECK(ContainsPath(files, L"core/nv-filters/nv-filters.dll"));
+  CHECK(ContainsPath(files, L"core/nv-filters/data/locale/en-US.ini"));
+  CHECK(!ContainsPath(files, L"core/obs-browser/obs-browser.dll"));
+  CHECK(!ContainsPath(files, L"core/obs-browser/data/locale/en-US.ini"));
+  CHECK(files.size() == 10);
 
   // Each module's imports resolve from its own folder: obs.dll and
   // obs-filters.dll get the system's version.dll.
@@ -349,7 +355,7 @@ TEST(EnsureCopiesReusesAndRepairs) {
   if (!first) return;
   CHECK(!first->reused);
   CHECK(first->root == base / L"32.2.2");
-  CHECK(first->file_count == 9);
+  CHECK(first->file_count == 11);
   CHECK(fs::exists(first->root / L"bin" / L"64bit" / L"obs.dll"));
   CHECK(!fs::exists(base / L"32.2.2.partial"));
 

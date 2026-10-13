@@ -3,9 +3,11 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cassert>
 #include <format>
 
+#include "app_info.h"
 #include "runtime/obs_layout.h"
 #include "util/win_strings.h"
 
@@ -104,6 +106,51 @@ obs_module_t* ObsSession::module(std::string_view name) const {
   return nullptr;
 }
 
+Status ObsSession::LoadOptionalModule(std::string_view name) {
+  assert(GetCurrentThreadId() == thread_id_ && "modules load on the obs_startup() thread");
+  if (module(name)) return Ok{};
+  if (const auto failed = module_errors_.find(name); failed != module_errors_.end()) return Error{failed->second};
+  if (!running_) return Error{"libobs isn't running."};
+  const auto known = std::find_if(kOptionalObsModules.begin(), kOptionalObsModules.end(),
+                                  [&](const OptionalObsModule& module) { return module.name == name; });
+  if (known == kOptionalObsModules.end()) {
+    return Error{std::format("{} doesn't load the OBS module {}.", kDisplayName, name)};
+  }
+
+  const ObsApi& api = runtime_.api();
+  const auto open = [&]() -> Status {
+    const std::filesystem::path dll = PluginDll(runtime_.root(), name, runtime_.install_version());
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(dll, ec)) {
+      return Error{std::format("This OBS install has no {} module.", name)};
+    }
+    const std::string binary = ToObsPath(dll);
+    const std::string data = ToObsPath(PluginDataDir(runtime_.root(), name, runtime_.install_version()));
+    obs_module_t* module = nullptr;
+    const int code = api.obs_open_module(&module, binary.c_str(), data.c_str());
+    if (code != MODULE_SUCCESS) {
+      return Error{std::format("Couldn't open the OBS module {}: {}.", name, DescribeModuleError(code))};
+    }
+    // Before any of its filters exist, so their objects belong to this
+    // thread's application.
+    if (name == "obs-vst" && !qt_) {
+      auto qt = QtApp::Start();
+      if (!qt) return Error{std::format("Couldn't start the Qt application obs-vst needs: {}", qt.error())};
+      qt_ = std::move(*qt);
+    }
+    if (!api.obs_init_module(module)) {
+      return Error{std::format("The OBS module {} failed to initialize. The log has details.", name)};
+    }
+    // Neither module has a post_load callback, which obs_post_load_modules()
+    // would run, for every module again.
+    modules_.emplace_back(name, module);
+    return Ok{};
+  };
+  Status opened = open();
+  if (!opened) module_errors_.emplace(name, opened.error());
+  return opened;
+}
+
 void ObsSession::DrainDestroyQueue() {
   const ObsApi& api = runtime_.api();
   constexpr obs_task_t kNoop = [](void*) {};
@@ -114,6 +161,7 @@ void ObsSession::DrainDestroyQueue() {
   if (audio_running_) api.obs_queue_task(OBS_TASK_AUDIO, kNoop, nullptr, true);
   // Runs after every destroy task queued before it.
   api.obs_queue_task(OBS_TASK_DESTROY, kNoop, nullptr, true);
+  if (qt_) qt_->DeliverPostedEvents();
 }
 
 long ObsSession::Shutdown() {
@@ -126,6 +174,9 @@ long ObsSession::Shutdown() {
     audio_running_ = false;
     video_running_ = false;
     modules_.clear();
+    // What obs_shutdown() destroyed may have posted deletes too, which free
+    // libobs allocations.
+    qt_.reset();
   }
   return api.bnum_allocs();
 }

@@ -22,10 +22,11 @@ struct RuntimeFileSet {
 };
 
 // Works out what knobs needs from an OBS install:
-//  - obs.dll, the graphics module and the two modules, plus every DLL they
+//  - obs.dll, the graphics module, the modules knobs always loads and the
+//    optional ones the install has (kOptionalObsModules), plus every DLL they
 //    import, directly or indirectly, that the install ships, and the PDBs
 //    next to them;
-//  - data\libobs and the two modules' data folders.
+//  - data\libobs and those modules' data folders.
 // The modules are where that version of OBS keeps them (HasCoreModules).
 // Imports are resolved like the loader will once they run from the copy: the
 // importing DLL's own folder, then bin\64bit, then the system.

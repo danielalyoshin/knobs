@@ -44,6 +44,7 @@ std::string Describe(const std::error_code& ec) {
 std::string RootsLine() {
   std::string roots(kGraphicsModule);
   for (std::string_view module : kObsModules) roots += std::format(" {}", module);
+  for (const OptionalObsModule& module : kOptionalObsModules) roots += std::format(" {}", module.name);
   return roots;
 }
 
@@ -372,8 +373,15 @@ RuntimeCopyLock::~RuntimeCopyLock() {
 
 Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVersion& version) {
   const fs::path bin = BinDir(install_root);
+  // The modules to copy: every one knobs always loads, and the optional ones
+  // the install has.
+  std::vector<std::string_view> modules(kObsModules.begin(), kObsModules.end());
+  for (const OptionalObsModule& module : kOptionalObsModules) {
+    std::error_code dll_ec;
+    if (fs::is_regular_file(PluginDll(install_root, module.name, version), dll_ec)) modules.push_back(module.name);
+  }
   std::map<fs::path, std::map<std::string, fs::path>> dlls_by_dir = {{bin, ListDlls(bin)}};
-  for (std::string_view module : kObsModules) {
+  for (std::string_view module : modules) {
     const fs::path dir = PluginBinDir(install_root, module, version);
     if (!dlls_by_dir.contains(dir)) dlls_by_dir.emplace(dir, ListDlls(dir));
   }
@@ -386,7 +394,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
 
   std::vector<fs::path> pending = {ObsDll(install_root),
                                    bin / (fs::path(kGraphicsModule) += L".dll")};
-  for (std::string_view module : kObsModules) pending.push_back(PluginDll(install_root, module, version));
+  for (std::string_view module : modules) pending.push_back(PluginDll(install_root, module, version));
 
   std::set<fs::path> binaries;
   std::map<std::string, std::string> system_dlls;  // Lowercase name -> as spelled.
@@ -431,7 +439,14 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
   }
 
   std::vector<fs::path> data_dirs = {LibobsDataDir(install_root)};
-  for (std::string_view module : kObsModules) data_dirs.push_back(PluginDataDir(install_root, module, version));
+  for (std::string_view module : modules) {
+    const fs::path data = PluginDataDir(install_root, module, version);
+    // An optional module with no data folder needs none.
+    std::error_code data_ec;
+    const bool optional = std::find(kObsModules.begin(), kObsModules.end(), module) == kObsModules.end();
+    if (optional && !fs::is_directory(data, data_ec)) continue;
+    data_dirs.push_back(data);
+  }
   for (const fs::path& dir : data_dirs) {
     for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
          it.increment(ec)) {

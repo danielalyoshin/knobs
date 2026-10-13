@@ -12,8 +12,26 @@
 // bin\64bit, in "../../data/libobs/" (obs-windows.c).
 namespace knobs::runtime {
 
-// The only modules knobs loads. No obs-vst in v1.
+// The modules knobs always loads.
 inline constexpr std::array<std::string_view, 2> kObsModules = {"win-wasapi", "obs-filters"};
+
+// Modules knobs loads only for a chain with their filter, since each brings
+// what nothing else in knobs needs: obs-vst runs on Qt, and nv-filters starts
+// NVIDIA's Audio Effects runtime on the GPU. An install may lack them.
+struct OptionalObsModule {
+  std::string_view name;
+  // The filter it registers, by its saved "id".
+  std::string_view filter_id;
+};
+inline constexpr std::array<OptionalObsModule, 2> kOptionalObsModules = {{
+    {"obs-vst", "vst_filter"},
+    {"nv-filters", "nvidia_audiofx_filter"},
+}};
+
+// obs-vst's "Open interface when active" setting. On, obs-vst opens the
+// plugin's window as the filter loads, in a QWidget, and with no
+// QApplication, Qt aborts the process. knobs always loads it off.
+inline constexpr char kVstOpenWhenActive[] = "open_when_active_vst_settings";
 
 // Graphics module for the dummy-video fallback (see VideoMode::kDummy).
 inline constexpr std::string_view kGraphicsModule = "libobs-d3d11";
