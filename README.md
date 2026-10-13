@@ -125,10 +125,10 @@ knobs is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows Smar
 The first run checks what it found in OBS and asks only what it needs to:
 
 - **Which mic**, if OBS has several.
-- **Which cable**, if OBS doesn't monitor the mic to one. With no cable installed, it shows how to install VB-Cable, step by step, and carries on when one appears. It also says when a cable is turned off in Windows' Sound settings, or waits for Windows to restart.
+- **Which cable**, always, starting at the one OBS monitors the mic to. Your choice stays yours if OBS monitors elsewhere later. Every other playback device is in a dropdown under the cables, for a cable knobs doesn't know by name. With no cable installed, it shows how to install VB-Cable, step by step, and lets you choose it when it appears. It also says when a cable is turned off in Windows' Sound settings, waits for Windows to restart, or gets your PC's sound because Windows made it the output.
 - **Filters it can't run**, if there are any. [Known limits](#known-limits) lists them.
 
-If you choose **I'm new to OBS**, it shows the steps above instead, and carries on by itself when you close OBS. The last page shows your chain, with **Start with Windows** checked, and asks whether knobs should check for new versions, and update itself when there's one. Both are off until you turn them on.
+If you choose **I'm new to OBS**, it shows the steps above instead, and carries on by itself when you close OBS. The last page shows your chain, with **Start with Windows** checked, and asks whether knobs should check for new versions, and update itself when there's one. Both are off until you turn them on. Closing the page is the same as **Done**.
 
 knobs then lives in the tray. Windows 11 hides new tray icons, so click **^** (Show hidden icons) on the taskbar to find the knob.
 
@@ -150,7 +150,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Status line | What knobs is doing, and the chain it runs, such as `Mic/Aux › 4 filters › CABLE In 16ch`. When something needs you, the fix follows it in bold. |
 | Pause / Resume | Stops sending to the cable and lets go of the mic, or starts again. |
 | Mic ▸ | Which of OBS's mics to run. **Same as OBS** follows OBS's only mic, even when it's renamed or replaced. |
-| Cable ▸ | Where to send the mic. **Same as OBS** uses OBS's monitoring device. |
+| Cable ▸ | Where to send the mic. Your pick stays, whatever OBS monitors to. Other playback devices are under **Other devices**. |
 | Re-import from OBS | Reads OBS's settings now, rather than when OBS next closes. |
 | Pause while OBS is open | On by default. If you turn it off while OBS monitors your mic to the same cable, the cable gets your mic twice. |
 | Start with Windows | Starts knobs when you sign in. |
@@ -160,7 +160,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Setup… | Opens the first run again. |
 | Open log folder | Opens knobs's logs. |
 
-**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, when OBS was updated, and, with the update check on, when a new version of knobs is out or knobs has updated itself, or couldn't. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
+**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, when OBS was updated, when Windows plays your PC's sound into the cable, and, with the update check on, when a new version of knobs is out or knobs has updated itself, or couldn't. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it, and stays paused if you paused it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
 
 **knobs keeps its files** in two folders, and never writes to OBS's settings or its install. A portable copy keeps both in the `data` folder beside its `knobs.exe` instead.
 
