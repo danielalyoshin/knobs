@@ -84,6 +84,27 @@ std::variant<StartedTool, int> StartTool(const ToolStartOptions& options) {
   return started;
 }
 
+namespace {
+
+// What loading the optional modules did, as ImportMic reports it.
+void ReportModules(const std::vector<std::string>& needed, const import::ModuleErrors& failed) {
+  for (const std::string& module : needed) {
+    const auto error = failed.find(module);
+    if (error == failed.end()) {
+      Check(true, "modules", std::format("loaded {}, which the chain needs", module));
+    } else {
+      Report(Outcome::kWarn, "modules", std::format("{}: {}", module, error->second));
+    }
+  }
+}
+
+}  // namespace
+
+void LoadModulesForSource(runtime::ObsHost& host, std::string_view source_json) {
+  const std::vector<std::string> needed = import::NeededModulesForSource(host.api(), source_json);
+  ReportModules(needed, import::LoadModules(host.session(), needed));
+}
+
 Result<import::ImportedMic> ImportMic(runtime::ObsHost& host, const import::ActiveObsConfig& config,
                                       const ImportArgs& args) {
   auto collection = import::ReadActiveCollection(host.api(), config);
@@ -108,15 +129,7 @@ Result<import::ImportedMic> ImportMic(runtime::ObsHost& host, const import::Acti
   // As knobs does (core::ObsBackend::ImportMic): the optional modules the
   // picked mic needs, then its mic and pre-flight again.
   const std::vector<std::string> needed = (*collection)->NeededModules(mics[*picked]);
-  const import::ModuleErrors failed = import::LoadModules(session, needed);
-  for (const std::string& module : needed) {
-    const auto error = failed.find(module);
-    if (error == failed.end()) {
-      Check(true, "modules", std::format("loaded {}, which the chain needs", module));
-    } else {
-      Report(Outcome::kWarn, "modules", std::format("{}: {}", module, error->second));
-    }
-  }
+  ReportModules(needed, import::LoadModules(session, needed));
   if (!needed.empty()) mics = (*collection)->Mics(session.module_errors());
   const import::MicCandidate& mic = mics[*picked];
   Check(true, "mic", std::format("{}, device {}", import::DescribeMic(mic, *picked + 1), mic.device_id));

@@ -28,8 +28,9 @@ struct OfflineRun {
 // `tail_frames` of silence so buffered filters flush. libobs runs the chain
 // on this thread before each push returns, and an audio capture callback,
 // the hook libobs's monitor uses, collects the output. No audio device is
-// opened. A chain with NVIDIA's noise removal gets a few seconds to start
-// first, as it would live. The push source must be registered, and `input`
+// opened. A chain with NVIDIA's noise removal gets a few seconds to load its
+// models first, as it would live: 2.5 s a model, one for each channel of each
+// such filter, and at least 5 s. The push source must be registered, and `input`
 // must be at the session's sample rate, mono or stereo.
 Result<OfflineRun> RunChainOffline(const runtime::ObsApi& api, runtime::ObsSession& session,
                                    std::string_view source_json, bool load_callbacks, const FloatAudio& input,

@@ -3,6 +3,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+
 #include <format>
 #include <vector>
 
@@ -14,22 +16,24 @@ namespace {
 // Where the synthetic timestamps start. Only their spacing matters.
 constexpr uint64_t kFirstTimestampNs = 1'000'000'000;
 
-// NVIDIA's noise removal loads its model on a thread of its own, and passes
-// audio through untouched until it has (nvidia_audio_initialize,
-// nvidia-audiofx-filter.c). Live, that's the first moments after the mic
-// starts, in OBS too; offline, where seconds of audio take milliseconds, it
-// would be all of it. It took under 0.5 s on an RTX 4080 SUPER, and NVIDIA's
-// code allows about 2 s.
-constexpr DWORD kLateStartWaitMs = 5000;
+// NVIDIA's noise removal loads a model for each channel, one at a time across
+// every such filter, on threads of their own, and passes audio through
+// untouched until it has (nvidia_audio_initialize, nvidia-audiofx-filter.c).
+// Live, that's the first moments after the mic starts, in OBS too; offline,
+// where seconds of audio take milliseconds, it would be all of it. Each load
+// took under 0.25 s on an RTX 4080 SUPER, and NVIDIA's code allows about 2 s.
+constexpr DWORD kModelLoadWaitMs = 2500;
+constexpr DWORD kMinLateStartWaitMs = 5000;
 
-double WaitForLateStarts(const audio::ChainInfo& chain) {
+double WaitForLateStarts(const audio::ChainInfo& chain, uint32_t channels) {
+  DWORD models = 0;
   for (const audio::ChainInfo::Filter& filter : chain.filters) {
-    if (filter.type == "nvidia_audiofx_filter" && filter.known && filter.enabled) {
-      Sleep(kLateStartWaitMs);
-      return kLateStartWaitMs / 1000.0;
-    }
+    if (filter.type == "nvidia_audiofx_filter" && filter.known && filter.enabled) models += channels;
   }
-  return 0;
+  if (models == 0) return 0;
+  const DWORD wait = std::max(kMinLateStartWaitMs, models * kModelLoadWaitMs);
+  Sleep(wait);
+  return wait / 1000.0;
 }
 
 struct Collector {
@@ -64,7 +68,7 @@ Result<OfflineRun> RunChainOffline(const runtime::ObsApi& api, runtime::ObsSessi
 
   OfflineRun run;
   run.chain = audio::DescribeChain(api, *source);
-  run.waited = WaitForLateStarts(run.chain);
+  run.waited = WaitForLateStarts(run.chain, get_audio_channels(session.options().speakers));
   Collector collector;
   collector.channels = get_audio_channels(session.options().speakers);
   api.obs_source_add_audio_capture_callback(*source, OnAudio, &collector);

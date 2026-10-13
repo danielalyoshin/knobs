@@ -60,6 +60,10 @@ struct StartedTool {
 // code to end with: kExitSkip when OBS isn't installed, kExitFail otherwise.
 std::variant<StartedTool, int> StartTool(const ToolStartOptions& options);
 
+// Loads the optional modules a source object's filters need, as an import
+// does for the picked mic, and reports each.
+void LoadModulesForSource(runtime::ObsHost& host, std::string_view source_json);
+
 // Once libobs runs: reads the active scene collection, picks the mic and
 // runs the pre-flight checks.
 Result<import::ImportedMic> ImportMic(runtime::ObsHost& host, const import::ActiveObsConfig& config,

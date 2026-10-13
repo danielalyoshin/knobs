@@ -938,6 +938,7 @@ void RunMode(runtime::ObsHost& host, const Options& options, const std::optional
     auto text = ReadText(*options.source);
     if (!text) return Check(false, "chain", text.error());
     chain.json = std::move(*text);
+    LoadModulesForSource(host, chain.json);
   } else if (!config) {
     chain.json = audio::MicWithGainSourceJson(mic ? mic->id : "default", options.gain_db);
   }

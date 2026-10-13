@@ -84,7 +84,8 @@ expect("${output}" "0 leaked allocations")
 output_hash(vst_hash "${output}")
 
 # One open and one close per run, all on the harness's thread, which runs
-# the chain, and no editor.
+# the chain, and no editor. Each run's plugin closes before the next opens:
+# knobs has Qt delete it as the run's chain goes, not only at shutdown.
 if(NOT EXISTS "${log}")
   message(FATAL_ERROR "The plugin wrote no log, so obs-vst never opened it.")
 endif()
@@ -95,6 +96,9 @@ set(closes 0)
 set(threads)
 foreach(line IN LISTS lines)
   if(line MATCHES "^open ([0-9]+)$")
+    if(NOT opens EQUAL closes)
+      message(FATAL_ERROR "A run's plugin opened before the last run's closed:\n${log_text}")
+    endif()
     math(EXPR opens "${opens} + 1")
     list(APPEND threads "${CMAKE_MATCH_1}")
   elseif(line MATCHES "^close ([0-9]+)$")

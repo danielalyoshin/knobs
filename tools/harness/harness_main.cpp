@@ -236,15 +236,7 @@ int Run(const Options& options) {
   } else {
     json = options.chain == "gain" ? audio::MicWithGainSourceJson("default", 0.0) : kCoverageChain;
   }
-  if (!config) {
-    // As an import loads them (ImportMic).
-    for (const std::string& module : import::NeededModulesForSource(api, json)) {
-      const Status loaded = host->session().LoadOptionalModule(module);
-      Check(loaded.ok(), "modules",
-            loaded ? std::format("loaded {}, which the chain needs", module)
-                   : std::format("{}: {}", module, loaded.error()));
-    }
-  }
+  if (!config) LoadModulesForSource(*host, json);
 
   // Runs. Stops at the first one that fails; earlier failures, such as
   // --save-input's, don't stop them.
@@ -255,7 +247,8 @@ int Run(const Options& options) {
     const auto began = std::chrono::steady_clock::now();
     auto result = RunChainOffline(api, host->session(), json, load_callbacks, input, options.chunk,
                                   kTailSeconds * rate);
-    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    if (result) seconds -= result->waited;
     if (!result) {
       Check(false, "load chain", result.error());
       break;
@@ -264,8 +257,8 @@ int Run(const Options& options) {
       ReportChain(result->chain);
       if (result->waited > 0) {
         Report(Outcome::kNote, "warm-up",
-               std::format("each run waits {:.0f} s for NVIDIA's noise removal to start before the audio, as it "
-                           "has time to live",
+               std::format("each run waits {:.1f} s for NVIDIA's noise removal to load its models before the audio, "
+                           "as it has time to live; the times below leave it out",
                            result->waited));
       }
       if (result->chain.volume != 1.0f) {

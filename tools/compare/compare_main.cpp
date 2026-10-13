@@ -267,7 +267,8 @@ int Run(const Options& options) {
   ReportChain(ran->chain);
   if (ran->waited > 0) {
     Report(Outcome::kNote, "warm-up",
-           std::format("waited {:.0f} s for NVIDIA's noise removal to start before the audio, as OBS's has time to",
+           std::format("waited {:.1f} s for NVIDIA's noise removal to load its models before the audio, as OBS's "
+                       "has time to",
                        ran->waited));
     // Its output depends on what it heard before and where its 10 ms frames
     // fall. On the test PC, OBS's recording of it also jumped 1024 frames
