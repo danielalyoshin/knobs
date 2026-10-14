@@ -260,45 +260,60 @@ std::string VstPluginState(const VstPlugin& plugin) {
   return std::format("{} {} {}", plugin.size, plugin.written, JoinWithAnd(plugin.missing));
 }
 
+// A filter's note, and the kind of note it is, for its key (ImportNote::key).
+// Each warning has a kind of its own, so the notifications tell a new one
+// from one already said.
+struct FilterNote {
+  ImportNote note;
+  std::string_view kind;
+};
+
 // Why an optional module's filter isn't one libobs has: the module didn't
 // load, or for nv-filters, NVIDIA's runtime wasn't there or didn't start as
 // it loaded, so nv-filters registered no filter (load_nvidia_afx,
-// nvidia-audiofx-filter.c). A warning, unless OBS can't run it either, or a
-// restart will.
-ImportNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::string_view id,
+// nvidia-audiofx-filter.c). The filter passes audio through, so it's a
+// warning even when OBS can't run it either, unless a restart will.
+FilterNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::string_view id,
                         const std::string& plugin, const ModuleErrors& modules, bool nvidia_sdk_arrived) {
   const runtime::OptionalObsModule* module = OptionalModuleFor(id);
   const auto failed = module ? modules.find(module->name) : modules.end();
   const std::string error = failed == modules.end() ? "" : failed->second;
+  // Not 0.3.0's kinds, "vst" and "unknown", which its own warnings left in
+  // the warned list (Notifier::Options::warned) for these filters.
   if (id == kVstFilterId) {
-    return {true, std::format("Filter \"{}\" is a VST plugin ({}), and {} couldn't load OBS's VST module: {} It "
-                              "passes audio through untouched.",
-                              name, plugin.empty() ? "none chosen" : plugin, kDisplayName,
-                              error.empty() ? "obs-vst registered no filter." : error)};
+    return {{true, std::format("Filter \"{}\" is a VST plugin ({}), and {} couldn't load OBS's VST module: {} It "
+                               "passes audio through untouched.",
+                               name, plugin.empty() ? "none chosen" : plugin, kDisplayName,
+                               error.empty() ? "obs-vst registered no filter." : error)},
+            "vst-module"};
   }
   if (!error.empty()) {
-    return {true, std::format("Filter \"{}\" is NVIDIA's noise removal, and {} couldn't load OBS's nv-filters "
-                              "module: {} It passes audio through untouched.",
-                              name, kDisplayName, error)};
+    return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal, and {} couldn't load OBS's nv-filters "
+                               "module: {} It passes audio through untouched.",
+                               name, kDisplayName, error)},
+            "nvidia-module"};
   }
   if (nvidia_sdk_arrived) {
-    return {.text = std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK was installed "
-                                "after {} loaded OBS's NVIDIA filters, so the filter passes audio through untouched "
-                                "until {} restarts.",
-                                name, kDisplayName, kDisplayName),
-            .changes_expectations = true};
+    // Nothing to do: knobs restarts by itself.
+    return {{.text = std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK was installed "
+                                 "after {} loaded OBS's NVIDIA filters, so the filter passes audio through untouched "
+                                 "until {} restarts.",
+                                 name, kDisplayName, kDisplayName),
+             .changes_expectations = true},
+            "nvidia-restart"};
   }
   if (FindNvidiaAudioEffects(runtime::ObsVersion::FromLibobs(api.obs_get_version())).empty()) {
-    return {.text = std::format("Filter \"{}\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. "
-                                "It isn't installed, so the filter passes audio through untouched, as it does in "
-                                "OBS without it.",
-                                name),
-            .changes_expectations = true};
+    return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It "
+                               "isn't installed, so the filter passes audio through untouched, as it does in OBS "
+                               "without it.",
+                               name)},
+            "nvidia-sdk"};
   }
-  return {true, std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK is installed but "
-                            "didn't start, so the filter passes audio through untouched. It needs an NVIDIA RTX "
-                            "GPU, and the log says why it didn't start.",
-                            name)};
+  return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK is installed but "
+                             "didn't start, so the filter passes audio through untouched. It needs an NVIDIA RTX "
+                             "GPU, and the log says why it didn't start.",
+                             name)},
+          "nvidia-module"};
 }
 
 // `file` parsed by libobs as its JSON reader takes it: os_quick_read_utf8_file
@@ -384,36 +399,38 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   if (!known) {
     // An optional module's filter, with the module or what it needs missing.
     const std::string plugin = id == kVstFilterId ? FileName(VstPluginPath(api, filter)) : "";
-    notes.push_back(WhyNotLoaded(api, name, id, plugin, modules, nvidia_sdk_arrived));
-    // Not 0.3.0's keys, "vst" and "unknown", which its own warnings left in
-    // the warned list (Notifier::Options::warned) for these filters.
-    key(id == kVstFilterId ? "vst-module" : "nvidia-module");
+    FilterNote why = WhyNotLoaded(api, name, id, plugin, modules, nvidia_sdk_arrived);
+    notes.push_back(std::move(why.note));
+    key(why.kind);
     notes.back().file = plugin;
     return true;
   }
   if (id == kVstFilterId) {
+    // A filter that passes audio through is a warning even when it does in
+    // OBS too: the user has a plugin to choose or install. Not 0.3.0's
+    // kind, "vst", which its warning for every VST filter left in the warned
+    // list.
     const std::string path = VstPluginPath(api, filter);
     const VstPlugin plugin = plugins.Check(path);
     if (path.empty()) {
-      notes.push_back({.text = std::format("VST filter \"{}\" has no plugin chosen, so it passes audio through "
-                                           "untouched, in OBS too.",
-                                           name),
-                       .changes_expectations = true});
-      key("vst");
+      notes.push_back({true, std::format("VST filter \"{}\" has no plugin chosen, so it passes audio through "
+                                         "untouched, in OBS too.",
+                                         name)});
+      key("vst-none");
     } else if (!plugin.found) {
-      notes.push_back({.text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't at {} any more, so it "
+      notes.push_back({.warning = true,
+                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't at {} any more, so it "
                                            "passes audio through untouched, in OBS too.",
                                            name, FileName(path), path),
-                       .changes_expectations = true,
                        .file = FileName(path)});
-      key("vst");
+      key("vst-gone");
     } else if (!plugin.is64) {
-      notes.push_back({.text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't a 64-bit plugin, so it "
+      notes.push_back({.warning = true,
+                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't a 64-bit plugin, so it "
                                            "passes audio through untouched, in OBS too.",
                                            name, FileName(path)),
-                       .changes_expectations = true,
                        .file = FileName(path)});
-      key("vst");
+      key("vst-not-64-bit");
     } else if (!plugin.missing.empty()) {
       // In OBS, the program's folder is OBS's bin\64bit, which can have
       // them (PluginSearchFolders).

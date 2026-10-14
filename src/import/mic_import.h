@@ -70,7 +70,8 @@ Result<size_t> PickMicByName(const std::vector<MicCandidate>& mics, std::string_
 std::string DescribeMic(const MicCandidate& mic, size_t number);
 
 struct ImportNote {
-  // A warning means knobs's cable won't sound like OBS's; a note is
+  // A warning means a filter that's on doesn't run as set up, even where OBS
+  // doesn't run it either, or knobs's cable won't sound like OBS's. A note is
   // information only.
   bool warning = false;
   std::string text;

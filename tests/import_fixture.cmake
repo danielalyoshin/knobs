@@ -65,13 +65,13 @@ if(NOT code EQUAL 0)
 endif()
 # The optional modules load for the filters that need them. The VST plugin
 # isn't there, at a path no PC has, and NVIDIA's SDK isn't either: the test
-# points nv-filters at a folder without it (NVAFX_SDK_DIR).
+# points nv-filters at a folder without it (NVAFX_SDK_DIR). Each filter
+# passes audio through, in OBS too, so each is a warning.
 expect("${output}" "[ok  ] modules            loaded obs-vst, which the chain needs")
 expect("${output}" "[ok  ] modules            loaded nv-filters, which the chain needs")
-expect("${output}" "[--  ] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll) that isn't at C:/Program Files/VSTPlugins (not installed 7d3f9a2c)/ReaComp-standalone.dll any more, so it passes audio through untouched, in OBS too.")
+expect("${output}" "[warn] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll) that isn't at C:/Program Files/VSTPlugins (not installed 7d3f9a2c)/ReaComp-standalone.dll any more, so it passes audio through untouched, in OBS too.")
 expect("${output}" "[--  ] pre-flight         Filter \"VST\" opens its VST plugin's window in OBS.")
-# Without the SDK, OBS passes the filter's audio through too: a note.
-expect("${output}" "[--  ] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It isn't installed")
+expect("${output}" "[warn] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It isn't installed")
 expect("${output}" "[warn] pre-flight         Compressor \"Ducking\" turns the mic down under \"Music\" in OBS.")
 expect("${output}" " loads only the mic, so it keeps only this compressor's output gain (+2.5 dB), and the mic sounds as it does in OBS while nothing plays on \"Music\".")
 expect("${output}" "[--  ] pre-flight         Filter \"Gate\" is off in OBS, and stays off.")
@@ -92,7 +92,7 @@ expect("${output}" "3. gain_filter \"Ducking\"")
 expect("${output}" "6. gain_filter \"Makeup\"")
 expect("${output}" "7. vst_filter \"Old VST\" (disabled)")
 expect_not("${output}" "compressor_filter")
-expect("${output}" "libobs loaded the chain and ran its load callbacks; 1 warning(s)")
+expect("${output}" "libobs loaded the chain and ran its load callbacks; 3 warning(s)")
 
 # The global Mic/Aux device: no load callbacks, nothing to warn about.
 run_import(output code --pick 1)
@@ -139,3 +139,38 @@ if(NOT code EQUAL 0)
   message(FATAL_ERROR "Importing \"Mic\" with a new gain failed.")
 endif()
 expect_not("${output}" "${key}")
+
+# "Old VST" turned on in OBS, with no plugin chosen, and "VST" pointed at a
+# 32-bit DLL, Windows' own version.dll for 32-bit programs: each passes
+# audio through, in OBS too, so each is a warning.
+set(x86_dll "$ENV{SystemRoot}/SysWOW64/version.dll")
+file(TO_CMAKE_PATH "${x86_dll}" x86_dll)
+if(EXISTS "${x86_dll}")
+  string(REPLACE "C:/Program Files/VSTPlugins (not installed 7d3f9a2c)/ReaComp-standalone.dll" "${x86_dll}" json
+         "${json}")
+endif()
+string(FIND "${json}" "\"name\": \"Old VST\"" old_vst)
+if(old_vst EQUAL -1)
+  message(FATAL_ERROR "Expected the fixture's \"Old VST\" filter.")
+endif()
+string(SUBSTRING "${json}" ${old_vst} -1 rest)
+string(FIND "${rest}" "\"enabled\": false" off)
+if(off EQUAL -1)
+  message(FATAL_ERROR "Expected the fixture's \"Old VST\" filter to be off.")
+endif()
+math(EXPR off "${old_vst} + ${off}")
+string(SUBSTRING "${json}" 0 ${off} before)
+string(LENGTH "\"enabled\": false" length)
+math(EXPR after "${off} + ${length}")
+string(SUBSTRING "${json}" ${after} -1 after)
+file(WRITE "${scenes}" "${before}\"enabled\": true${after}")
+run_import(output code --pick 2)
+message("${output}")
+if(NOT code EQUAL 0)
+  message(FATAL_ERROR "Importing \"Podcast Mic\" with \"Old VST\" on failed.")
+endif()
+expect("${output}" "[warn] pre-flight         VST filter \"Old VST\" has no plugin chosen, so it passes audio through untouched, in OBS too.")
+if(EXISTS "${x86_dll}")
+  expect("${output}" "[warn] pre-flight         Filter \"VST\" is a VST plugin (version.dll) that isn't a 64-bit plugin, so it passes audio through untouched, in OBS too.")
+endif()
+expect("${output}" "libobs loaded the chain and ran its load callbacks; 4 warning(s)")

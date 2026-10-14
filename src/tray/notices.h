@@ -45,7 +45,7 @@ struct Notice {
   std::string text;   // What knobs does, or what to do.
   // The cable gets no mic. Shown with the attention badge.
   bool problem = false;
-  // Played with a sound: a problem, or a filter that won't sound as in OBS.
+  // Played with a sound: a problem, or a filter knobs can't run.
   bool sound = false;
   // What a click opens: the first run at this page, a web page in the
   // browser, or else the tray menu.
