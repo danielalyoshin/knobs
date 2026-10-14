@@ -155,7 +155,7 @@ The runtime copy carries both modules, and what they import, whenever the instal
 - **Threads.** The plugin opens and closes on the core thread, which pumps messages, for plugins that make windows or timers there, and processes on the mic's capture thread, as in OBS, where it opens on OBS's UI thread.
 - **Settings.** `obs-vst` restores the plugin's state from what OBS saved (`chunk_data`), but only while the plugin's file is the one it was saved with (`chunk_hash`, its MD5). After a plugin update, the plugin runs at its defaults, in OBS too.
 - **DLL lookups.** A plugin's own imports resolve from Windows' default directories, as in OBS: the app's folder, which is knobs's rather than OBS's `bin\64bit`, the copy's `bin\64bit`, and the system's. A plugin that needs a DLL OBS ships and knobs doesn't copy won't load, so pre-flight reads the plugin's import table and warns about any DLL it wouldn't find (`UnresolvedDllImports`).
-- **Files in use.** knobs holds the plugin's DLL while the chain runs, so a plugin's installer can't replace it then. Pausing knobs lets go of it.
+- **Files in use.** knobs holds the plugin's DLL while the chain runs, so a plugin's installer can't replace it then. Pausing knobs lets go of it, and an installer that closes apps through Windows' Restart Manager closes knobs and opens it again after (Restarts, settings and startup).
 - **Mono.** With a mono profile, `obs-vst` feeds a stereo plugin's second input from a buffer it never clears (`VSTPlugin::process`), in OBS too, so such a plugin's output can vary.
 - **Crashes.** A plugin runs in knobs's process, so one that crashes takes knobs down, as it takes OBS down.
 
@@ -300,6 +300,8 @@ Do Not Disturb hides notifications, so the icon shows the state too: a pause bad
 ### Restarts, settings and startup
 
 A restart the core needs, for another OBS version or a new audio format, happens at once, and the new copy says why. OBS asks first, because a restart would interrupt a stream, but restarting knobs costs only a moment of silence. A copy the user paused stays paused through it (`--paused`), as through an update, and says so.
+
+An installer that has to replace a file knobs has open, such as a VST plugin's DLL, can close knobs through Windows' Restart Manager, as Windows Installer packages and Inno Setup's do by default. knobs asks Windows to start it again after one (`RegisterApplicationRestart`), with `--reopened`, and `--paused` while the user has paused it, which knobs keeps up to date. Restart Manager closes it with `ENDSESSION_CLOSEAPP`, and knobs lets go of the mic and the cable and quits, as at sign-out. Windows doesn't start knobs again after a crash or a hang, nor once it restarts for an update. At a shutdown or sign-out knobs takes its request back, so that Windows' own "restart apps" doesn't open it at the next sign-in: the Run entry does, if the user wants that. knobs's own installer closes knobs itself (Updates).
 
 Settings live in `%AppData%\knobs\settings.ini`, written whole through a temporary file. Pause isn't saved, so knobs runs after a cold boot. A picked OBS install or settings folder that stops working stays picked: knobs shows the error and offers the way back, but changes nothing by itself.
 

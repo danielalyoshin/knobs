@@ -106,6 +106,11 @@ struct TrayOptions {
   // paused if `paused`. The tray restarts by itself when the core needs it
   // to follow OBS.
   std::function<Status(core::RestartNeed why, bool paused)> restart;
+  // Has Windows start knobs again, paused if `paused`, after an installer
+  // closes it to replace a file it has open (Restart Manager), or not, if
+  // `on` is false. The tray keeps it on, and in step with pausing, except
+  // while Windows shuts down or signs out.
+  std::function<Status(bool on, bool paused)> reopen_after_installer;
   // Why the copy before this one restarted it, if it did.
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
   UpdateHooks updates;
@@ -212,6 +217,9 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // sending the mic to the cable, the user hasn't paused it, and nothing of
   // knobs's is open.
   bool CanRestart() const;
+  // Turns on reopening after an installer (TrayOptions::reopen_after_installer),
+  // paused or not as knobs is now, unless it's on that way already.
+  void KeepReopening();
   // Starts the core, which sends the mic.
   Status StartCore();
   // Starts the core held back for an update at start (Create), once that's
@@ -289,6 +297,9 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // The warnings the notifications have said, as last saved.
   std::optional<std::vector<std::string>> warned_;
   bool restart_tried_ = false;  // Since the core said it needs a restart.
+  // How Windows reopens knobs after an installer: paused or not, or not at
+  // all (TrayOptions::reopen_after_installer).
+  std::optional<bool> reopen_paused_;
   // The update check's plan, and its settings, which are kept even without
   // the check (HasUpdateCheck).
   Updater updater_;

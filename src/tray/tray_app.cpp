@@ -193,6 +193,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   } else if (const Status started = app->StartCore(); !started) {
     return Error{started.error()};
   }
+  app->KeepReopening();
   if (!settings_error.empty()) {
     app->ShowError(std::format("Couldn't read the settings, so {} uses its defaults until they're changed.\n\n{}",
                                kDisplayName, settings_error));
@@ -312,6 +313,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (snapshot) {
         const core::Snapshot before = std::exchange(snapshot_, std::move(*snapshot));
         UpdateTip();
+        KeepReopening();
         if (RestartByItself()) return 0;
         if (setup_window_) setup_window_->Changed(before);
         Notify(notifier_.Changed(snapshot_, Quiet(), Clock::now()));
@@ -382,11 +384,25 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       }
       break;
     case WM_QUERYENDSESSION:
+      // An installer closing knobs to replace a file it has open asks with
+      // ENDSESSION_CLOSEAPP, and Windows reopens knobs after it
+      // (KeepReopening). Otherwise Windows is shutting down or signing out:
+      // at the next sign-in, the Run entry starts knobs if the user wants
+      // that, and Windows' own "restart apps" shouldn't.
+      if (!(lparam & ENDSESSION_CLOSEAPP) && reopen_paused_ && options_.reopen_after_installer) {
+        if (const Status off = options_.reopen_after_installer(false, false); !off) Log(off.error());
+        reopen_paused_.reset();
+      }
       return TRUE;
     case WM_ENDSESSION:
-      // Windows is shutting down or signing out, and ends the process after
-      // this returns: let go of the mic and the cable first.
-      if (wparam) Quit();
+      // The session or knobs ends, and Windows ends the process after this
+      // returns: let go of the mic and the cable first.
+      if (wparam) {
+        Quit();
+      } else {
+        // It doesn't end after all: another program said no.
+        KeepReopening();
+      }
       return 0;
     case WM_CLOSE:
       Quit();
@@ -853,6 +869,17 @@ bool TrayApp::Paused() const {
   // Before the core says otherwise, as this copy was started: an update at
   // start comes before it.
   return snapshot_.paused_by_user || (snapshot_.state == core::State::kStarting && options_.start_paused);
+}
+
+void TrayApp::KeepReopening() {
+  if (!options_.reopen_after_installer || quitting_) return;
+  const bool paused = Paused();
+  if (reopen_paused_ == paused) return;
+  if (const Status on = options_.reopen_after_installer(true, paused); !on) {
+    Log(on.error());
+    return;
+  }
+  reopen_paused_ = paused;
 }
 
 bool TrayApp::CanRestart() const {

@@ -822,6 +822,12 @@ int Run(const Options& options) {
                       tray::RestartNeedName(why), paused ? " --paused" : ""));
     return Status(Ok{});
   };
+  tray_options.reopen_after_installer = [](bool on, bool paused) {
+    Print(on ? std::format("{} would open again{} if an installer closed it\n", kDisplayName,
+                           paused ? ", paused," : "")
+             : std::format("{} wouldn't open again if an installer closed it\n", kDisplayName));
+    return Status(Ok{});
+  };
   tray_options.resume_after_restart = [](bool on) {
     Print(on ? std::format("{} would open again at the next sign-in, to carry on with the first run\n", kDisplayName)
              : std::format("{} wouldn't open again at the next sign-in\n", kDisplayName));

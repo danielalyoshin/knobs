@@ -15,10 +15,14 @@
 //               copy is already running, it opens it there.
 //   --restart   Started by a copy that's quitting to restart: wait for it.
 //   --restarted-for <reason>
-//               Why: obs-updated, obs-changed or audio-changed. The new copy
-//               says so in a notification.
-//   --paused    The copy that restarted it, or started the update, was
-//               paused: start paused.
+//               Why: obs-updated, obs-changed, audio-changed or
+//               nvidia-installed. The new copy says so in a notification.
+//   --reopened  Started by Windows after an installer closed the copy before
+//               to replace a file it had open (Restart Manager): as
+//               --restart, but if a copy is already running, quit without a
+//               word.
+//   --paused    The copy that restarted it, started the update, or was
+//               closed by an installer, was paused: start paused.
 //   --updated   Started by the installer of an update this copy's
 //               predecessor started: as --restart. Whether it updated is
 //               said by whichever copy runs first after it.
@@ -122,7 +126,7 @@ bool IsWindows11() {
 }
 
 int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core::RestartNeed restarted_for,
-        bool paused, bool updated) {
+        bool paused, bool updated, bool reopened) {
   const std::wstring window_class = std::format(L"{}.tray", kDisplayNameW);
   auto lock = tray::SingleInstance::Acquire(window_class, restart ? kRestartWait : 0ms);
   if (!lock) {
@@ -135,7 +139,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
       // the same sign-in, and not have its window yet: it opens the first
       // run, as this one would have.
       for (int tries = 0; tries < 40 && !tray::ActivateTray(window_class, true); ++tries) Sleep(250);
-    } else if (!startup && !updated) {
+    } else if (!startup && !updated && !reopened) {
       // Show where the running copy is, unless Windows or an installer
       // started this one.
       tray::ActivateTray(window_class);
@@ -153,10 +157,10 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   std::shared_ptr<runtime::ObsLog> log;
   if (auto opened = runtime::OpenNewLog(dirs->Logs(), std::format(L"{} ", kDisplayNameW), 20)) {
     log = std::move(*opened);
-    log->Write(LOG_INFO, std::format("{} {} started{}{}{}{}{}", kDisplayName, KNOBS_VERSION,
+    log->Write(LOG_INFO, std::format("{} {} started{}{}{}{}{}{}", kDisplayName, KNOBS_VERSION,
                                      startup ? ", at sign-in" : "", resume_setup ? ", to carry on with setup" : "",
                                      restart ? ", to restart" : "", updated ? ", after an update" : "",
-                                     paused ? ", paused" : ""));
+                                     reopened ? ", after an installer closed it" : "", paused ? ", paused" : ""));
   }
   const tray::RunEntry run{std::wstring(kDisplayNameW), std::format(L"\"{}\" --startup", exe.native())};
 
@@ -181,6 +185,18 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     }
     if (paused) arguments += L" --paused";
     return StartCopy(exe, arguments);
+  };
+  options.reopen_after_installer = [](bool on, bool paused) -> Status {
+    // Not after a crash or a hang, nor once Windows restarts for an update:
+    // the Run entry starts knobs at sign-in, if the user wants that.
+    const HRESULT result = on ? RegisterApplicationRestart(paused ? L"--reopened --paused" : L"--reopened",
+                                                           RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT)
+                              : UnregisterApplicationRestart();
+    if (FAILED(result)) {
+      return Error{std::format("Couldn't {} Windows to start {} again after an installer closes it (0x{:08X}).",
+                               on ? "ask" : "stop asking", kDisplayName, static_cast<uint32_t>(result))};
+    }
+    return Ok{};
   };
   options.restarted_for = restarted_for;
   options.resume_after_restart = [exe](bool on) {
@@ -238,6 +254,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   bool restart = false;
   bool paused = false;
   bool updated = false;
+  bool reopened = false;
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
   int argc = 0;
   if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
@@ -248,6 +265,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       restart |= arg == L"--restart";
       paused |= arg == L"--paused";
       updated |= arg == L"--updated";
+      reopened |= arg == L"--reopened";
       if (arg == L"--restarted-for" && i + 1 < argc) {
         restarted_for = tray::RestartNeedNamed(ToUtf8(argv[++i])).value_or(core::RestartNeed::kNone);
       }
@@ -261,8 +279,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     tray::ShowStartupError(std::format("Couldn't initialize COM (0x{:08X}).", static_cast<uint32_t>(com)));
     return 1;
   }
-  // An update's new copy waits for the old one, as a restart's does.
-  const int code = Run(instance, startup, resume_setup, restart || updated, restarted_for, paused, updated);
+  // An update's new copy waits for the old one, as a restart's does, and so
+  // does one Windows reopens.
+  const int code =
+      Run(instance, startup, resume_setup, restart || updated || reopened, restarted_for, paused, updated, reopened);
   CoUninitialize();
   return code;
 }
