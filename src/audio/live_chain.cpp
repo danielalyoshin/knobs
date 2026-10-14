@@ -25,18 +25,18 @@ void SetMonitoring(const runtime::ObsApi& api, obs_source_t* source, bool on) {
 
 // Turns obs-vst's "Open interface when active" off for every VST filter in
 // a source object, which would otherwise abort the process as it loads
-// (runtime::kVstOpenWhenActive). A filter's type is its versioned id, or its
-// id without one, as the loader reads it (obs_load_source_type), and the
-// loader loads a filter's own filters too. Nested objects are shared, so
-// this changes `source` itself.
+// (runtime::kVstOpenWhenActive). A VST filter is one whose id without its
+// version is obs-vst's, as pre-flight tells them, whichever version of it the
+// loader loads (obs_load_source_type). The loader loads a filter's own
+// filters too. Nested objects are shared, so this changes `source` itself.
 void CloseVstWindows(const runtime::ObsApi& api, obs_data_t* source) {
   obs_data_array_t* filters = api.obs_data_get_array(source, "filters");
   const size_t count = filters ? api.obs_data_array_count(filters) : 0;
   for (size_t i = 0; i < count; ++i) {
     obs_data_t* filter = api.obs_data_array_item(filters, i);
-    std::string type = OrEmpty(api.obs_data_get_string(filter, "versioned_id"));
-    if (type.empty()) type = OrEmpty(api.obs_data_get_string(filter, "id"));
-    if (type == "vst_filter") {
+    const std::string id = OrEmpty(api.obs_data_get_string(filter, "id"));
+    const std::string versioned_id = OrEmpty(api.obs_data_get_string(filter, "versioned_id"));
+    if (id == "vst_filter" || versioned_id.starts_with("vst_filter")) {
       obs_data_t* settings = api.obs_data_get_obj(filter, "settings");
       if (settings) {
         api.obs_data_set_bool(settings, runtime::kVstOpenWhenActive, false);
