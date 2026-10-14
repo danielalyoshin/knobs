@@ -21,6 +21,8 @@ std::string_view StateName(State state) {
       return "paused";
     case State::kPausedForObs:
       return "paused while OBS is open";
+    case State::kPausedForUpdate:
+      return "paused for a plugin update";
     case State::kNeedsSetup:
       return "needs setup";
     case State::kMicMissing:

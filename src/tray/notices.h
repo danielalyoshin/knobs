@@ -28,6 +28,7 @@ struct Notice {
     kObsMissing,
     kNeedsSetup,      // Something changed in OBS that only the user can settle.
     kFailed,
+    kRestartNeeded,   // An SDK installer was released because a restart can't happen yet.
     kChainChanged,    // The mic or its chain changed in OBS.
     kFilterWarnings,  // New pre-flight warnings: filters knobs can't run.
     kRestarted,       // The copy before this one restarted to follow OBS.
@@ -63,8 +64,9 @@ std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name);
 // a notification. The rules:
 // - Problems, the states where the cable gets no mic, get one as they begin:
 //   a mic or cable missing once it has been for Options::device_grace, the
-//   others at once. A restart that's needed gets none: the tray restarts by
-//   itself. While paused, nothing is missing.
+//   others at once. A restart that's needed gets none while the tray can
+//   restart by itself; a delayed SDK restart says its installer was released.
+//   While paused, nothing is missing.
 // - A problem's notification is taken down when it ends.
 // - The mic or its chain changing in OBS gets one after the first import,
 //   and new pre-flight warnings do even at it, if Options::warned says which

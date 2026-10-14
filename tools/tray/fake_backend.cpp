@@ -122,6 +122,12 @@ const std::vector<FakeScenario>& FakeScenarios() {
       {"paused", "running, then paused from the menu", [](FakeWorld&, FakeScript& script) { script.pause = true; }},
       {"obs-open", std::format("OBS is open, so {} pauses", kDisplayName),
        [](FakeWorld&, FakeScript& script) { script.obs_running = true; }},
+      {"plugin-update", "paused while an installer updates a plugin",
+       [](FakeWorld& world, FakeScript& script) {
+         world.file_update.folders = {L"C:\\VSTPlugins"};
+         world.files_changing = true;
+         script.reimport = true;
+       }},
       {"mic-missing", "the mic's recording device isn't connected",
        [](FakeWorld& world, FakeScript&) {
          world.devices.mics.clear();

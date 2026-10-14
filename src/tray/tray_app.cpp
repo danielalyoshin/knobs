@@ -803,8 +803,15 @@ bool TrayApp::Restart() {
   restart_tried_ = true;
   if (!options_.restart) return false;
   // Paused, the new copy is too: a restart doesn't put the mic back live.
-  if (const Status started = options_.restart(snapshot_.restart, Paused()); !started) {
-    ShowError(std::format("{}\n\nQuit {}, then start it again.", started.error(), kDisplayName));
+  const auto start = [restart = options_.restart, why = snapshot_.restart, paused = Paused()](const auto& files) {
+    return restart(why, paused, files);
+  };
+  if (const Status started = core_ ? core_->Restart(start) : start(std::vector<uintptr_t>{}); !started) {
+    const std::string advice = snapshot_.restart == core::RestartNeed::kNvidiaUpdating
+                                  ? std::format("The NVIDIA installer is no longer held waiting. If it says a file "
+                                                "is in use, quit {} and retry it.", kDisplayName)
+                                  : std::format("Quit {}, then start it again.", kDisplayName);
+    ShowError(std::format("{}\n\n{}", started.error(), advice));
     return false;
   }
   Quit();
@@ -883,6 +890,12 @@ void TrayApp::KeepReopening() {
 }
 
 bool TrayApp::CanRestart() const {
+  // A self-update starts a new copy without the plugin wait. Let that wait
+  // finish first, including the new SDK copy's time before its first snapshot.
+  if (snapshot_.state == core::State::kPausedForUpdate || snapshot_.restart == core::RestartNeed::kNvidiaUpdating ||
+      (snapshot_.state == core::State::kStarting && options_.restarted_for == core::RestartNeed::kNvidiaUpdating)) {
+    return false;
+  }
   return snapshot_.state != core::State::kRunning && !Paused() && !Quiet() && !in_menu_ && !OpenDialog();
 }
 

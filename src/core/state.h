@@ -49,6 +49,9 @@ enum class State {
   // Paused while OBS runs, so the cable never gets the mic twice. Resumes
   // when OBS exits, after a re-import.
   kPausedForObs,
+  // An installer is replacing a plugin or NVIDIA's SDK. Resumes after its
+  // folder has stopped changing, with a fresh import.
+  kPausedForUpdate,
   // Needs something only the user can settle; Snapshot::setup says what.
   kNeedsSetup,
   // The mic's recording device isn't connected, or it stopped sending audio.
@@ -60,7 +63,8 @@ enum class State {
   kObsMissing,
   // The OBS install is a version knobs doesn't support.
   kObsUnsupported,
-  // OBS was updated, or its profile's sample rate or channels changed.
+  // OBS was updated, its profile's sample rate or channels changed, or
+  // NVIDIA's SDK was installed or is being updated.
   // knobs has to restart to follow: libobs can't be reloaded in a running
   // process, and OBS restarts for a format change too. Also, with
   // RestartNeed::kNone, when trying again after libobs failed to start with
@@ -104,6 +108,8 @@ enum class RestartNeed {
   // NVIDIA's Audio Effects SDK was installed after nv-filters loaded without
   // it, and nv-filters only looks for it as it loads.
   kNvidiaInstalled,
+  // An installer needs NVIDIA's loaded DLLs. Only process exit frees them.
+  kNvidiaUpdating,
 };
 
 // The chain as the user knows it from OBS.
@@ -140,6 +146,9 @@ struct Snapshot {
   State state = State::kStarting;
   SetupNeed setup = SetupNeed::kNone;      // With kNeedsSetup.
   RestartNeed restart = RestartNeed::kNone;  // With kRestartNeeded.
+  // The SDK restart couldn't happen promptly, or failed. Its installer is
+  // no longer held waiting, though loaded DLLs can still block it.
+  bool restart_delayed = false;
   // What happened, in a sentence or two, for states that need explaining.
   std::string detail;
   // The imported chain, once an import has got as far as the mic.

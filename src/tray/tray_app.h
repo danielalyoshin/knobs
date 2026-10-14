@@ -105,7 +105,10 @@ struct TrayOptions {
   // Starts a new copy, which waits for this one to quit, says why, and starts
   // paused if `paused`. The tray restarts by itself when the core needs it
   // to follow OBS.
-  std::function<Status(core::RestartNeed why, bool paused)> restart;
+  // Called on the core's thread, through Backend::Restart. `files` must be
+  // inherited before returning success, then released by the new copy only
+  // after this process exits (StartWithFileOplocks). Must return promptly.
+  std::function<Status(core::RestartNeed why, bool paused, const std::vector<uintptr_t>& files)> restart;
   // Has Windows start knobs again, paused if `paused`, after an installer
   // closes it to replace a file it has open (Restart Manager), or not, if
   // `on` is false. The tray keeps it on, and in step with pausing, except

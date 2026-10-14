@@ -45,6 +45,7 @@ add_library(knobs_runtime STATIC
   src/runtime/qt_app.cpp
   src/runtime/runtime_copy.cpp
   src/util/app_dirs.cpp
+  src/util/files_in_use.cpp
   src/util/json.cpp
   src/util/pick_folder.cpp
   src/util/process.cpp
@@ -54,7 +55,7 @@ add_library(knobs_runtime STATIC
 target_include_directories(knobs_runtime PUBLIC src)
 target_link_libraries(knobs_runtime
   PUBLIC libobs_headers knobs_options
-  PRIVATE version shell32 ole32 wtsapi32
+  PRIVATE version shell32 ole32 wtsapi32 psapi
 )
 
 # The update check's requests to GitHub and its check of an installer's
@@ -175,8 +176,6 @@ foreach(version IN ITEMS 32.2.2 33.0.0)
   target_link_options(fake-obs-${major} PRIVATE /NOENTRY)
   add_dependencies(knobs-tests fake-obs-${major})
 endforeach()
-# A VST 2 plugin of our own, for the vst test: OBS's VST filter needs one,
-# and the tests can't count on any being installed.
 # A DLL whose import, knobs-test-dep.dll, is in a folder of its own, for the
 # unit tests of UnresolvedDllImports.
 add_library(knobs-test-dep SHARED tests/fixtures/dep/test_dep.cpp)
@@ -185,6 +184,8 @@ add_library(knobs-test-needs-dep SHARED tests/fixtures/dep/test_needs_dep.cpp)
 target_link_libraries(knobs-test-needs-dep PRIVATE knobs-test-dep)
 add_dependencies(knobs-tests knobs-test-needs-dep)
 
+# A VST 2 plugin of our own, for the vst test: OBS's VST filter needs one,
+# and the tests can't count on any being installed.
 add_library(knobs-test-vst SHARED tests/fixtures/vst/knobs_test_vst.cpp)
 target_link_libraries(knobs-test-vst PRIVATE knobs_options)
 add_dependencies(knobs-harness knobs-test-vst)

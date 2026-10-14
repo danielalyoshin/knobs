@@ -39,6 +39,8 @@ struct CoreOptions {
   std::chrono::milliseconds device_poll{5000};
   // Start paused, as the copy before was (Controller::Start).
   bool paused = false;
+  // A copy restarted to free NVIDIA's SDK waits before loading it again.
+  bool wait_for_nvidia = false;
   Controller::Timing timing;
 };
 
@@ -69,6 +71,11 @@ class Core {
   // A line for knobs's log, which libobs's start opens: lines before it are
   // lost.
   void Log(std::string line);
+
+  // Runs `start` on the core's thread with the backend's file watches, and
+  // waits for its result. Called only from outside the core's thread; the
+  // hook must return promptly and must not call back into the tray.
+  Status Restart(RestartHook start);
 
  private:
   using Task = std::function<void(Controller& controller, Controller::Clock::time_point now)>;

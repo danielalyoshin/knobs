@@ -45,6 +45,7 @@ bool Stopped(State state) {
     case State::kRunning:
     case State::kPausedByUser:
     case State::kPausedForObs:
+    case State::kPausedForUpdate:
       return false;
     default:
       return true;
@@ -179,8 +180,14 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       notice.title = std::format("{} stopped after an error", kDisplayName);
       notice.text = snapshot.detail.empty() ? "Click for what to do." : snapshot.detail + " Click for what to do.";
       return notice;
+    case State::kRestartNeeded:
+      if (!snapshot.restart_delayed) return std::nullopt;
+      notice.kind = Kind::kRestartNeeded;
+      notice.page = FirstRunPage::kProblem;
+      notice.title = std::format("{} couldn't restart yet", kDisplayName);
+      notice.text = snapshot.detail;
+      return notice;
     default:
-      // A restart that's needed: the tray restarts by itself.
       return std::nullopt;
   }
 }
@@ -298,6 +305,10 @@ std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& sna
       return Notice{.kind = Kind::kRestarted,
                     .title = "NVIDIA's Audio Effects SDK was installed",
                     .text = std::format("{} restarted to run NVIDIA's noise removal with it.{}", kDisplayName, paused)};
+    case core::RestartNeed::kNvidiaUpdating:
+      return Notice{.kind = Kind::kRestarted,
+                    .title = "NVIDIA's Audio Effects SDK update",
+                    .text = std::format("{} restarted so its installer could replace the files.{}", kDisplayName, paused)};
     case core::RestartNeed::kNone:
       break;
   }
@@ -316,6 +327,8 @@ std::string_view RestartNeedName(core::RestartNeed need) {
       return "obs-changed";
     case core::RestartNeed::kNvidiaInstalled:
       return "nvidia-installed";
+    case core::RestartNeed::kNvidiaUpdating:
+      return "nvidia-updating";
     case core::RestartNeed::kNone:
       break;
   }
@@ -324,7 +337,8 @@ std::string_view RestartNeedName(core::RestartNeed need) {
 
 std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name) {
   for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged,
-                                       core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled}) {
+                                       core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled,
+                                       core::RestartNeed::kNvidiaUpdating}) {
     if (RestartNeedName(need) == name) return need;
   }
   return std::nullopt;
@@ -367,8 +381,9 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   // there.
   std::optional<std::pair<State, SetupNeed>> problem;
   if (OtherProblem(snapshot.state)) problem = std::pair{snapshot.state, snapshot.setup};
-  if (problem != problem_) {
-    for (const Kind kind : {Kind::kObsUnsupported, Kind::kObsMissing, Kind::kNeedsSetup, Kind::kFailed}) {
+  if (problem != problem_ || snapshot.restart_delayed != before.restart_delayed) {
+    for (const Kind kind : {Kind::kObsUnsupported, Kind::kObsMissing, Kind::kNeedsSetup, Kind::kFailed,
+                            Kind::kRestartNeeded}) {
       Hide(kind, update);
     }
     problem_ = problem;
@@ -413,8 +428,11 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
 
   // After a restart or an update, the new copy says so, after anything shown
   // now. A problem says more than the restart.
-  if (first && !Stopped(snapshot.state)) {
-    if (auto notice = Restarted(options_.restarted_for, snapshot)) ShowOrHold(std::move(*notice), quiet, update);
+  if (snapshot.state != State::kPausedForUpdate && options_.restarted_for != core::RestartNeed::kNone) {
+    if (!Stopped(snapshot.state)) {
+      if (auto notice = Restarted(options_.restarted_for, snapshot)) ShowOrHold(std::move(*notice), quiet, update);
+    }
+    options_.restarted_for = core::RestartNeed::kNone;
   }
   if (first && options_.updated) {
     Notice notice = *options_.updated;
@@ -476,6 +494,7 @@ Badge Notifier::badge() const {
       return mic_ && mic_->due ? Badge::kAttention : Badge::kNone;
     case State::kPausedByUser:
     case State::kPausedForObs:
+    case State::kPausedForUpdate:
       return Badge::kPaused;
     case State::kMicMissing:
       return mic_ && mic_->due ? Badge::kAttention : Badge::kNone;

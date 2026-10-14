@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -50,6 +51,7 @@ struct ChainPlan {
   std::string chain_key;    // import::ImportedMic::chain_key
   bool load_callbacks = false;
   audio::AudioDevice cable;
+  std::vector<std::filesystem::path> vst_plugins;
 
   // The same chain to the same cable (audio::SameId). The rest of
   // source_json, and the cable's name, don't change what reaches the cable.
@@ -58,6 +60,18 @@ struct ChainPlan {
            audio::SameId(cable.id, other.cable.id);
   }
 };
+
+// An installer is waiting to replace loaded files in these folders. NVIDIA's
+// DLLs stay loaded until exit; VST plugins unload when the chain stops.
+struct FileUpdate {
+  std::vector<std::filesystem::path> folders;
+  bool restart = false;
+};
+
+// Starts a replacement process. Before returning success, it must pass the
+// backend's borrowed file handles to that process, which releases them only
+// after this one exits (StartWithFileOplocks). Called on the core's thread.
+using RestartHook = std::function<Status(const std::vector<uintptr_t>& files)>;
 
 // How loud a running chain's output has been since the last look, from the
 // peak of each packet it filtered (10 ms each from win-wasapi), as the monitor
@@ -97,6 +111,25 @@ class Backend {
   // time: the Controller stops one before starting the next.
   virtual Status StartChain(const ChainPlan& plan) = 0;
   virtual void StopChain() = 0;
+  // Watches the running chain's loaded VST DLLs. Null releases those watches,
+  // only after StopChain has unloaded the plugins. NVIDIA watches survive
+  // pauses and failed imports; a restart inherits any broken ones.
+  virtual void WatchChainFiles(const ChainPlan* plan) = 0;
+  // The loaded files an installer wants to replace, since the last watch.
+  // NVIDIA's SDK needs a restart; a VST plugin needs the chain stopped.
+  virtual FileUpdate FilesWanted() = 0;
+  // Names, sizes and write times in these folders and their subfolders, for
+  // noticing writes while an installer works. Doesn't need libobs.
+  virtual std::string FingerprintFolders(const std::vector<std::filesystem::path>& folders) = 0;
+  // Where this OBS version looks for NVIDIA's SDK, even while it is missing
+  // during an update. Used by the new process before loading nv-filters.
+  virtual std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion& obs) = 0;
+  // Starts the replacement through `start`, passing the SDK watches to it.
+  // Keeps the originals until shutdown or ReleaseUpdateFiles.
+  virtual Status Restart(const RestartHook& start) = 0;
+  // Releases the SDK watches when a restart can't happen promptly or fails.
+  // The installer proceeds as without them; loaded DLLs can still block it.
+  virtual void ReleaseUpdateFiles() = 0;
   // Audio packets the running chain has filtered since it started. Silence
   // counts: win-wasapi passes silent packets on as zeros.
   virtual uint64_t ChainPackets() = 0;

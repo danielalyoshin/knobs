@@ -108,6 +108,8 @@ TEST(StatusLineFollowsTheState) {
   CHECK(StatusLine(snapshot) == "Paused: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.state = State::kPausedForObs;
   CHECK(StatusLine(snapshot) == "Paused while OBS is open: Mic/Aux › 4 filters › CABLE In 16ch");
+  snapshot.state = State::kPausedForUpdate;
+  CHECK(StatusLine(snapshot) == "Paused for a plugin update: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.state = State::kMicMissing;
   CHECK(StatusLine(snapshot) == "Mic missing: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.state = State::kCableMissing;
@@ -256,7 +258,8 @@ TEST(MenuOffersTheFixInBold) {
   };
   core::Snapshot snapshot = Running();
   for (const State state :
-       {State::kRunning, State::kPausedByUser, State::kPausedForObs, State::kMicMissing, State::kStarting}) {
+       {State::kRunning, State::kPausedByUser, State::kPausedForObs, State::kPausedForUpdate,
+        State::kMicMissing, State::kStarting}) {
     snapshot.state = state;
     CHECK(fix(snapshot) == "none");
   }

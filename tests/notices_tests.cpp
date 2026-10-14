@@ -702,6 +702,29 @@ TEST(NoticesSayKnobsRestartedForAnObsUpdate) {
                                                   "OBS was updated to 32.2.3"}));
 }
 
+TEST(NoticesExplainWhenADelayedSdkRestartReleasesTheInstaller) {
+  for (const bool quiet : {false, true}) {
+    Fixture f;
+    f.Start();
+    f.quiet = quiet;
+    f.world->Change([](FakeWorld& world) { world.file_update = {{L"C:\\sdk"}, true}; });
+    f.Advance(1s);
+    CHECK(f.state() == State::kRestartNeeded && f.events.empty());
+    f.Advance(2s);
+    if (quiet) {
+      CHECK(f.events.empty());
+      f.quiet = false;
+      f.Apply(f.notifier.Tick(false, f.now));
+    }
+    CHECK(f.events == std::vector<std::string>{std::format("{} couldn't restart yet", kDisplayName)});
+    CHECK(f.last.kind == Notice::Kind::kRestartNeeded && f.last.problem);
+    CHECK(f.last.text == f.controller.snapshot().detail);
+    CHECK(f.last.text.find("retry it") != std::string::npos);
+    f.Advance(30s);
+    CHECK(f.events.size() == 1);
+  }
+}
+
 TEST(NoticesSayWindowsPlaysThePcIntoTheCable) {
   // Installing a cable can make it Windows' Output: the user hears nothing,
   // and the cable's apps hear the PC with the mic. A click opens Sound
@@ -841,12 +864,35 @@ TEST(NoticesSayWhatStopsKnobs) {
 
 TEST(RestartReasonsHaveNames) {
   for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged,
-                                       core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled}) {
+                                       core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled,
+                                       core::RestartNeed::kNvidiaUpdating}) {
     CHECK(RestartNeedNamed(RestartNeedName(need)) == need);
   }
   CHECK(RestartNeedName(core::RestartNeed::kObsChanged) == "obs-changed");
   CHECK(RestartNeedName(core::RestartNeed::kObsUpdated) == "obs-updated");
   CHECK(!RestartNeedNamed("") && !RestartNeedNamed("OBS-UPDATED"));
+}
+
+TEST(PluginUpdatesShowAPauseBadgeWithoutAnError) {
+  FakeWorld world = tools::DefaultWorld();
+  world.file_update.folders = {L"C:\\plugins"};
+  world.files_changing = true;
+  Fixture f(world);
+  f.Start();
+  f.Advance(1s);
+  CHECK(f.state() == State::kPausedForUpdate && f.events == kNone && f.notifier.badge() == Badge::kPaused);
+}
+
+TEST(NvidiaRestartNoticeWaitsForTheFilesToSettle) {
+  Fixture f(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kNvidiaUpdating});
+  f.controller.Start(false, f.now, false, true);
+  f.Feed();
+  CHECK(f.state() == State::kPausedForUpdate && f.events == kNone);
+  f.Advance(5s);
+  CHECK(f.state() == State::kRunning && f.events.size() == 1);
+  CHECK(f.last.kind == Notice::Kind::kRestarted && f.last.title == "NVIDIA's Audio Effects SDK update");
+  f.Reimport();
+  CHECK(f.events.size() == 1);
 }
 
 // --- Badges -------------------------------------------------------------------------

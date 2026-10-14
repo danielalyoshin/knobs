@@ -130,6 +130,8 @@ std::optional<Page> Blocking(const core::Snapshot& snapshot) {
   switch (snapshot.state) {
     case State::kStarting:
       return Page::kLooking;
+    case State::kPausedForUpdate:
+      return snapshot.chain ? std::nullopt : std::optional(Page::kLooking);
     case State::kObsMissing:
       return Page::kFindObs;
     case State::kObsUnsupported:
@@ -306,6 +308,8 @@ std::string ObsUserNote(const core::Snapshot& snapshot) {
   switch (snapshot.state) {
     case State::kStarting:
       return "Looking for OBS…";
+    case State::kPausedForUpdate:
+      return "Waiting for a plugin update…";
     case State::kObsMissing:
       return std::format("Can't find OBS Studio. If it's installed somewhere else, you can show {} where.",
                          kDisplayName);
@@ -755,6 +759,9 @@ PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool 
     case State::kPausedByUser:
       view.content += "\n\nIt's paused now. Resume it from the tray menu.";
       break;
+    case State::kPausedForUpdate:
+      view.content += "\n\nIt's paused while a plugin is being updated, and resumes when its files stop changing.";
+      break;
     case State::kMicMissing:
       view.content +=
           std::format("\n\n{} {} starts when the mic is back.", EscapeMarkup(snapshot.detail), kDisplayName);
@@ -880,6 +887,10 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, const CheckS
       break;
     case Page::kLooking:
       view = Looking();
+      if (snapshot.state == State::kPausedForUpdate) {
+        view.instruction = "Waiting for a plugin update…";
+        view.content = snapshot.detail;
+      }
       break;
     case Page::kFindObs:
       view = FindObs(snapshot);

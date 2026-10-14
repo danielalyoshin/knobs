@@ -49,14 +49,16 @@ Controller::Controller(Backend& backend, Settings settings, Publish publish, Tim
   snapshot_.settings = settings_;
 }
 
-void Controller::Start(bool obs_running, Clock::time_point now, bool paused) {
+void Controller::Start(bool obs_running, Clock::time_point now, bool paused, bool wait_for_nvidia) {
   obs_running_ = obs_running;
   paused_by_user_ = paused;
+  wait_for_nvidia_ = wait_for_nvidia;
+  next_file_check_ = now + timing_.file_poll;
   snapshot_.obs_running = obs_running;
   snapshot_.paused_by_user = paused;
   publish_(snapshot_);
   devices_ = backend_.ListDevices();
-  Refresh();
+  Refresh(now);
   Reconcile(now);
 }
 
@@ -69,7 +71,7 @@ void Controller::SetObsRunning(bool running, Clock::time_point now) {
     // OBS saves its settings as it exits, so they're complete by now.
     backend_.Log("OBS exited. Importing its settings again.");
     ClearFailures();
-    Refresh();
+    Refresh(now);
   }
   Reconcile(now);
 }
@@ -118,7 +120,7 @@ void Controller::Reimport(Clock::time_point now) {
   // Devices too: without Windows' notifications, as when they couldn't be
   // listened for, this is how a device that came back is seen.
   devices_ = backend_.ListDevices();
-  Refresh();
+  Refresh(now);
   Reconcile(now);
 }
 
@@ -132,16 +134,50 @@ void Controller::Apply(const Settings& settings, Clock::time_point now) {
   settings_ = settings;
   ClearFailures();
   if (reimport) {
-    Refresh();
+    Refresh(now);
   } else if (import_ && import_->mic) {
     PlanChain();
   }
   Reconcile(now);
 }
 
+Status Controller::Restart(const RestartHook& start, Clock::time_point now) {
+  if (file_restart_due_ && now >= *file_restart_due_) ReleaseUpdateFiles();
+  const Status started = backend_.Restart(start);
+  if (started) {
+    file_restart_due_.reset();  // The replacement now holds the installer through exit.
+  } else {
+    ReleaseUpdateFiles();
+    Reconcile(now);
+  }
+  return started;
+}
+
 void Controller::Tick(Clock::time_point now) {
   if (stopped_) return;
   bool changed = false;
+  if (file_restart_due_ && now >= *file_restart_due_) {
+    ReleaseUpdateFiles();
+    changed = true;
+  }
+  if (now >= next_file_check_) {
+    next_file_check_ = now + timing_.file_poll;
+    CheckFileUpdates(now);
+    if (!updating_folders_.empty() && !file_restart_) {
+      const std::string fingerprint = backend_.FingerprintFolders(updating_folders_);
+      if (fingerprint != folder_fingerprint_) {
+        folder_fingerprint_ = fingerprint;
+        files_quiet_since_ = now;
+      } else if (now - files_quiet_since_ >= timing_.file_settle) {
+        updating_folders_.clear();
+        backend_.Log("The plugin folder stopped changing. Importing OBS's settings again.");
+        ClearFailures();
+        devices_ = backend_.ListDevices();
+        Refresh(now);
+      }
+    }
+    changed = true;
+  }
   if (devices_due_ && now >= *devices_due_) {
     devices_due_.reset();
     devices_first_.reset();
@@ -188,6 +224,8 @@ std::optional<Controller::Clock::time_point> Controller::NextDeadline() const {
     if (time && (!next || *time < *next)) next = time;
   };
   consider(devices_due_);
+  consider(next_file_check_);
+  consider(file_restart_due_);
   if (loaded_) consider(next_check_);
   consider(retry_at_);
   return next;
@@ -198,7 +236,39 @@ void Controller::Stop() {
   stopped_ = true;
 }
 
-void Controller::Refresh() {
+void Controller::CheckFileUpdates(Clock::time_point now) {
+  if (file_restart_) return;
+  const FileUpdate update = backend_.FilesWanted();
+  if (update.restart) {
+    // The new process inherits the broken oplocks and releases them after
+    // this process has exited. Stopping the chain doesn't unload the SDK.
+    file_restart_ = true;
+    file_restart_due_ = now + timing_.file_restart_wait;
+  } else if (!update.folders.empty() && updating_folders_.empty()) {
+    WaitForFiles(update.folders, now);
+  }
+}
+
+void Controller::WaitForFiles(std::vector<std::filesystem::path> folders, Clock::time_point now) {
+  updating_folders_ = std::move(folders);
+  StopChain();  // Unload before releasing the oplocks and letting the writer in.
+  folder_fingerprint_ = backend_.FingerprintFolders(updating_folders_);
+  files_quiet_since_ = std::max(now, timing_.clock());
+  ClearFailures();
+}
+
+void Controller::ReleaseUpdateFiles() {
+  if (!file_restart_ || update_files_released_) return;
+  backend_.ReleaseUpdateFiles();
+  file_restart_due_.reset();
+  update_files_released_ = true;
+}
+
+void Controller::Refresh(Clock::time_point now) {
+  CheckFileUpdates(now);
+  // A re-import, OBS closing or a settings change cannot load files halfway
+  // through an update. The eventual refresh uses the latest settings.
+  if (file_restart_ || !updating_folders_.empty()) return;
   problem_.reset();
   import_.reset();
   plan_.reset();
@@ -216,6 +286,14 @@ void Controller::Refresh() {
   obs_install_ = obs.install;
   obs_writes_config_ = obs.config && obs.config->obs_writes_here;
   if (obs.found == ObsFound::kUnsupported) return fail(State::kObsUnsupported, obs.message);
+  if (wait_for_nvidia_) {
+    wait_for_nvidia_ = false;
+    auto folders = backend_.NvidiaUpdateFolders(obs.install.version);
+    if (!folders.empty()) {
+      WaitForFiles(std::move(folders), now);
+      return;
+    }
+  }
   // libobs stays loaded until the process ends (runtime::ObsRuntime).
   if (libobs_ && obs.install.version != libobs_->version) {
     // Newer where the old one was is an update. Older, or another folder
@@ -297,11 +375,12 @@ void Controller::PlanChain() {
     return;
   }
   const import::ImportedMic& mic = *import_->mic;
-  plan_ = ChainPlan{mic.source_json, mic.chain_key, mic.load_callbacks(), {"", cable}};
+  plan_ = ChainPlan{mic.source_json, mic.chain_key, mic.load_callbacks(), {"", cable}, mic.vst_plugins};
 }
 
 void Controller::Reconcile(Clock::time_point now) {
   if (stopped_) return;
+  CheckFileUpdates(now);
   Snapshot next = Decide(now);
   if (next.state != State::kRunning) {
     StopChain();
@@ -313,6 +392,7 @@ void Controller::Reconcile(Clock::time_point now) {
     plan.cable.name = CableName();
     const Status started = backend_.StartChain(plan);
     if (started) {
+      backend_.WatchChainFiles(&plan);
       // Not `now`: the import or the chain's start may have taken seconds.
       const Clock::time_point started_at = timing_.clock();
       loaded_ = std::move(plan);
@@ -367,7 +447,20 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.state = state;
     next.detail = std::move(detail);
   };
-  if (problem_) {
+  if (file_restart_) {
+    set(State::kRestartNeeded,
+        std::format("An installer is updating NVIDIA's Audio Effects SDK. {} has to restart to let it finish.",
+                    kDisplayName));
+    next.restart = RestartNeed::kNvidiaUpdating;
+    next.restart_delayed = update_files_released_;
+    if (update_files_released_) {
+      next.detail = std::format("{} couldn't restart yet, so it let the NVIDIA installer continue. "
+                                "If the installer says a file is in use, quit {} and retry it.",
+                                kDisplayName, kDisplayName);
+    }
+  } else if (!updating_folders_.empty()) {
+    set(State::kPausedForUpdate, "Waiting for the updated files to stop changing.");
+  } else if (problem_) {
     set(problem_->state, problem_->detail);
     next.setup = problem_->setup;
     next.restart = problem_->restart;
@@ -397,6 +490,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
 void Controller::StopChain() {
   if (!loaded_) return;
   backend_.StopChain();
+  backend_.WatchChainFiles(nullptr);
   loaded_.reset();
 }
 

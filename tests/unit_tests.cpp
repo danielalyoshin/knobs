@@ -7,6 +7,7 @@
 #include <winioctl.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -42,7 +43,9 @@
 #include "runtime/runtime_copy.h"
 #include "test_harness.h"
 #include "util/app_dirs.h"
+#include "util/files_in_use.h"
 #include "util/json.h"
+#include "util/process.h"
 #include "util/win_strings.h"
 
 namespace {
@@ -177,6 +180,168 @@ TEST(PeImportsRejectsNonBinaries) {
   WriteFile(dir.path / L"not-a-dll.dll", "MZ but not really a PE file");
   CHECK(!ReadDllImports(dir.path / L"not-a-dll.dll").ok());
   CHECK(!ReadDllImports(dir.path / L"missing.dll").ok());
+}
+
+// --- Files in use --------------------------------------------------------------
+
+TEST(FileOplockLetsAnInstallerReplaceALoadedDll) {
+  using namespace std::chrono_literals;
+  fs::path dependency;
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+    if (entry.path().filename() == L"knobs-test-dep.dll") dependency = entry.path();
+  }
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  TempDir dir(L"oplock");
+  for (const int operation : {0, 1, 2}) {  // Overwrite, rename, delete.
+    const fs::path file = dir.path / std::format(L"loaded-{}.dll", operation);
+    fs::copy_file(dependency, file);
+    HMODULE module = LoadLibraryW(file.c_str());
+    CHECK(module != nullptr);
+    if (!module) continue;
+    const auto modules = LoadedModules();
+    CHECK(std::any_of(modules.begin(), modules.end(), [&](const fs::path& path) { return SamePath(path, file); }));
+    std::promise<void> broken;
+    auto notified = broken.get_future();
+    auto taken = FileOplock::Take(file, [&] { broken.set_value(); });
+    CHECK(taken.ok());
+    if (!taken) {
+      FreeLibrary(module);
+      continue;
+    }
+    auto watch = std::move(*taken);
+    const HANDLE reader = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    CHECK(reader != INVALID_HANDLE_VALUE && !watch->wanted());
+    if (reader != INVALID_HANDLE_VALUE) CloseHandle(reader);
+
+    auto writer = std::async(std::launch::async, [&]() -> DWORD {
+      if (operation == 1) return MoveFileExW(file.c_str(), (dir.path / L"renamed.dll").c_str(), 0) ? 0 : GetLastError();
+      if (operation == 2) return DeleteFileW(file.c_str()) ? 0 : GetLastError();
+      const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+      if (out == INVALID_HANDLE_VALUE) return GetLastError();
+      DWORD written = 0;
+      const bool wrote = ::WriteFile(out, "updated", 7, &written, nullptr) && written == 7;
+      const DWORD error = wrote ? 0 : GetLastError();
+      CloseHandle(out);
+      return error;
+    });
+    CHECK(notified.wait_for(3s) == std::future_status::ready);
+    CHECK(watch->wanted());
+    CHECK(writer.wait_for(50ms) == std::future_status::timeout);
+    CHECK(FreeLibrary(module));
+    // Unloading alone doesn't let the installer proceed: it waits for the
+    // oplock's handle too. The controller must release them in this order.
+    CHECK(writer.wait_for(50ms) == std::future_status::timeout);
+    watch.reset();
+    CHECK(writer.get() == ERROR_SUCCESS);
+    if (operation == 0) CHECK(fs::file_size(file) == 7);
+    if (operation == 1) CHECK(fs::exists(dir.path / L"renamed.dll") && !fs::exists(file));
+    if (operation == 2) CHECK(!fs::exists(file));
+  }
+}
+
+TEST(FileOplockCancelsWithoutCallingBack) {
+  TempDir dir(L"oplock-cancel");
+  const fs::path file = dir.path / L"file";
+  WriteFile(file, "original");
+  std::atomic<int> calls = 0;
+  auto watch = FileOplock::Take(file, [&] { ++calls; });
+  CHECK(watch.ok());
+  if (watch) watch->reset();
+  CHECK(calls == 0);
+  const HANDLE writer = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+  CHECK(writer != INVALID_HANDLE_VALUE);
+  CHECK(!FileOplock::Take(file, {}).ok());  // A writer already has it.
+  if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+  CHECK(!FileOplock::Take(dir.path / L"missing", {}).ok());
+}
+
+// Two copies of the test binary exercise the same handoff as the tray. The
+// first keeps the DLL loaded; the replacement releases its inherited oplock
+// only after the first copy exits. Neither runs the test suite.
+int HoldDllForUpdate(const fs::path& file, const fs::path& ready, const fs::path& done) {
+  if (!LoadLibraryW(file.c_str())) return 1;
+  auto watch = FileOplock::Take(file, {});
+  if (!watch) return 2;
+  WriteFile(ready, "ready");
+  const ULONGLONG deadline = GetTickCount64() + 10000;
+  while (!(*watch)->wanted() && GetTickCount64() < deadline) Sleep(10);
+  if (!(*watch)->wanted()) return 3;
+  const Status started = StartWithFileOplocks(SelfPath(), std::format(L"--file-update-helper \"{}\"", done.native()),
+                                             {(*watch)->handle()});
+  // The watch closes normally, but the DLL stays mapped through process exit.
+  return started ? 0 : 4;
+}
+
+TEST(FileOplocksHandTheWriterToTheReplacementProcess) {
+  using namespace std::chrono_literals;
+  TempDir dir(L"oplock-handoff");
+  fs::path dependency;
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+    if (entry.path().filename() == L"knobs-test-dep.dll") dependency = entry.path();
+  }
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  const fs::path file = dir.path / L"loaded.dll";
+  const fs::path ready = dir.path / L"ready";
+  const fs::path done = dir.path / L"done";
+  fs::copy_file(dependency, file);
+  auto process = StartProcessToWait(SelfPath(), std::format(L"--hold-dll \"{}\" \"{}\" \"{}\"",
+                                                           file.native(), ready.native(), done.native()), dir.path);
+  CHECK(process.ok());
+  if (!process) return;
+  const ULONGLONG deadline = GetTickCount64() + 5000;
+  while (!fs::exists(ready) && GetTickCount64() < deadline && WaitForSingleObject(*process, 0) == WAIT_TIMEOUT) Sleep(10);
+  CHECK(fs::exists(ready));
+  auto writer = std::async(std::launch::async, [&]() -> DWORD {
+    const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (out == INVALID_HANDLE_VALUE) return GetLastError();
+    CloseHandle(out);
+    return ERROR_SUCCESS;
+  });
+  CHECK(WaitForSingleObject(*process, 10000) == WAIT_OBJECT_0);
+  DWORD code = 1;
+  CHECK(GetExitCodeProcess(*process, &code) && code == 0);
+  CloseHandle(*process);
+  CHECK(writer.wait_for(5s) == std::future_status::ready);
+  CHECK(writer.get() == ERROR_SUCCESS);
+  CHECK(fs::file_size(file) == 0);
+  const ULONGLONG finished = GetTickCount64() + 5000;
+  while (!fs::exists(done) && GetTickCount64() < finished) Sleep(10);
+  CHECK(fs::exists(done));
+  CHECK(!WaitForFileOplocks(L"").ok());
+  CHECK(!WaitForFileOplocks(L"not-handles").ok());
+  CHECK(!StartWithFileOplocks(SelfPath(), L"", {}).ok());
+}
+
+TEST(FolderFingerprintFollowsAnUpdate) {
+  TempDir dir(L"fingerprint");
+  const std::vector<fs::path> folders = {dir.path / L"plugin", dir.path / L"sdk"};
+  std::string previous = FolderFingerprint(folders);
+  const auto changed = [&] {
+    const std::string next = FolderFingerprint(folders);
+    CHECK(next != previous);
+    // A completed write has stable metadata immediately, without a wait
+    // for NTFS's directory entry cache to catch up.
+    CHECK(next == FolderFingerprint(folders));
+    previous = next;
+  };
+  WriteFile(folders[0] / L"plugin.dll", "one");
+  changed();
+  WriteFile(folders[0] / L"plugin.dll", "updated");
+  changed();
+  fs::last_write_time(folders[0] / L"plugin.dll", fs::last_write_time(folders[0] / L"plugin.dll") + std::chrono::seconds(2));
+  changed();
+  fs::rename(folders[0] / L"plugin.dll", folders[0] / L"renamed.dll");
+  changed();
+  WriteFile(folders[1] / L"models" / L"version" / L"model", "new model");
+  changed();
+  fs::remove(folders[0] / L"renamed.dll");
+  changed();
+  CHECK(SamePath(L"C:/Plugins/../plugins/test.dll", L"c:\\PLUGINS\\test.dll"));
+  CHECK(InFolder(L"C:/Plugins/sub/test.dll", L"c:\\plugins\\"));
+  CHECK(!InFolder(L"C:/Plugins-other/test.dll", L"C:/Plugins"));
+  CHECK(!InFolder(L"C:/Plugins/test.dll", L""));
 }
 
 // --- OBS install ---------------------------------------------------------------
@@ -1511,9 +1676,18 @@ TEST(EnvelopeIgnoresFramesOffTheGrid) {
 
 }  // namespace
 
-int main() {
+int wmain(int argc, wchar_t** argv) {
   using knobs::test::g_failures;
   using knobs::test::Tests;
+  if (argc == 5 && std::wstring_view(argv[1]) == L"--hold-dll") {
+    return HoldDllForUpdate(argv[2], argv[3], argv[4]);
+  }
+  if (argc == 5 && std::wstring_view(argv[1]) == L"--file-update-helper" &&
+      std::wstring_view(argv[3]) == L"--wait-for-files") {
+    if (!knobs::WaitForFileOplocks(argv[4])) return 1;
+    WriteFile(argv[2], "done");
+    return 0;
+  }
   if (knobs::test::RunAsStandInObs()) return 0;
   for (const knobs::test::TestCase& test : Tests()) {
     const int before = g_failures;

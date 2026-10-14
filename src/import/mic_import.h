@@ -12,6 +12,7 @@
 
 #include "import/obs_config.h"
 #include "runtime/obs_api.h"
+#include "runtime/obs_version.h"
 #include "util/result.h"
 
 namespace knobs::runtime {
@@ -112,6 +113,9 @@ struct ImportedMic {
   // plugin file obs-vst would load, which its settings don't. Imports with the
   // same key load the same chain.
   std::string chain_key;
+  // The plugin files saved by VST filters, including disabled filters:
+  // obs-vst can still load their plugins when the source loads.
+  std::vector<std::filesystem::path> vst_plugins;
 
   // Whether loading should run obs_source_load2 afterwards, as OBS does.
   bool load_callbacks() const { return mic.origin == MicOrigin::kSource; }
@@ -169,6 +173,8 @@ std::vector<std::string> NeededModulesForSource(const runtime::ObsApi& api, std:
 // nv-filters looks for it. nv-filters registers NVIDIA's noise removal only
 // if it was there when the module loaded.
 bool NvidiaAudioEffectsInstalled(const runtime::ObsApi& api);
+// The folder that version's nv-filters searches, whether installed or not.
+std::filesystem::path NvidiaAudioEffectsFolder(const runtime::ObsVersion& obs);
 
 // Loads optional modules into the session, and returns those that didn't
 // load, with why.

@@ -180,17 +180,7 @@ std::string JoinNames(const std::vector<std::string>& names) {
 // names, or the SDK's own folder in Program Files (nvafx_get_sdk_path,
 // nvafx-load.h). Empty if NVAudioEffects.dll isn't there.
 fs::path FindNvidiaAudioEffects(const runtime::ObsVersion& obs) {
-  const auto variable = [](const wchar_t* name) {
-    wchar_t value[MAX_PATH] = {};
-    const DWORD length = GetEnvironmentVariableW(name, value, MAX_PATH);
-    return length == 0 || length >= MAX_PATH - 1 ? fs::path() : fs::path(value);
-  };
-  fs::path dir = variable(L"NVAFX_SDK_DIR");
-  if (dir.empty() && obs >= runtime::ObsVersion{33, 0, 0}) dir = variable(L"AFX_SDK_DIR");
-  if (dir.empty()) {
-    const fs::path program_files = variable(L"ProgramFiles");
-    if (!program_files.empty()) dir = program_files / L"NVIDIA Corporation" / L"NVIDIA Audio Effects SDK";
-  }
+  const fs::path dir = NvidiaAudioEffectsFolder(obs);
   std::error_code ec;
   return !dir.empty() && fs::is_regular_file(dir / L"NVAudioEffects.dll", ec) ? dir : fs::path();
 }
@@ -636,6 +626,8 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
     DataPtr filter = Own(api_, api_.obs_data_array_item(key_filters.get(), i));
     for (const char* key : kFilterKeysTheCableIgnores) api_.obs_data_erase(filter.get(), key);
     if (String(api_, filter.get(), "id") == kVstFilterId) {
+      const std::string plugin = VstPluginPath(api_, filter.get());
+      if (!plugin.empty()) imported.vst_plugins.emplace_back(FromUtf8(plugin));
       // Every VST filter loads with its window off (audio::LoadSourceJson).
       DataPtr settings = Own(api_, api_.obs_data_get_obj(filter.get(), "settings"));
       if (settings) api_.obs_data_erase(settings.get(), kVstOpenWhenActive);
@@ -658,6 +650,21 @@ std::vector<std::string> NeededModulesForSource(const runtime::ObsApi& api, std:
 
 bool NvidiaAudioEffectsInstalled(const runtime::ObsApi& api) {
   return !FindNvidiaAudioEffects(runtime::ObsVersion::FromLibobs(api.obs_get_version())).empty();
+}
+
+fs::path NvidiaAudioEffectsFolder(const runtime::ObsVersion& obs) {
+  const auto variable = [](const wchar_t* name) {
+    wchar_t value[MAX_PATH] = {};
+    const DWORD length = GetEnvironmentVariableW(name, value, MAX_PATH);
+    return length == 0 || length >= MAX_PATH - 1 ? fs::path() : fs::path(value);
+  };
+  fs::path dir = variable(L"NVAFX_SDK_DIR");
+  if (dir.empty() && obs >= runtime::ObsVersion{33, 0, 0}) dir = variable(L"AFX_SDK_DIR");
+  if (dir.empty()) {
+    const fs::path program_files = variable(L"ProgramFiles");
+    if (!program_files.empty()) dir = program_files / L"NVIDIA Corporation" / L"NVIDIA Audio Effects SDK";
+  }
+  return dir;
 }
 
 ModuleErrors LoadModules(runtime::ObsSession& session, const std::vector<std::string>& modules) {

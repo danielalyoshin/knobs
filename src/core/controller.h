@@ -23,9 +23,11 @@ namespace knobs::core {
 // it on one thread.
 //
 // After every event it works out the state from what it knows, in this order:
+// a restart to free NVIDIA's SDK, or a pause while updated files settle;
 // problems with OBS, its settings or the import; a chain that failed to start,
-// or Windows' list of devices that couldn't be read; paused by the user; paused while OBS runs, unless Settings::pause_for_obs is
-// off; the cable missing; the mic missing. The chain runs only while the state
+// or Windows' list of devices that couldn't be read; paused by the user;
+// paused while OBS runs, unless Settings::pause_for_obs is off; the cable
+// missing; the mic missing. The chain runs only while the state
 // is kRunning. Every other state releases it, which frees the mic and the
 // cable, and the next kRunning loads it again with libobs's loader
 // (docs/design.md, Audio without video). A re-import while the chain runs
@@ -39,6 +41,13 @@ class Controller {
   using Publish = std::function<void(const Snapshot&)>;
 
   struct Timing {
+    // Oplock breaks are just flags until the core checks them. Also the
+    // interval between folder fingerprints while an installer works.
+    Clock::duration file_poll = std::chrono::seconds(1);
+    Clock::duration file_settle = std::chrono::seconds(5);
+    // How long to hold an SDK installer for a restart. If the tray can't
+    // start one by then, let the installer proceed as without the watches.
+    Clock::duration file_restart_wait = std::chrono::seconds(2);
     // Device notifications come in bursts, e.g. while an audio interface
     // powers up. The devices are listed again once notifications have
     // stopped for this long...
@@ -82,8 +91,9 @@ class Controller {
   Controller(Backend& backend, Settings settings, Publish publish, Timing timing = {});
 
   // Publishes kStarting, then imports and starts, or stays paused if
-  // `paused`: a copy restarted while the user had paused it.
-  void Start(bool obs_running, Clock::time_point now, bool paused = false);
+  // `paused`: a copy restarted while the user had paused it. With
+  // wait_for_nvidia, lets the SDK folder settle before loading anything.
+  void Start(bool obs_running, Clock::time_point now, bool paused = false, bool wait_for_nvidia = false);
   // OBS started or exited. When it exits, its settings are imported again.
   void SetObsRunning(bool running, Clock::time_point now);
   // OBS running in other Windows sessions (Snapshot::other_obs).
@@ -101,6 +111,9 @@ class Controller {
   // New settings, then a re-import if the install, OBS's settings folder or
   // the mic changed.
   void Apply(const Settings& settings, Clock::time_point now);
+  // Starts a replacement through the backend's restart hook. A failure
+  // releases any waiting SDK installer; success keeps it held through exit.
+  Status Restart(const RestartHook& start, Clock::time_point now);
   // Does whatever is due: settled device changes, the watchdog, a retry.
   void Tick(Clock::time_point now);
   // When Tick next has something to do, if ever.
@@ -129,7 +142,10 @@ class Controller {
   };
 
   // Finds OBS, reads its settings, starts libobs if needed, and imports.
-  void Refresh();
+  void Refresh(Clock::time_point now);
+  void CheckFileUpdates(Clock::time_point now);
+  void WaitForFiles(std::vector<std::filesystem::path> folders, Clock::time_point now);
+  void ReleaseUpdateFiles();
   // Works out the cable and the chain to run, from an import that found the
   // mic and the settings.
   void PlanChain();
@@ -154,6 +170,14 @@ class Controller {
   Timing timing_;
   Snapshot snapshot_;
   bool stopped_ = false;
+  bool wait_for_nvidia_ = false;
+  bool file_restart_ = false;
+  bool update_files_released_ = false;
+  std::optional<Clock::time_point> file_restart_due_;
+  std::vector<std::filesystem::path> updating_folders_;
+  std::string folder_fingerprint_;
+  Clock::time_point files_quiet_since_;
+  Clock::time_point next_file_check_;
 
   // From the last Refresh.
   std::optional<Problem> problem_;

@@ -15,8 +15,11 @@
 //               copy is already running, it opens it there.
 //   --restart   Started by a copy that's quitting to restart: wait for it.
 //   --restarted-for <reason>
-//               Why: obs-updated, obs-changed, audio-changed or
-//               nvidia-installed. The new copy says so in a notification.
+//               Why: obs-updated, obs-changed, audio-changed,
+//               nvidia-installed or nvidia-updating. The new copy says why.
+//   --wait-for-files <handles>
+//               Inherited process and oplock handles for an SDK update.
+//               Wait for the old process to exit, then release its writer.
 //   --reopened  Started by Windows after an installer closed the copy before
 //               to replace a file it had open (Restart Manager): as
 //               --restart, but if a copy is already running, quit without a
@@ -50,6 +53,7 @@
 #include "tray/single_instance.h"
 #include "tray/tray_app.h"
 #include "util/app_dirs.h"
+#include "util/files_in_use.h"
 #include "util/process.h"
 #include "util/win_strings.h"
 
@@ -178,12 +182,13 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   if (log) options.log = [log](std::string_view line) { log->Write(LOG_INFO, line); };
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };
-  options.restart = [exe](core::RestartNeed why, bool paused) {
+  options.restart = [exe](core::RestartNeed why, bool paused, const std::vector<uintptr_t>& files) {
     std::wstring arguments = L"--restart";
     if (why != core::RestartNeed::kNone) {
       arguments += std::format(L" --restarted-for {}", FromUtf8(tray::RestartNeedName(why)));
     }
     if (paused) arguments += L" --paused";
+    if (!files.empty()) return StartWithFileOplocks(exe, arguments, files);
     return StartCopy(exe, arguments);
   };
   options.reopen_after_installer = [](bool on, bool paused) -> Status {
@@ -220,7 +225,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   options.updates.folder = dirs->local / L"updates";
   options.updates.current = {KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
   options.updates.can_install = !dirs->portable && InstalledByInstaller(exe.parent_path());
-  options.start_core = [log](core::Observer& observer, const core::Settings& settings, bool paused) {
+  options.start_core = [log, restarted_for](core::Observer& observer, const core::Settings& settings, bool paused) {
     core::ObsBackendOptions backend;
     backend.log = log;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
@@ -228,6 +233,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     core::CoreOptions core_options;
     core_options.settings = settings;
     core_options.paused = paused;
+    core_options.wait_for_nvidia = restarted_for == core::RestartNeed::kNvidiaUpdating;
     return core::Core::Start(std::make_unique<core::ObsBackend>(std::move(backend)), observer,
                              std::move(core_options));
   };
@@ -256,6 +262,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   bool updated = false;
   bool reopened = false;
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
+  std::wstring file_handoff;
   int argc = 0;
   if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
     for (int i = 1; i < argc; ++i) {
@@ -269,8 +276,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       if (arg == L"--restarted-for" && i + 1 < argc) {
         restarted_for = tray::RestartNeedNamed(ToUtf8(argv[++i])).value_or(core::RestartNeed::kNone);
       }
+      if (arg == L"--wait-for-files" && i + 1 < argc) file_handoff = argv[++i];
     }
     LocalFree(argv);
+  }
+  if (!file_handoff.empty()) {
+    if (const Status waited = WaitForFileOplocks(file_handoff); !waited) {
+      tray::ShowStartupError(waited.error());
+      return 1;
+    }
   }
   // The tray's thread is a single-threaded apartment: the shell's dialogs
   // and ShellExecute need one.

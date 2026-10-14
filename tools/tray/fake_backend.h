@@ -34,6 +34,8 @@ struct FakeWorld {
   std::optional<std::string> chain_error;
   // The running chain gets no audio, as when win-wasapi stops capturing.
   bool stalled = false;
+  core::FileUpdate file_update;
+  bool files_changing = false;
 };
 
 // The world, changed by knobs-tray's keys while the core's thread reads it.
@@ -112,6 +114,14 @@ class FakeBackend : public core::Backend {
   audio::Endpoints ListDevices() override { return world_->Get().devices; }
   Status StartChain(const core::ChainPlan& plan) override;
   void StopChain() override {}
+  void WatchChainFiles(const core::ChainPlan* plan) override { files_watched_ = plan != nullptr; }
+  core::FileUpdate FilesWanted() override { return files_watched_ ? world_->Get().file_update : core::FileUpdate{}; }
+  std::string FingerprintFolders(const std::vector<std::filesystem::path>&) override {
+    return std::to_string(world_->Get().files_changing ? ++file_changes_ : file_changes_);
+  }
+  std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion&) override { return {L"C:\\sdk"}; }
+  Status Restart(const core::RestartHook& start) override { return start({}); }
+  void ReleaseUpdateFiles() override { world_->Change([](FakeWorld& world) { world.file_update = {}; }); }
   // Flowing unless stalled: 10 ms packets, a second's worth each time it's
   // asked. Counted from the chain's start, as the real backend counts.
   uint64_t ChainPackets() override { return world_->Get().stalled ? packets_ : packets_ += 100; }
@@ -127,6 +137,8 @@ class FakeBackend : public core::Backend {
   bool pick_by_number_ = false;
   int checks_ = 0;
   uint64_t packets_ = 0;
+  bool files_watched_ = false;
+  uint64_t file_changes_ = 0;
 };
 
 // The installed OBS and an OBS settings folder, such as the made-up one in

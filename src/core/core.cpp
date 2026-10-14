@@ -71,6 +71,15 @@ void Core::Log(std::string line) {
   Post([line = std::move(line)](Controller& controller, Clock::time_point) { controller.Log(line); });
 }
 
+Status Core::Restart(RestartHook start) {
+  auto result = std::make_shared<std::promise<Status>>();
+  std::future<Status> started = result->get_future();
+  Post([start = std::move(start), result](Controller& controller, Clock::time_point now) {
+    result->set_value(controller.Restart(start, now));
+  });
+  return started.get();
+}
+
 void Core::Post(Task task) {
   {
     std::lock_guard lock(mutex_);
@@ -125,7 +134,7 @@ void Core::Run(std::unique_ptr<Backend> backend, std::promise<Status>* started) 
     }
 
     bool obs_running = options_.obs_running();
-    controller.Start(obs_running, Clock::now(), options_.paused);
+    controller.Start(obs_running, Clock::now(), options_.paused, options_.wait_for_nvidia);
     // Logged once there's a log, which libobs's start opens.
     std::optional<Clock::time_point> next_device_poll;
     if (!device_watch_error.empty()) {

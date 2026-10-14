@@ -101,9 +101,9 @@ Options:
                          Without it, the first run counts as finished unless
                          --first-run is given.
   --start-with-windows   Start with "Start with Windows" checked.
-  --restarted-for <why>  Start as the copy {0} starts to follow OBS, which says
-                         why in a notification: obs-updated, obs-changed or
-                         audio-changed.
+  --restarted-for <why>  Start as the copy {0} starts after a restart, which says
+                         why in a notification: obs-updated, obs-changed,
+                         audio-changed, nvidia-installed or nvidia-updating.
   --paused               Start paused, as the copy does that a paused copy
                          restarted or updated.
   --windows10            Word Windows' Sound settings as Windows 10 does.
@@ -513,6 +513,9 @@ void CALLBACK OnSettled(HWND, UINT, UINT_PTR timer, DWORD) {
   if (session.script.reimport) {
     session.script.reimport = false;
     Print("menu: Re-import from OBS\n");
+    // A plugin update can already have paused the core. Importing while it
+    // waits changes no snapshot, so keep the script moving in that case too.
+    WaitToSettle();
     session.app->Execute(tray::kIdReimport);
     return;
   }
@@ -816,7 +819,7 @@ int Run(const Options& options) {
     Print(std::format("Start with Windows {}\n", on ? "on" : "off"));
     return Status(Ok{});
   };
-  tray_options.restart = [](core::RestartNeed why, bool paused) {
+  tray_options.restart = [](core::RestartNeed why, bool paused, const std::vector<uintptr_t>&) {
     Print(std::format("{0} would restart now{1}{2}{3}\n", kDisplayName,
                       why == core::RestartNeed::kNone ? "" : ", and say why: knobs-tray --restarted-for ",
                       tray::RestartNeedName(why), paused ? " --paused" : ""));
@@ -901,6 +904,7 @@ int Run(const Options& options) {
     core::CoreOptions core_options;
     core_options.settings = settings;
     core_options.paused = paused;
+    core_options.wait_for_nvidia = g_session->options.restarted_for == core::RestartNeed::kNvidiaUpdating;
     core_options.obs_running = [] { return g_session->obs_running.load(); };
     core_options.other_obs = [] {
       if (!g_session->other_obs) return std::vector<core::OtherObs>();

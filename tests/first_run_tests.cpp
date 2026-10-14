@@ -217,6 +217,13 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   missing.state = State::kMicMissing;
   missing.detail = "The recording device for \"Mic/Aux\" isn't connected.";
   CHECK(Contains(first_run.View(missing).content, "isn't connected. "));
+  core::Snapshot updating = Running();
+  updating.state = State::kPausedForUpdate;
+  CHECK(Contains(first_run.View(updating).content, "paused while a plugin is being updated"));
+  updating.chain.reset();  // The new NVIDIA copy has not imported yet.
+  updating.detail = "Waiting for the updated files to stop changing.";
+  CHECK(first_run.View(updating).page == Page::kLooking);
+  CHECK(first_run.View(updating).instruction == "Waiting for a plugin update…");
 }
 
 TEST(SeveralMicsAskWhichOne) {

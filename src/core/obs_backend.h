@@ -14,6 +14,7 @@
 #include "audio/live_chain.h"
 #include "core/backend.h"
 #include "runtime/obs_host.h"
+#include "util/files_in_use.h"
 
 namespace knobs::core {
 
@@ -62,6 +63,12 @@ class ObsBackend : public Backend {
   audio::Endpoints ListDevices() override;
   Status StartChain(const ChainPlan& plan) override;
   void StopChain() override;
+  void WatchChainFiles(const ChainPlan* plan) override;
+  FileUpdate FilesWanted() override;
+  std::string FingerprintFolders(const std::vector<std::filesystem::path>& folders) override;
+  std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion& obs) override;
+  Status Restart(const RestartHook& start) override;
+  void ReleaseUpdateFiles() override;
   uint64_t ChainPackets() override;
   ChainLevel TakeChainLevel() override;
   void RestartMonitor() override;
@@ -75,6 +82,8 @@ class ObsBackend : public Backend {
   // A capture callback on the chain: counts what it filters and keeps each
   // packet's peak. It only reads the samples.
   static void OnChainAudio(void* param, obs_source_t* source, const audio_data* audio, bool muted);
+  void WatchNvidiaFiles();
+  void WatchFile(const std::filesystem::path& file, std::vector<std::unique_ptr<FileOplock>>& watches);
 
   ObsBackendOptions options_;
   std::unique_ptr<runtime::ObsHost> host_;
@@ -82,6 +91,9 @@ class ObsBackend : public Backend {
   // Whether NVIDIA's Audio Effects SDK was there when nv-filters loaded, once
   // it has.
   std::optional<bool> nvidia_sdk_at_load_;
+  std::filesystem::path nvidia_folder_;
+  std::vector<std::unique_ptr<FileOplock>> nvidia_files_;
+  std::vector<std::unique_ptr<FileOplock>> vst_files_;
   std::atomic<uint64_t> packets_ = 0;
   std::mutex level_mutex_;
   // Each packet's peak since the last TakeChainLevel, oldest first, before
