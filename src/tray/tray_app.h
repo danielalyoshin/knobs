@@ -303,6 +303,9 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // How Windows reopens knobs after an installer: paused or not, or not at
   // all (TrayOptions::reopen_after_installer).
   std::optional<bool> reopen_paused_;
+  // Windows asked whether the session can end, and hasn't said it won't.
+  // knobs doesn't ask to be reopened meanwhile.
+  bool session_ending_ = false;
   // The update check's plan, and its settings, which are kept even without
   // the check (HasUpdateCheck).
   Updater updater_;

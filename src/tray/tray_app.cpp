@@ -386,12 +386,16 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     case WM_QUERYENDSESSION:
       // An installer closing knobs to replace a file it has open asks with
       // ENDSESSION_CLOSEAPP, and Windows reopens knobs after it
-      // (KeepReopening). Otherwise Windows is shutting down or signing out:
-      // at the next sign-in, the Run entry starts knobs if the user wants
-      // that, and Windows' own "restart apps" shouldn't.
-      if (!(lparam & ENDSESSION_CLOSEAPP) && reopen_paused_ && options_.reopen_after_installer) {
-        if (const Status off = options_.reopen_after_installer(false, false); !off) Log(off.error());
-        reopen_paused_.reset();
+      // (KeepReopening). A shutdown that restarts apps, as Windows' "restart
+      // apps" setting has it do, asks the same way, but then the session is
+      // ending. At a shutdown or sign-out, the Run entry starts knobs at the
+      // next sign-in if the user wants that, and Windows shouldn't.
+      if (!(lparam & ENDSESSION_CLOSEAPP) || (lparam & ENDSESSION_LOGOFF) || GetSystemMetrics(SM_SHUTTINGDOWN)) {
+        session_ending_ = true;
+        if (reopen_paused_ && options_.reopen_after_installer) {
+          if (const Status off = options_.reopen_after_installer(false, false); !off) Log(off.error());
+          reopen_paused_.reset();
+        }
       }
       return TRUE;
     case WM_ENDSESSION:
@@ -401,6 +405,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         Quit();
       } else {
         // It doesn't end after all: another program said no.
+        session_ending_ = false;
         KeepReopening();
       }
       return 0;
@@ -879,7 +884,7 @@ bool TrayApp::Paused() const {
 }
 
 void TrayApp::KeepReopening() {
-  if (!options_.reopen_after_installer || quitting_) return;
+  if (!options_.reopen_after_installer || quitting_ || session_ending_) return;
   const bool paused = Paused();
   if (reopen_paused_ == paused) return;
   if (const Status on = options_.reopen_after_installer(true, paused); !on) {
