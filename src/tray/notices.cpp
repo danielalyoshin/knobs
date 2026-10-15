@@ -195,6 +195,39 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
   }
 }
 
+// The restart to run NVIDIA's SDK waits for `window` (Notifier::RestartWaits).
+// Meanwhile the cable gets no mic, as with any restart that's needed. A click
+// brings the window forward, or with the menu, closes it.
+Notice RestartWaitsNotice(RestartWait window) {
+  std::string what = "the menu";
+  if (window == RestartWait::kSetup) {
+    what = std::format("{} setup", kDisplayName);  // As its title bar names it.
+  } else if (window == RestartWait::kWindow) {
+    what = std::format("the {} window", kDisplayName);
+  }
+  return {.kind = Kind::kRestartWaits,
+          // The menu's words: the whole chain is off, not just NVIDIA's filter.
+          .title = std::format("{} needs to restart", kDisplayName),
+          .text = std::format("NVIDIA's Audio Effects SDK was installed, so {} stopped. It restarts once you close {}.",
+                              kDisplayName, what),
+          .problem = true,
+          .sound = true};
+}
+
+// While an installer updates a plugin or NVIDIA's SDK
+// (Snapshot::nvidia_update), and the core waits for its files to settle. No
+// problem: the mic comes back by itself, and the icon has the pause badge.
+Notice PausedForUpdate(const core::Snapshot& snapshot) {
+  return {.kind = Kind::kPausedForUpdate,
+          .title = snapshot.nvidia_update ? "Paused for NVIDIA's SDK update" : "Paused for a plugin update",
+          // Paused by the user, it stays paused after.
+          .text = snapshot.paused_by_user
+                      ? std::format("{} waits for the updated files to stop changing. It's still paused.", kDisplayName)
+                      : std::format("{} doesn't send your mic to the cable until the updated files stop changing. Then "
+                                    "it resumes by itself.",
+                                    kDisplayName)};
+}
+
 // A text's length as a balloon holds it (kMaxText): in UTF-16 units.
 size_t Length(std::string_view text) { return FromUtf8(text).size(); }
 
@@ -380,6 +413,13 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   if (sound_into.empty()) Hide(Kind::kSoundIntoCable, update);
   sound_into_ = sound_into;
 
+  // A restart for NVIDIA's SDK that said it waits, until it's no longer
+  // needed.
+  if (snapshot.state != State::kRestartNeeded || snapshot.restart != core::RestartNeed::kNvidiaInstalled) {
+    Hide(Kind::kRestartWaits, update);
+    restart_wait_said_ = false;
+  }
+
   // Other problems, as they begin, or once it isn't quiet if they're still
   // there.
   std::optional<std::pair<State, SetupNeed>> problem;
@@ -393,7 +433,19 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
     problem_waiting_.reset();
     if (problem) problem_waiting_ = ProblemNotice(snapshot, obs_version_);
   }
-  ShowProblem(quiet, update);
+  ShowWaiting(problem_waiting_, quiet, update);
+
+  // A pause while an installer updates a plugin or NVIDIA's SDK, the same
+  // way.
+  std::optional<bool> update_pause;
+  if (snapshot.state == State::kPausedForUpdate) update_pause = snapshot.nvidia_update;
+  if (update_pause != update_pause_) {
+    Hide(Kind::kPausedForUpdate, update);
+    update_pause_ = update_pause;
+    pause_waiting_.reset();
+    if (update_pause) pause_waiting_ = PausedForUpdate(snapshot);
+  }
+  ShowWaiting(pause_waiting_, quiet, update);
 
   // Changes in OBS, after the first import, and warnings not said before. A
   // problem says more.
@@ -461,6 +513,16 @@ Notifier::Update Notifier::Say(Notice notice, bool quiet) {
   return update;
 }
 
+Notifier::Update Notifier::RestartWaits(RestartWait window, Clock::time_point now) {
+  Update update;
+  if (restart_wait_said_) return update;
+  restart_wait_said_ = true;
+  Show(RestartWaitsNotice(window), false, update);
+  // What's held follows it.
+  ShowHeld(false, now, update);
+  return update;
+}
+
 Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   Update update;
   if (mic_ && mic_->running_since && now - *mic_->running_since >= options_.mic_back_after) {
@@ -469,7 +531,8 @@ Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   }
   Due(mic_, Kind::kMicMissing, quiet, now, update);
   Due(cable_, Kind::kCableMissing, quiet, now, update);
-  ShowProblem(quiet, update);
+  ShowWaiting(problem_waiting_, quiet, update);
+  ShowWaiting(pause_waiting_, quiet, update);
   ShowHeld(quiet, now, update);
   return update;
 }
@@ -535,10 +598,10 @@ void Notifier::Due(std::optional<Missing>& missing, Notice::Kind kind, bool quie
   Show(kind == Kind::kMicMissing ? MicMissing(snapshot_) : CableMissing(snapshot_), quiet, update);
 }
 
-void Notifier::ShowProblem(bool quiet, Update& update) {
-  if (quiet || !problem_waiting_ || update.show) return;
-  Show(std::move(*problem_waiting_), quiet, update);
-  problem_waiting_.reset();
+void Notifier::ShowWaiting(std::optional<Notice>& waiting, bool quiet, Update& update) {
+  if (quiet || !waiting || update.show) return;
+  Show(std::move(*waiting), quiet, update);
+  waiting.reset();
 }
 
 void Notifier::ShowOrHold(Notice notice, bool quiet, Update& update) {

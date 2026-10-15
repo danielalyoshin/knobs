@@ -573,17 +573,32 @@ bool TrayApp::RestartByItself() {
   // the first run try again as they close.
   const bool urgent = snapshot_.restart == core::RestartNeed::kNvidiaUpdating && !snapshot_.restart_delayed;
   if (in_menu_) {
-    if (urgent) EndMenu();
+    if (urgent) {
+      EndMenu();
+    } else {
+      SayRestartWaits(RestartWait::kMenu);
+    }
     return false;
   }
-  if (!urgent && setup_window_) return false;
+  if (!urgent && setup_window_) {
+    SayRestartWaits(RestartWait::kSetup);
+    return false;
+  }
   if (!urgent && OpenDialog()) {
     // Other windows, such as an error or a folder picker, don't say when
     // they close.
     SetTimer(window_, kRestartTimer, kRestartRetryMs, nullptr);
+    SayRestartWaits(RestartWait::kWindow);
     return false;
   }
   return Restart();
+}
+
+void TrayApp::SayRestartWaits(RestartWait window) {
+  // NVIDIA's SDK only: the notes on its filter said that knobs restarts by
+  // itself to run it, and the cable gets no mic until it does.
+  if (snapshot_.restart != core::RestartNeed::kNvidiaInstalled) return;
+  if (const Notifier::Update update = notifier_.RestartWaits(window, Clock::now()); update.show) Notify(update);
 }
 
 POINT TrayApp::IconPoint() const {

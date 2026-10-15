@@ -160,7 +160,7 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 | Setup… | Opens the first run again. |
 | Open log folder | Opens knobs's logs. |
 
-**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, when OBS was updated, when Windows plays your PC's sound into the cable, and, with the update check on, when a new version of knobs is out or knobs has updated itself, or couldn't. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it, and stays paused if you paused it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
+**Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, when knobs pauses while a plugin or NVIDIA's SDK is updated, when OBS was updated, when Windows plays your PC's sound into the cable, and, with the update check on, when a new version of knobs is out or knobs has updated itself, or couldn't. A click on one opens the fix. When OBS updates to a version knobs supports, or NVIDIA's SDK is installed or updated, knobs restarts by itself to use it, and stays paused if you paused it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
 
 **knobs keeps its files** in two folders, and never writes to OBS's settings or its install. A portable copy keeps both in the `data` folder beside its `knobs.exe` instead.
 

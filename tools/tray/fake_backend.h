@@ -36,6 +36,9 @@ struct FakeWorld {
   bool stalled = false;
   core::FileUpdate file_update;
   bool files_changing = false;
+  // NVIDIA's SDK was installed since nv-filters loaded without it, so only a
+  // restart runs the chain's NVIDIA filter (core::Backend::NvidiaSdkArrived).
+  bool nvidia_sdk_arrived = false;
 };
 
 // The world, changed by knobs-tray's keys while the core's thread reads it.
@@ -124,7 +127,7 @@ class FakeBackend : public core::Backend {
     return std::to_string(world_->Get().files_changing ? ++file_changes_ : file_changes_);
   }
   std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion&) override { return {L"C:\\sdk"}; }
-  bool NvidiaSdkArrived() override { return false; }
+  bool NvidiaSdkArrived() override { return world_->Get().nvidia_sdk_arrived; }
   Status Restart(const core::RestartHook& start) override { return start({}); }
   void ReleaseUpdateFiles() override { world_->Change([](FakeWorld& world) { world.file_update = {}; }); }
   // Flowing unless stalled: 10 ms packets, a second's worth each time it's

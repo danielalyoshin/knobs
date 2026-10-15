@@ -727,6 +727,59 @@ TEST(NoticesExplainWhenADelayedSdkRestartReleasesTheInstaller) {
   }
 }
 
+// The core needs a restart to run NVIDIA's SDK, installed since nv-filters
+// loaded without it.
+void InstallNvidiaSdk(Fixture& f) {
+  f.world->Change([](FakeWorld& world) { world.nvidia_sdk_arrived = true; });
+  f.Advance(1s);
+}
+
+TEST(NoticesSayARestartForNvidiasSdkWaitsForAWindow) {
+  // The tray restarts by itself within a second, and the new copy says why,
+  // so nothing's said as the restart becomes needed. The icon says the
+  // cable gets no mic meanwhile.
+  Fixture f;
+  f.Start();
+  InstallNvidiaSdk(f);
+  CHECK(f.state() == State::kRestartNeeded && f.controller.snapshot().restart == core::RestartNeed::kNvidiaInstalled);
+  CHECK(f.events == kNone && f.notifier.badge() == Badge::kAttention);
+
+  // It waits for the menu: said once, as a problem.
+  const std::string title = std::format("{} needs to restart", kDisplayName);
+  f.Apply(f.notifier.RestartWaits(RestartWait::kMenu, f.now));
+  CHECK(f.events == std::vector<std::string>{title});
+  CHECK(f.last.text ==
+        std::format("NVIDIA's Audio Effects SDK was installed, so {} stopped. It restarts once you close the menu.",
+                    kDisplayName));
+  CHECK(f.last.kind == Notice::Kind::kRestartWaits && f.last.problem && f.last.sound && !f.last.page);
+  CHECK(FromUtf8(f.last.title).size() <= 63 && FromUtf8(f.last.text).size() <= 160);
+  // Then for a message the menu opened: not again.
+  f.Apply(f.notifier.RestartWaits(RestartWait::kWindow, f.now));
+  f.Advance(10s);
+  CHECK(f.events.size() == 1);
+
+  // Taken down once that restart isn't needed, as when an installer goes for
+  // the SDK, which needs a restart of its own.
+  f.world->Change([](FakeWorld& world) { world.file_update = {{L"C:\\sdk"}, true}; });
+  f.Advance(1s);
+  CHECK(f.controller.snapshot().restart == core::RestartNeed::kNvidiaUpdating);
+  CHECK((f.events == std::vector<std::string>{title, "-"}));
+
+  // The setup window, which keeps everything else quiet, and another of
+  // knobs's windows, each named.
+  for (const RestartWait window : {RestartWait::kSetup, RestartWait::kWindow}) {
+    Fixture g;
+    g.quiet = window == RestartWait::kSetup;
+    g.Start();
+    InstallNvidiaSdk(g);
+    g.Apply(g.notifier.RestartWaits(window, g.now));
+    CHECK(g.events == std::vector<std::string>{title});
+    CHECK(g.last.text.ends_with(window == RestartWait::kSetup
+                                    ? std::format(" once you close {} setup.", kDisplayName)
+                                    : std::format(" once you close the {} window.", kDisplayName)));
+  }
+}
+
 TEST(NoticesSayWindowsPlaysThePcIntoTheCable) {
   // Installing a cable can make it Windows' Output: the user hears nothing,
   // and the cable's apps hear the PC with the mic. A click opens Sound
@@ -875,26 +928,91 @@ TEST(RestartReasonsHaveNames) {
   CHECK(!RestartNeedNamed("") && !RestartNeedNamed("OBS-UPDATED"));
 }
 
-TEST(PluginUpdatesShowAPauseBadgeWithoutAnError) {
+// An installer goes for the running chain's plugin, and keeps writing its
+// files until they settle.
+FakeWorld PluginUpdate() {
   FakeWorld world = tools::DefaultWorld();
   world.file_update.folders = {L"C:\\plugins"};
   world.files_changing = true;
-  Fixture f(world);
+  return world;
+}
+
+// The installer is done: the files stop changing.
+void PluginUpdated(FakeWorld& world) {
+  world.file_update = {};
+  world.files_changing = false;
+}
+
+TEST(NoticesSayAPluginUpdatePausesKnobs) {
+  // Said once, with the pause badge, and not as a problem: the mic comes back
+  // by itself.
+  Fixture f(PluginUpdate());
   f.Start();
   f.Advance(1s);
-  CHECK(f.state() == State::kPausedForUpdate && f.events == kNone && f.notifier.badge() == Badge::kPaused);
+  CHECK(f.state() == State::kPausedForUpdate && f.notifier.badge() == Badge::kPaused);
+  CHECK(f.events == std::vector<std::string>{"Paused for a plugin update"});
+  CHECK(f.last.text == std::format("{} doesn't send your mic to the cable until the updated files stop changing. Then "
+                                    "it resumes by itself.",
+                                    kDisplayName));
+  CHECK(f.last.kind == Notice::Kind::kPausedForUpdate && !f.last.problem && !f.last.sound && !f.last.page);
+  CHECK(FromUtf8(f.last.text).size() <= 160);
+  f.Advance(1min);
+  CHECK(f.events.size() == 1);
+  // Taken down once the files have settled and the chain runs again.
+  f.world->Change(PluginUpdated);
+  f.Advance(10s);
+  CHECK(f.state() == State::kRunning && f.notifier.badge() == Badge::kNone);
+  CHECK((f.events == std::vector<std::string>{"Paused for a plugin update", "-"}));
+
+  // One that began while the setup window was open is said once it closes,
+  // if it's still on.
+  Fixture quiet(PluginUpdate());
+  quiet.quiet = true;
+  quiet.Start();
+  quiet.Advance(1s);
+  CHECK(quiet.state() == State::kPausedForUpdate && quiet.events == kNone);
+  quiet.quiet = false;
+  quiet.Apply(quiet.notifier.Tick(false, quiet.now));
+  CHECK(quiet.events == std::vector<std::string>{"Paused for a plugin update"});
+  // Over before it closes: nothing to say.
+  Fixture over(PluginUpdate());
+  over.quiet = true;
+  over.Start();
+  over.Advance(1s);
+  over.world->Change(PluginUpdated);
+  over.Advance(10s);
+  over.quiet = false;
+  over.Apply(over.notifier.Tick(false, over.now));
+  CHECK(over.state() == State::kRunning && over.events == kNone);
 }
 
 TEST(NvidiaRestartNoticeWaitsForTheFilesToSettle) {
+  // The copy restarted for an SDK update says it's paused for it, then once
+  // the files settle, why it restarted.
   Fixture f(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kNvidiaUpdating});
   f.controller.Start(false, f.now, false, true);
   f.Feed();
-  CHECK(f.state() == State::kPausedForUpdate && f.events == kNone);
+  CHECK(f.state() == State::kPausedForUpdate && f.events == std::vector<std::string>{"Paused for NVIDIA's SDK update"});
+  CHECK(f.last.kind == Notice::Kind::kPausedForUpdate && !f.last.problem);
+  CHECK(f.last.text.starts_with(std::format("{} doesn't send your mic to the cable until", kDisplayName)));
   f.Advance(5s);
-  CHECK(f.state() == State::kRunning && f.events.size() == 1);
-  CHECK(f.last.kind == Notice::Kind::kRestarted && f.last.title == "NVIDIA's Audio Effects SDK update");
+  CHECK(f.state() == State::kRunning);
+  CHECK((f.events == std::vector<std::string>{"Paused for NVIDIA's SDK update", "NVIDIA's Audio Effects SDK update"}));
+  CHECK(f.last.kind == Notice::Kind::kRestarted);
   f.Reimport();
-  CHECK(f.events.size() == 1);
+  CHECK(f.events.size() == 2);
+
+  // Restarted while paused: it waits for the files, and stays paused.
+  Fixture paused(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kNvidiaUpdating});
+  paused.controller.Start(false, paused.now, true, true);
+  paused.Feed();
+  CHECK(paused.state() == State::kPausedForUpdate && paused.events.size() == 1);
+  CHECK(paused.last.text ==
+        std::format("{} waits for the updated files to stop changing. It's still paused.", kDisplayName));
+  paused.Advance(5s);
+  CHECK(paused.state() == State::kPausedByUser && paused.events.size() == 2);
+  CHECK(paused.last.text ==
+        std::format("{} restarted so its installer could replace the files. It's still paused.", kDisplayName));
 }
 
 // --- Badges -------------------------------------------------------------------------

@@ -29,11 +29,13 @@ struct Notice {
     kNeedsSetup,      // Something changed in OBS that only the user can settle.
     kFailed,
     kRestartNeeded,   // An SDK installer was released because a restart can't happen yet.
+    kRestartWaits,    // A restart to run NVIDIA's SDK waits for a window to close.
     kChainChanged,    // The mic or its chain changed in OBS.
     kFilterWarnings,  // New pre-flight warnings: filters knobs can't run.
     kRestarted,       // The copy before this one restarted to follow OBS.
     kOtherObs,        // OBS opened in another Windows session.
     kSoundIntoCable,  // Windows plays the PC's sound into a virtual cable.
+    kPausedForUpdate,  // An installer is updating a plugin or NVIDIA's SDK.
     kUpdateAvailable,  // A new version is out (updates.h).
     kUpdated,          // This copy is the version an update installed.
     kUpdateFailed,     // An update didn't install by itself.
@@ -60,14 +62,23 @@ struct Notice {
 std::string_view RestartNeedName(core::RestartNeed need);
 std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name);
 
+// What a restart the tray makes by itself waits for (TrayApp::RestartByItself):
+// the menu, the setup window, or another window of knobs's, such as a
+// message.
+enum class RestartWait { kMenu, kSetup, kWindow };
+
 // Follows the core's snapshots, and time, and says when to show or take down
 // a notification. The rules:
 // - Problems, the states where the cable gets no mic, get one as they begin:
 //   a mic or cable missing once it has been for Options::device_grace, the
 //   others at once. A restart that's needed gets none while the tray can
-//   restart by itself; a delayed SDK restart says its installer was released.
-//   While paused, nothing is missing.
+//   restart by itself; a delayed SDK restart says its installer was released,
+//   and one to run NVIDIA's SDK that waits for a window says so
+//   (RestartWaits). While paused, nothing is missing.
 // - A problem's notification is taken down when it ends.
+// - A pause while an installer updates a plugin or NVIDIA's SDK gets one as
+//   it begins, taken down as it ends. It isn't a problem: the mic comes back
+//   by itself.
 // - The mic or its chain changing in OBS gets one after the first import,
 //   and new pre-flight warnings do even at it, if Options::warned says which
 //   are known. A change knobs's own settings made gets none.
@@ -77,9 +88,11 @@ std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name);
 //   PC's sound into a virtual cable, get one, unless one of the above is
 //   shown at the same time, and it's taken down when it ends.
 // - Nothing shows while `quiet`: the setup window is open, and shows the
-//   state itself. A problem that began meanwhile shows once it isn't quiet,
-//   if it's still there, and so do what an update did and what Say was
-//   given. News of the chain and its warnings doesn't: the window showed it.
+//   state itself. A problem or a pause that began meanwhile shows once it
+//   isn't quiet, if it's still there, and so do what an update did and what
+//   Say was given. News of the chain and its warnings doesn't: the window
+//   showed it. Only a restart that waits for the setup window says so while
+//   it's open.
 class Notifier {
  public:
   using Clock = std::chrono::steady_clock;
@@ -122,6 +135,11 @@ class Notifier {
   // Something to say that isn't about the core's state, such as a new
   // version (updates.h). While `quiet`, it waits.
   Update Say(Notice notice, bool quiet);
+  // The restart to run NVIDIA's SDK, installed since nv-filters loaded,
+  // waits for `window` to close: the notes said knobs restarts by itself.
+  // Said once, even while quiet, since the setup window can be what it waits
+  // for, and taken down once that restart isn't needed.
+  Update RestartWaits(RestartWait window, Clock::time_point now);
   // Does what's due by `now` (NextDeadline), and shows what Say held back
   // if it's no longer quiet.
   Update Tick(bool quiet, Clock::time_point now);
@@ -157,8 +175,9 @@ class Notifier {
               Clock::time_point now) const;
   // Shows what `missing` is due to say, once, when it isn't quiet.
   void Due(std::optional<Missing>& missing, Notice::Kind kind, bool quiet, Clock::time_point now, Update& update);
-  // Shows the problem's notification, if it waits and it isn't quiet.
-  void ShowProblem(bool quiet, Update& update);
+  // Shows a problem's or a pause's notification, if it waits and it isn't
+  // quiet.
+  void ShowWaiting(std::optional<Notice>& waiting, bool quiet, Update& update);
   // Shows `notice` now, or after what's quiet or shown now.
   void ShowOrHold(Notice notice, bool quiet, Update& update);
   void Show(Notice notice, bool quiet, Update& update);
@@ -178,6 +197,13 @@ class Notifier {
   // and its notification while it waits for quiet to end.
   std::optional<std::pair<core::State, core::SetupNeed>> problem_;
   std::optional<Notice> problem_waiting_;
+  // RestartWaits said so, for the restart that's needed now.
+  bool restart_wait_said_ = false;
+  // Paused for an update, with whether it's NVIDIA's SDK's
+  // (Snapshot::nvidia_update), and its notification while it waits for
+  // quiet to end.
+  std::optional<bool> update_pause_;
+  std::optional<Notice> pause_waiting_;
   // What the last import that found the mic found.
   uint32_t chain_revision_ = 0;
   // Its warnings, by what each is about (WarningKey), once known.

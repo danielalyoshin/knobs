@@ -202,6 +202,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // once what's open closes, paused if the user paused this copy. Returns
   // whether this copy is quitting.
   bool RestartByItself();
+  // A restart to run NVIDIA's SDK waits for `window`: says so, once.
+  void SayRestartWaits(RestartWait window);
   // A finished first run with no cable picked, as one from before knobs
   // asked for it: what OBS monitors to becomes the pick, so OBS monitoring
   // elsewhere later doesn't move it.
