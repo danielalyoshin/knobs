@@ -115,11 +115,16 @@ class FakeBackend : public core::Backend {
   Status StartChain(const core::ChainPlan& plan) override;
   void StopChain() override {}
   void WatchChainFiles(const core::ChainPlan* plan) override { files_watched_ = plan != nullptr; }
-  core::FileUpdate FilesWanted() override { return files_watched_ ? world_->Get().file_update : core::FileUpdate{}; }
+  // NVIDIA's SDK stays loaded, and watched, while the chain is stopped.
+  core::FileUpdate FilesWanted() override {
+    const core::FileUpdate update = world_->Get().file_update;
+    return files_watched_ || update.restart ? update : core::FileUpdate{};
+  }
   std::string FingerprintFolders(const std::vector<std::filesystem::path>&) override {
     return std::to_string(world_->Get().files_changing ? ++file_changes_ : file_changes_);
   }
   std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion&) override { return {L"C:\\sdk"}; }
+  bool NvidiaSdkArrived() override { return false; }
   Status Restart(const core::RestartHook& start) override { return start({}); }
   void ReleaseUpdateFiles() override { world_->Change([](FakeWorld& world) { world.file_update = {}; }); }
   // Flowing unless stalled: 10 ms packets, a second's worth each time it's

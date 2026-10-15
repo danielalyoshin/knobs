@@ -304,12 +304,17 @@ bool ObsInstalled(const core::Snapshot& snapshot) {
 
 // --- Copy ---------------------------------------------------------------------------
 
+// While kPausedForUpdate.
+std::string UpdateWaitNote(const core::Snapshot& snapshot) {
+  return snapshot.nvidia_update ? "Waiting for NVIDIA's SDK update…" : "Waiting for a plugin update…";
+}
+
 std::string ObsUserNote(const core::Snapshot& snapshot) {
   switch (snapshot.state) {
     case State::kStarting:
       return "Looking for OBS…";
     case State::kPausedForUpdate:
-      return "Waiting for a plugin update…";
+      return UpdateWaitNote(snapshot);
     case State::kObsMissing:
       return std::format("Can't find OBS Studio. If it's installed somewhere else, you can show {} where.",
                          kDisplayName);
@@ -356,6 +361,11 @@ bool ObsUserFits(const core::Snapshot& snapshot) {
     case State::kStarting:
     case State::kObsUnsupported:
       return true;
+    case State::kPausedForUpdate:
+      // Before the first import, as a copy waits for NVIDIA's SDK: as when
+      // starting, nothing is known yet.
+      if (!snapshot.chain) return true;
+      break;
     default:
       break;
   }
@@ -760,7 +770,9 @@ PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool 
       view.content += "\n\nIt's paused now. Resume it from the tray menu.";
       break;
     case State::kPausedForUpdate:
-      view.content += "\n\nIt's paused while a plugin is being updated, and resumes when its files stop changing.";
+      view.content += std::format("\n\nIt's paused while {} is being updated, and resumes when its files stop "
+                                  "changing.",
+                                  snapshot.nvidia_update ? "NVIDIA's Audio Effects SDK" : "a plugin");
       break;
     case State::kMicMissing:
       view.content +=
@@ -888,7 +900,7 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, const CheckS
     case Page::kLooking:
       view = Looking();
       if (snapshot.state == State::kPausedForUpdate) {
-        view.instruction = "Waiting for a plugin update…";
+        view.instruction = UpdateWaitNote(snapshot);
         view.content = snapshot.detail;
       }
       break;

@@ -109,10 +109,14 @@ struct ImportedMic {
   // knobs sets monitoring itself and VST plugins' windows stay closed, its
   // private source registers no hotkeys, the names of the mic and its filters
   // only label them, and the rest is the output mix, video or OBS's own
-  // bookkeeping, filters' UUIDs included. Each VST filter also says which
-  // plugin file obs-vst would load, which its settings don't. Imports with the
-  // same key load the same chain.
+  // bookkeeping, filters' UUIDs included. A new key means the chain changed in
+  // OBS.
   std::string chain_key;
+  // Which plugin file obs-vst would load for each VST filter, which their
+  // saved settings don't say: whether it's there, its size and time, and what
+  // it can't load. A new key means a plugin was installed, updated or removed.
+  // Imports with the same chain_key and plugins_key load the same chain.
+  std::string plugins_key;
   // The plugin files saved by VST filters, including disabled filters:
   // obs-vst can still load their plugins when the source loads.
   std::vector<std::filesystem::path> vst_plugins;
@@ -154,8 +158,11 @@ class SceneCollection {
 
   // Runs the pre-flight checks on `mic` and returns it ready to load. Needs
   // libobs started with its modules, and the optional ones loaded, to tell
-  // which filters it has. `modules` says why any it needed didn't load.
-  Result<ImportedMic> Import(const MicCandidate& mic, const ModuleErrors& modules = {}) const;
+  // which filters it has. `modules` says why any it needed didn't load, and
+  // `nvidia_sdk_arrived` that NVIDIA's SDK was installed after nv-filters
+  // loaded without it, so a restart runs it.
+  Result<ImportedMic> Import(const MicCandidate& mic, const ModuleErrors& modules = {},
+                             bool nvidia_sdk_arrived = false) const;
 
  private:
   SceneCollection(const runtime::ObsApi& api, obs_data_t* data) : api_(api), data_(data) {}

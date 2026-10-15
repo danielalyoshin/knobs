@@ -561,13 +561,23 @@ void TrayApp::SaveWarned() {
 
 bool TrayApp::RestartByItself() {
   if (snapshot_.state != core::State::kRestartNeeded) {
-    restart_tried_ = false;
+    restart_tried_.reset();
     return false;
   }
-  if (restart_tried_ || quitting_) return false;
-  // The menu and the first run try again as they close.
-  if (in_menu_ || setup_window_) return false;
-  if (OpenDialog()) {
+  // Once for each reason, so that one for NVIDIA's SDK still happens after a
+  // restart for OBS failed.
+  if (restart_tried_ == snapshot_.restart || quitting_) return false;
+  // An SDK installer waits for this restart only briefly, so it goes ahead
+  // over the first run and any dialog, which close as they do at sign-out,
+  // and the menu closes for it. Other restarts wait for them: the menu and
+  // the first run try again as they close.
+  const bool urgent = snapshot_.restart == core::RestartNeed::kNvidiaUpdating && !snapshot_.restart_delayed;
+  if (in_menu_) {
+    if (urgent) EndMenu();
+    return false;
+  }
+  if (!urgent && setup_window_) return false;
+  if (!urgent && OpenDialog()) {
     // Other windows, such as an error or a folder picker, don't say when
     // they close.
     SetTimer(window_, kRestartTimer, kRestartRetryMs, nullptr);
@@ -805,7 +815,7 @@ void TrayApp::OpenLogFolder() {
 
 bool TrayApp::Restart() {
   // Once by itself: if it fails, the menu and the first run offer it.
-  restart_tried_ = true;
+  restart_tried_ = snapshot_.restart;
   if (!options_.restart) return false;
   // Paused, the new copy is too: a restart doesn't put the mic back live.
   const auto start = [restart = options_.restart, why = snapshot_.restart, paused = Paused()](const auto& files) {
@@ -894,13 +904,15 @@ void TrayApp::KeepReopening() {
   reopen_paused_ = paused;
 }
 
+bool TrayApp::FilesUpdating() const {
+  return snapshot_.state == core::State::kPausedForUpdate || snapshot_.restart == core::RestartNeed::kNvidiaUpdating ||
+         (snapshot_.state == core::State::kStarting && options_.wait_for_nvidia);
+}
+
 bool TrayApp::CanRestart() const {
   // A self-update starts a new copy without the plugin wait. Let that wait
   // finish first, including the new SDK copy's time before its first snapshot.
-  if (snapshot_.state == core::State::kPausedForUpdate || snapshot_.restart == core::RestartNeed::kNvidiaUpdating ||
-      (snapshot_.state == core::State::kStarting && options_.restarted_for == core::RestartNeed::kNvidiaUpdating)) {
-    return false;
-  }
+  if (FilesUpdating()) return false;
   return snapshot_.state != core::State::kRunning && !Paused() && !Quiet() && !in_menu_ && !OpenDialog();
 }
 
@@ -954,8 +966,9 @@ void TrayApp::RunUpdates() {
   KillTimer(window_, kUpdateTimer);
   // A job is running: it says when it's done.
   if (update_thread_.joinable()) return;
-  // The menu asked to update while one ran.
-  if (const auto asked = std::exchange(install_asked_, std::nullopt)) {
+  // The menu asked to update while one ran, or while files were being
+  // updated.
+  if (const auto asked = FilesUpdating() ? std::nullopt : std::exchange(install_asked_, std::nullopt)) {
     const auto offer = updater_.offer();
     if (offer && offer->install && offer->version == *asked) {
       StartUpdateJob(Updater::Job::kInstall, true);
@@ -1134,6 +1147,14 @@ void TrayApp::FinishUpdateJob() {
       // when knobs can restart, which may have passed while the signature was
       // checked, and only while it still installs by itself.
       if (!asked && updater_.Due(now, CanRestart()) != Updater::Job::kInstall) break;
+      // Asked or not, not while files are being updated: it installs once
+      // they've settled (RunUpdates).
+      if (FilesUpdating()) {
+        Log(std::format("Updating to {} {} once the files being updated have settled.", kDisplayName,
+                        version.ToString()));
+        install_asked_ = version;
+        break;
+      }
       Log(std::format("Updating to {} {}.", kDisplayName, version.ToString()));
       updater_.Installing();
       Save();
@@ -1189,7 +1210,7 @@ void TrayApp::SetUpdates(bool check, bool install) {
 }
 
 void TrayApp::InstallUpdate(const update::Version& asked) {
-  if (update_thread_.joinable()) {
+  if (update_thread_.joinable() || FilesUpdating()) {
     install_asked_ = asked;
     return;
   }

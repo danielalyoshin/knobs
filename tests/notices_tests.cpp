@@ -718,7 +718,9 @@ TEST(NoticesExplainWhenADelayedSdkRestartReleasesTheInstaller) {
     }
     CHECK(f.events == std::vector<std::string>{std::format("{} couldn't restart yet", kDisplayName)});
     CHECK(f.last.kind == Notice::Kind::kRestartNeeded && f.last.problem);
-    CHECK(f.last.text == f.controller.snapshot().detail);
+    // What setup's page says, without saying the title again.
+    CHECK(f.last.text.starts_with("It let the NVIDIA installer continue."));
+    CHECK(f.last.text.find("couldn't restart") == std::string::npos);
     CHECK(f.last.text.find("retry it") != std::string::npos);
     f.Advance(30s);
     CHECK(f.events.size() == 1);

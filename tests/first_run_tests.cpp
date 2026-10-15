@@ -120,6 +120,14 @@ TEST(WelcomeSaysWhatWasFound) {
   CHECK(notes(PickMic()).starts_with("I set up my mic in OBS\nFound 3 mics: Desk Mic, Mic/Aux and Podcast Mic. |"));
   CHECK(notes(PickMic()).ends_with("| obs"));
 
+  // A copy restarted for NVIDIA's SDK waits for it before its first import:
+  // as when starting, the door for OBS users.
+  core::Snapshot waiting;
+  waiting.state = State::kPausedForUpdate;
+  waiting.nvidia_update = true;
+  CHECK(notes(waiting).starts_with("I set up my mic in OBS\nWaiting for NVIDIA's SDK update…"));
+  CHECK(notes(waiting).ends_with("| obs"));
+
   core::Snapshot missing;
   missing.state = State::kObsMissing;
   CHECK(Contains(notes(missing), "I'm new to OBS\nOBS Studio isn't installed."));
@@ -220,9 +228,13 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   core::Snapshot updating = Running();
   updating.state = State::kPausedForUpdate;
   CHECK(Contains(first_run.View(updating).content, "paused while a plugin is being updated"));
+  updating.nvidia_update = true;
+  CHECK(Contains(first_run.View(updating).content, "paused while NVIDIA's Audio Effects SDK is being updated"));
   updating.chain.reset();  // The new NVIDIA copy has not imported yet.
   updating.detail = "Waiting for the updated files to stop changing.";
   CHECK(first_run.View(updating).page == Page::kLooking);
+  CHECK(first_run.View(updating).instruction == "Waiting for NVIDIA's SDK update…");
+  updating.nvidia_update = false;
   CHECK(first_run.View(updating).instruction == "Waiting for a plugin update…");
 }
 

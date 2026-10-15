@@ -162,21 +162,38 @@ void Controller::Tick(Clock::time_point now) {
   }
   if (now >= next_file_check_) {
     next_file_check_ = now + timing_.file_poll;
+    // Reconciled only for a change, not once a second for nothing.
+    const bool restart_before = file_restart_;
+    const bool waiting_before = !updating_folders_.empty();
+    const bool installed_before = nvidia_installed_;
     CheckFileUpdates(now);
     if (!updating_folders_.empty() && !file_restart_) {
       const std::string fingerprint = backend_.FingerprintFolders(updating_folders_);
       if (fingerprint != folder_fingerprint_) {
         folder_fingerprint_ = fingerprint;
         files_quiet_since_ = now;
-      } else if (now - files_quiet_since_ >= timing_.file_settle) {
+      }
+      const bool settled = now - files_quiet_since_ >= timing_.file_settle;
+      if (settled || now - file_wait_since_ >= timing_.file_wait_max) {
         updating_folders_.clear();
-        backend_.Log("The plugin folder stopped changing. Importing OBS's settings again.");
+        backend_.Log(settled ? std::string("The updated files stopped changing. Importing OBS's settings again.")
+                             : std::format("The updated files kept changing for {}. Importing OBS's settings "
+                                           "again anyway.",
+                                           Minutes(now - file_wait_since_)));
         ClearFailures();
         devices_ = backend_.ListDevices();
         Refresh(now);
+        changed = true;
       }
     }
-    changed = true;
+    // nv-filters looks for NVIDIA's SDK only as it loads, so nothing else
+    // would notice one installed since.
+    if (!nvidia_installed_ && backend_.NvidiaSdkArrived()) {
+      nvidia_installed_ = true;
+      backend_.Log("NVIDIA's Audio Effects SDK was installed since OBS's NVIDIA filters loaded without it.");
+    }
+    changed |= file_restart_ != restart_before || updating_folders_.empty() == waiting_before ||
+               nvidia_installed_ != installed_before;
   }
   if (devices_due_ && now >= *devices_due_) {
     devices_due_.reset();
@@ -243,17 +260,21 @@ void Controller::CheckFileUpdates(Clock::time_point now) {
     // The new process inherits the broken oplocks and releases them after
     // this process has exited. Stopping the chain doesn't unload the SDK.
     file_restart_ = true;
-    file_restart_due_ = now + timing_.file_restart_wait;
+    // From now, not `now`: an import that took seconds may be how long ago
+    // this check began.
+    file_restart_due_ = std::max(now, timing_.clock()) + timing_.file_restart_wait;
   } else if (!update.folders.empty() && updating_folders_.empty()) {
-    WaitForFiles(update.folders, now);
+    // Unloads the plugins, waits for their folders, then lets the writer in.
+    StopChain();
   }
 }
 
-void Controller::WaitForFiles(std::vector<std::filesystem::path> folders, Clock::time_point now) {
+void Controller::WaitForFiles(std::vector<std::filesystem::path> folders, bool nvidia, Clock::time_point now) {
   updating_folders_ = std::move(folders);
-  StopChain();  // Unload before releasing the oplocks and letting the writer in.
+  updating_nvidia_ = nvidia;
   folder_fingerprint_ = backend_.FingerprintFolders(updating_folders_);
   files_quiet_since_ = std::max(now, timing_.clock());
+  file_wait_since_ = files_quiet_since_;
   ClearFailures();
 }
 
@@ -287,10 +308,11 @@ void Controller::Refresh(Clock::time_point now) {
   obs_writes_config_ = obs.config && obs.config->obs_writes_here;
   if (obs.found == ObsFound::kUnsupported) return fail(State::kObsUnsupported, obs.message);
   if (wait_for_nvidia_) {
+    // Nothing has loaded in this process yet.
     wait_for_nvidia_ = false;
     auto folders = backend_.NvidiaUpdateFolders(obs.install.version);
     if (!folders.empty()) {
-      WaitForFiles(std::move(folders), now);
+      WaitForFiles(std::move(folders), true, now);
       return;
     }
   }
@@ -343,11 +365,11 @@ void Controller::Refresh(Clock::time_point now) {
   if (!imported) return fail(State::kFailed, imported.error());
   import_ = std::move(*imported);
   if (import_->restart == RestartNeed::kNvidiaInstalled) {
-    return fail(State::kRestartNeeded,
-                std::format("NVIDIA's Audio Effects SDK was installed after {0} loaded OBS's NVIDIA filters. {0} has "
-                            "to restart to use it.",
-                            kDisplayName),
-                SetupNeed::kNone, RestartNeed::kNvidiaInstalled);
+    // Kept apart from problem_, so that a new cable or another import can't
+    // lose it.
+    if (!nvidia_installed_) backend_.Log("NVIDIA's Audio Effects SDK was installed since OBS's NVIDIA filters loaded.");
+    nvidia_installed_ = true;
+    return;
   }
   if (!import_->mic) {
     return fail(State::kNeedsSetup, import_->pick_error,
@@ -358,7 +380,11 @@ void Controller::Refresh(Clock::time_point now) {
     if (chain_revision_ > 0) backend_.Log("The mic or its chain changed in OBS.");
     chain_key_ = mic.chain_key;
     ++chain_revision_;
+  } else if (mic.plugins_key != plugins_key_) {
+    // Not a change in OBS: an installer updated, added or removed a plugin.
+    backend_.Log("A VST plugin's file changed.");
   }
+  plugins_key_ = mic.plugins_key;
   PlanChain();
 }
 
@@ -375,19 +401,26 @@ void Controller::PlanChain() {
     return;
   }
   const import::ImportedMic& mic = *import_->mic;
-  plan_ = ChainPlan{mic.source_json, mic.chain_key, mic.load_callbacks(), {"", cable}, mic.vst_plugins};
+  plan_ = ChainPlan{mic.source_json, mic.chain_key, mic.load_callbacks(), {"", cable}, mic.vst_plugins,
+                    mic.plugins_key};
 }
 
 void Controller::Reconcile(Clock::time_point now) {
   if (stopped_) return;
   CheckFileUpdates(now);
   Snapshot next = Decide(now);
+  const bool waiting = !updating_folders_.empty();
   if (next.state != State::kRunning) {
     StopChain();
   } else if (!loaded_ || !loaded_->SameAs(*plan_) || (MicIsDefault() && loaded_default_mic_ != devices_.default_mic)) {
     // A new chain, or the same one rebuilt: libobs's loader runs again, and
     // win-wasapi opens the device afresh.
     StopChain();
+  }
+  if (!waiting && !updating_folders_.empty()) {
+    // Stopping the chain found an installer going for a plugin.
+    next = Decide(now);
+  } else if (next.state == State::kRunning && !loaded_) {
     ChainPlan plan = *plan_;
     plan.cable.name = CableName();
     const Status started = backend_.StartChain(plan);
@@ -460,6 +493,13 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     }
   } else if (!updating_folders_.empty()) {
     set(State::kPausedForUpdate, "Waiting for the updated files to stop changing.");
+    next.nvidia_update = updating_nvidia_;
+  } else if (nvidia_installed_) {
+    set(State::kRestartNeeded,
+        std::format("NVIDIA's Audio Effects SDK was installed after {0} loaded OBS's NVIDIA filters. {0} has to "
+                    "restart to use it.",
+                    kDisplayName));
+    next.restart = RestartNeed::kNvidiaInstalled;
   } else if (problem_) {
     set(problem_->state, problem_->detail);
     next.setup = problem_->setup;
@@ -490,6 +530,13 @@ Snapshot Controller::Decide(Clock::time_point now) const {
 void Controller::StopChain() {
   if (!loaded_) return;
   backend_.StopChain();
+  // An installer may have gone for a plugin since the last check, while the
+  // chain stopped for something else. Releasing the watches loses that, so
+  // wait for the plugins' folders before the writer is let in.
+  if (updating_folders_.empty() && !file_restart_) {
+    FileUpdate update = backend_.FilesWanted();
+    if (!update.restart && !update.folders.empty()) WaitForFiles(std::move(update.folders), false, timing_.clock());
+  }
   backend_.WatchChainFiles(nullptr);
   loaded_.reset();
 }

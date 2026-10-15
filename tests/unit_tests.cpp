@@ -212,6 +212,15 @@ TEST(PeImportsRejectsNonBinaries) {
 
 // --- Files in use --------------------------------------------------------------
 
+bool WaitUntilWanted(FileOplock& watch) {
+  const ULONGLONG deadline = GetTickCount64() + 3000;
+  while (GetTickCount64() < deadline) {
+    if (watch.wanted()) return true;
+    Sleep(10);
+  }
+  return watch.wanted();
+}
+
 TEST(FileOplockLetsAnInstallerReplaceALoadedDll) {
   using namespace std::chrono_literals;
   fs::path dependency;
@@ -229,9 +238,7 @@ TEST(FileOplockLetsAnInstallerReplaceALoadedDll) {
     if (!module) continue;
     const auto modules = LoadedModules();
     CHECK(std::any_of(modules.begin(), modules.end(), [&](const fs::path& path) { return SamePath(path, file); }));
-    std::promise<void> broken;
-    auto notified = broken.get_future();
-    auto taken = FileOplock::Take(file, [&] { broken.set_value(); });
+    auto taken = FileOplock::Take(file);
     CHECK(taken.ok());
     if (!taken) {
       FreeLibrary(module);
@@ -253,7 +260,7 @@ TEST(FileOplockLetsAnInstallerReplaceALoadedDll) {
       CloseHandle(out);
       return error;
     });
-    CHECK(notified.wait_for(3s) == std::future_status::ready);
+    CHECK(WaitUntilWanted(*watch));
     CHECK(watch->wanted());
     CHECK(writer.wait_for(50ms) == std::future_status::timeout);
     CHECK(FreeLibrary(module));
@@ -268,20 +275,112 @@ TEST(FileOplockLetsAnInstallerReplaceALoadedDll) {
   }
 }
 
-TEST(FileOplockCancelsWithoutCallingBack) {
+TEST(FileOplockCancelsAnUnbrokenRequest) {
   TempDir dir(L"oplock-cancel");
   const fs::path file = dir.path / L"file";
   WriteFile(file, "original");
-  std::atomic<int> calls = 0;
-  auto watch = FileOplock::Take(file, [&] { ++calls; });
+  auto watch = FileOplock::Take(file);
   CHECK(watch.ok());
   if (watch) watch->reset();
-  CHECK(calls == 0);
   const HANDLE writer = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
   CHECK(writer != INVALID_HANDLE_VALUE);
-  CHECK(!FileOplock::Take(file, {}).ok());  // A writer already has it.
+  CHECK(!FileOplock::Take(file).ok());  // A writer already has it.
   if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
-  CHECK(!FileOplock::Take(dir.path / L"missing", {}).ok());
+  CHECK(!FileOplock::Take(dir.path / L"missing").ok());
+}
+
+TEST(FileOplockReleasesAPreparedHoldWhenRestartFails) {
+  using namespace std::chrono_literals;
+  TempDir dir(L"oplock-failed-restart");
+  const fs::path file = dir.path / L"file";
+  WriteFile(file, "original");
+  auto taken = FileOplock::Take(file);
+  CHECK(taken.ok());
+  if (!taken) return;
+  auto watch = std::move(*taken);
+  CHECK(!watch->wanted());
+  CHECK(watch->PrepareHandoff().ok());
+  CHECK(!StartWithFileOplocks(dir.path / L"missing.exe", L"", {watch->handle()}).ok());
+  auto writer = std::async(std::launch::async, [&]() -> DWORD {
+    const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (out == INVALID_HANDLE_VALUE) return GetLastError();
+    CloseHandle(out);
+    return ERROR_SUCCESS;
+  });
+  CHECK(writer.wait_for(50ms) == std::future_status::timeout);
+  watch.reset();  // The same release as the failed-restart and 2 s fallbacks.
+  CHECK(writer.get() == ERROR_SUCCESS);
+  CHECK(fs::file_size(file) == 8);
+}
+
+TEST(FileOplockLetsExclusiveReadersProbeALoadedDllAndRearms) {
+  using namespace std::chrono_literals;
+  fs::path dependency;
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+    if (entry.path().filename() == L"knobs-test-dep.dll") dependency = entry.path();
+  }
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  TempDir dir(L"oplock-reader");
+  const fs::path file = dir.path / L"loaded.dll";
+  fs::copy_file(dependency, file);
+  const HMODULE module = LoadLibraryW(file.c_str());
+  CHECK(module != nullptr);
+  if (!module) return;
+  auto taken = FileOplock::Take(file);
+  CHECK(taken.ok());
+  if (!taken) {
+    FreeLibrary(module);
+    return;
+  }
+  auto watch = std::move(*taken);
+  for (int probe = 0; probe < 2; ++probe) {
+    auto reader = std::async(std::launch::async, [&] {
+      // FileShare.None: reading only, but incompatible with our handle.
+      return CreateFileW(file.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    });
+    bool wanted = false;
+    const ULONGLONG deadline = GetTickCount64() + 3000;
+    while (reader.wait_for(10ms) != std::future_status::ready && GetTickCount64() < deadline) {
+      wanted = watch->wanted() || wanted;
+    }
+    CHECK(!wanted);
+    const bool opened = reader.wait_for(0ms) == std::future_status::ready;
+    CHECK(opened);
+    if (!opened) watch.reset();  // Release a stuck reader even when the check fails.
+    const HANDLE handle = reader.get();
+    CHECK(handle != INVALID_HANDLE_VALUE);
+    if (opened && handle != INVALID_HANDLE_VALUE) {
+      CHECK(!watch->wanted());
+      CHECK(watch->handle() == 0);  // Can't rearm while the reader owns it.
+      CHECK(ContainsPath(LoadedModules(), file));
+    }
+    if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+    if (!opened || handle == INVALID_HANDLE_VALUE) {
+      FreeLibrary(module);
+      return;
+    }
+    const ULONGLONG rearm = GetTickCount64() + 3000;
+    while (!watch->handle() && GetTickCount64() < rearm) {
+      CHECK(!watch->wanted());
+      Sleep(10);
+    }
+    CHECK(watch->handle() != 0);
+  }
+  // Repeated probes mustn't lose the watch: an append-only installer still
+  // waits for both unloading and release, just as an overwrite does.
+  auto writer = std::async(std::launch::async, [&]() -> DWORD {
+    const HANDLE out = CreateFileW(file.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (out == INVALID_HANDLE_VALUE) return GetLastError();
+    CloseHandle(out);
+    return ERROR_SUCCESS;
+  });
+  CHECK(WaitUntilWanted(*watch));
+  CHECK(writer.wait_for(50ms) == std::future_status::timeout);
+  CHECK(FreeLibrary(module));
+  CHECK(writer.wait_for(50ms) == std::future_status::timeout);
+  watch.reset();
+  CHECK(writer.get() == ERROR_SUCCESS);
 }
 
 // Two copies of the test binary exercise the same handoff as the tray. The
@@ -289,16 +388,46 @@ TEST(FileOplockCancelsWithoutCallingBack) {
 // only after the first copy exits. Neither runs the test suite.
 int HoldDllForUpdate(const fs::path& file, const fs::path& ready, const fs::path& done) {
   if (!LoadLibraryW(file.c_str())) return 1;
-  auto watch = FileOplock::Take(file, {});
+  auto watch = FileOplock::Take(file);
   if (!watch) return 2;
   WriteFile(ready, "ready");
   const ULONGLONG deadline = GetTickCount64() + 10000;
   while (!(*watch)->wanted() && GetTickCount64() < deadline) Sleep(10);
   if (!(*watch)->wanted()) return 3;
+  if (!(*watch)->PrepareHandoff()) return 4;
   const Status started = StartWithFileOplocks(SelfPath(), std::format(L"--file-update-helper \"{}\"", done.native()),
                                              {(*watch)->handle()});
-  // The watch closes normally, but the DLL stays mapped through process exit.
-  return started ? 0 : 4;
+  // Destructors run normally, but the DLL stays mapped through process exit.
+  return started ? 0 : 5;
+}
+
+bool WaitForMarker(const fs::path& file) {
+  const ULONGLONG deadline = GetTickCount64() + 10000;
+  while (!fs::exists(file) && GetTickCount64() < deadline) Sleep(10);
+  return fs::exists(file);
+}
+
+int HoldDllsForUpdate(const fs::path& folder) {
+  // Like Core, issue requests and run their destructors on a worker, then
+  // join it before the process exits. Keep both images mapped until exit.
+  const int result = std::async(std::launch::async, [&] {
+    const fs::path first = folder / L"first.dll";
+    const fs::path second = folder / L"second.dll";
+    if (!LoadLibraryW(first.c_str()) || !LoadLibraryW(second.c_str())) return 1;
+    auto broken = FileOplock::Take(first);
+    auto unbroken = FileOplock::Take(second);
+    if (!broken || !unbroken) return 2;
+    WriteFile(folder / L"ready", "ready");
+    if (!WaitUntilWanted(**broken)) return 3;
+    if (!(*broken)->PrepareHandoff() || !(*unbroken)->PrepareHandoff()) return 4;
+    const Status started = StartWithFileOplocks(
+        SelfPath(), std::format(L"--file-updates-helper \"{}\"", folder.native()),
+        {(*broken)->handle(), (*unbroken)->handle()});
+    return started ? 0 : 5;
+  }).get();
+  if (result) return result;
+  WriteFile(folder / L"stopped", "stopped");
+  return WaitForMarker(folder / L"exit") ? 0 : 6;
 }
 
 TEST(FileOplocksHandTheWriterToTheReplacementProcess) {
@@ -340,6 +469,91 @@ TEST(FileOplocksHandTheWriterToTheReplacementProcess) {
   CHECK(!WaitForFileOplocks(L"").ok());
   CHECK(!WaitForFileOplocks(L"not-handles").ok());
   CHECK(!StartWithFileOplocks(SelfPath(), L"", {}).ok());
+}
+
+TEST(FileOplocksHandUnbrokenHoldsPastThreadAndProcessExit) {
+  using namespace std::chrono_literals;
+  fs::path dependency;
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+    if (entry.path().filename() == L"knobs-test-dep.dll") dependency = entry.path();
+  }
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  // Reach the second DLL after just the issuing thread has exited, then
+  // in a fresh pair of processes after the entire old process has exited.
+  for (const bool after_exit : {false, true}) {
+    TempDir dir(after_exit ? L"oplock-process-exit" : L"oplock-thread-exit");
+    const fs::path first = dir.path / L"first.dll";
+    const fs::path second = dir.path / L"second.dll";
+    fs::copy_file(dependency, first);
+    fs::copy_file(dependency, second);
+    auto process = StartProcessToWait(SelfPath(), std::format(L"--hold-dlls \"{}\"", dir.path.native()), dir.path);
+    CHECK(process.ok());
+    if (!process) continue;
+    CHECK(WaitForMarker(dir.path / L"ready"));
+    auto writer = std::async(std::launch::async, [&]() -> DWORD {
+      const HANDLE out = CreateFileW(first.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+      if (out == INVALID_HANDLE_VALUE) return GetLastError();
+      CloseHandle(out);
+      return ERROR_SUCCESS;
+    });
+    CHECK(WaitForMarker(dir.path / L"stopped"));
+    if (after_exit) {
+      WriteFile(dir.path / L"exit", "exit");
+      CHECK(WaitForSingleObject(*process, 10000) == WAIT_OBJECT_0);
+    } else {
+      CHECK(WaitForSingleObject(*process, 0) == WAIT_TIMEOUT);
+    }
+    std::promise<void> opening;
+    auto opening_started = opening.get_future();
+    auto renamer = std::async(std::launch::async, [&]() -> DWORD {
+      opening.set_value();
+      return MoveFileExW(second.c_str(), (dir.path / L"renamed.dll").c_str(), 0) ? ERROR_SUCCESS : GetLastError();
+    });
+    CHECK(opening_started.wait_for(3s) == std::future_status::ready);
+    // A mere FILE_SHARE_READ duplicate would fail immediately here. The
+    // previously unbroken watch must still hold, even after process teardown.
+    CHECK(renamer.wait_for(100ms) == std::future_status::timeout);
+    CHECK(writer.wait_for(0ms) == std::future_status::timeout);
+    WriteFile(dir.path / L"exit", "exit");
+    CHECK(WaitForSingleObject(*process, 10000) == WAIT_OBJECT_0);
+    DWORD code = 1;
+    CHECK(GetExitCodeProcess(*process, &code) && code == 0);
+    CloseHandle(*process);
+    CHECK(renamer.wait_for(50ms) == std::future_status::timeout);
+    WriteFile(dir.path / L"release", "release");
+    CHECK(writer.wait_for(5s) == std::future_status::ready);
+    CHECK(renamer.wait_for(5s) == std::future_status::ready);
+    CHECK(writer.get() == ERROR_SUCCESS);
+    CHECK(renamer.get() == ERROR_SUCCESS);
+    CHECK(fs::file_size(first) == 0);
+    CHECK(fs::exists(dir.path / L"renamed.dll") && !fs::exists(second));
+    if (fs::exists(dir.path / L"renamed.dll")) {
+      CHECK(fs::file_size(dir.path / L"renamed.dll") == fs::file_size(dependency));
+    }
+    CHECK(WaitForMarker(dir.path / L"done"));
+  }
+}
+
+TEST(FileOplockHandoffThatDoesntCheckOutStillClosesItsFiles) {
+  // A bad value before the files mustn't leave them open, holding an
+  // installer for as long as this copy runs.
+  TempDir dir(L"oplock-bad-handoff");
+  const fs::path file = dir.path / L"held.dll";
+  WriteFile(file, "loaded");
+  SECURITY_ATTRIBUTES inherit = {sizeof(inherit), nullptr, TRUE};
+  const HANDLE held =
+      CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, &inherit, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  CHECK(held != INVALID_HANDLE_VALUE);
+  if (held == INVALID_HANDLE_VALUE) return;
+  const Status waited = WaitForFileOplocks(std::format(L"zz,{:x}", reinterpret_cast<uintptr_t>(held)));
+  CHECK(!waited.ok() && waited.error() == "The restart's file handoff is invalid.");
+  DWORD flags = 0;
+  CHECK(!GetHandleInformation(held, &flags));
+  // Closed, so a writer gets in.
+  const HANDLE writer = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+  CHECK(writer != INVALID_HANDLE_VALUE);
+  if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
 }
 
 TEST(FolderFingerprintFollowsAnUpdate) {
@@ -1753,10 +1967,22 @@ int wmain(int argc, wchar_t** argv) {
   if (argc == 5 && std::wstring_view(argv[1]) == L"--hold-dll") {
     return HoldDllForUpdate(argv[2], argv[3], argv[4]);
   }
+  if (argc == 3 && std::wstring_view(argv[1]) == L"--hold-dlls") {
+    return HoldDllsForUpdate(argv[2]);
+  }
   if (argc == 5 && std::wstring_view(argv[1]) == L"--file-update-helper" &&
       std::wstring_view(argv[3]) == L"--wait-for-files") {
     if (!knobs::WaitForFileOplocks(argv[4])) return 1;
     WriteFile(argv[2], "done");
+    return 0;
+  }
+  if (argc == 5 && std::wstring_view(argv[1]) == L"--file-updates-helper" &&
+      std::wstring_view(argv[3]) == L"--wait-for-files") {
+    const fs::path folder = argv[2];
+    const bool release = WaitForMarker(folder / L"release");
+    const Status waited = knobs::WaitForFileOplocks(argv[4]);
+    if (!release || !waited) return 1;
+    WriteFile(folder / L"done", "done");
     return 0;
   }
   if (knobs::test::RunAsStandInObs()) return 0;

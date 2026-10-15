@@ -52,12 +52,14 @@ struct ChainPlan {
   bool load_callbacks = false;
   audio::AudioDevice cable;
   std::vector<std::filesystem::path> vst_plugins;
+  std::string plugins_key;  // import::ImportedMic::plugins_key
 
-  // The same chain to the same cable (audio::SameId). The rest of
-  // source_json, and the cable's name, don't change what reaches the cable.
+  // The same chain, with the same plugin files, to the same cable
+  // (audio::SameId). The rest of source_json, and the cable's name, don't
+  // change what reaches the cable.
   bool SameAs(const ChainPlan& other) const {
-    return chain_key == other.chain_key && load_callbacks == other.load_callbacks &&
-           audio::SameId(cable.id, other.cable.id);
+    return chain_key == other.chain_key && plugins_key == other.plugins_key &&
+           load_callbacks == other.load_callbacks && audio::SameId(cable.id, other.cable.id);
   }
 };
 
@@ -124,8 +126,14 @@ class Backend {
   // Where this OBS version looks for NVIDIA's SDK, even while it is missing
   // during an update. Used by the new process before loading nv-filters.
   virtual std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion& obs) = 0;
-  // Starts the replacement through `start`, passing the SDK watches to it.
-  // Keeps the originals until shutdown or ReleaseUpdateFiles.
+  // Whether NVIDIA's SDK is now where nv-filters looks for it, though
+  // nv-filters loaded without it for a chain that still needs it. nv-filters
+  // looks only as it loads, so only a new process can run the SDK. Cheap
+  // enough to ask every second.
+  virtual bool NvidiaSdkArrived() = 0;
+  // Starts the replacement through `start`, passing the SDK watches to it
+  // when an installer went for one of them, and none otherwise. Keeps the
+  // originals until shutdown or ReleaseUpdateFiles.
   virtual Status Restart(const RestartHook& start) = 0;
   // Releases the SDK watches when a restart can't happen promptly or fails.
   // The installer proceeds as without them; loaded DLLs can still block it.

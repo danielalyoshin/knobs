@@ -78,7 +78,9 @@ std::string FormatChain(const ChainSummary& chain, bool short_form) {
 }
 
 std::string DescribeSnapshot(const Snapshot& snapshot) {
-  std::string text(StateName(snapshot.state));
+  std::string text(snapshot.state == State::kPausedForUpdate && snapshot.nvidia_update
+                       ? "paused for NVIDIA's SDK update"
+                       : StateName(snapshot.state));
   if (!snapshot.detail.empty()) {
     text += ": " + snapshot.detail;
   } else if (snapshot.chain) {

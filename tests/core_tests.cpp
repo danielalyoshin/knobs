@@ -91,7 +91,11 @@ struct FakeBackend : Backend {
   bool libobs_can_retry = true;
   std::optional<std::string> import_error;
   RestartNeed import_restart = RestartNeed::kNone;
+  // NVIDIA's SDK appeared after nv-filters loaded without it.
+  bool sdk_arrived = false;
   FileUpdate file_update;
+  // An installer that goes for a plugin while the chain stops.
+  std::optional<FileUpdate> update_as_chain_stops;
   std::string folder_fingerprint = "original files";
   std::vector<fs::path> fingerprinted;
   int file_watches = 0;
@@ -122,6 +126,7 @@ struct FakeBackend : Backend {
 
   std::function<void()> on_call;
   std::function<void()> on_start_libobs;
+  std::function<void()> on_import;
   std::function<void(bool chain_running)> on_destroy;
 
   ~FakeBackend() override {
@@ -152,6 +157,7 @@ struct FakeBackend : Backend {
   Result<MicImport> ImportMic(const import::ActiveObsConfig&, std::string_view pick) override {
     Called();
     ++imports;
+    if (on_import) on_import();
     if (import_error) return Error{*import_error};
     MicImport result;
     for (const import::ImportedMic& mic : collection) result.mics.push_back(mic.mic);
@@ -189,6 +195,7 @@ struct FakeBackend : Backend {
     CHECK(chain_running);
     ++chain_stops;
     chain_running = false;
+    if (update_as_chain_stops) file_update = *std::exchange(update_as_chain_stops, std::nullopt);
   }
   void WatchChainFiles(const ChainPlan* plan) override {
     Called();
@@ -214,6 +221,10 @@ struct FakeBackend : Backend {
   std::vector<fs::path> NvidiaUpdateFolders(const runtime::ObsVersion&) override {
     Called();
     return {L"C:\\sdk"};
+  }
+  bool NvidiaSdkArrived() override {
+    Called();
+    return sdk_arrived;
   }
   Status Restart(const RestartHook& start) override {
     Called();
@@ -603,6 +614,27 @@ TEST(CoreRestartsWhenNvidiasSdkArrives) {
   CHECK(f.state() == State::kRestartNeeded && !f.backend.chain_running);
   CHECK(f.last().restart == RestartNeed::kNvidiaInstalled);
   CHECK(f.last().detail.find("NVIDIA's Audio Effects SDK was installed") != std::string::npos);
+  // Choosing a cable plans the chain again, but can't lose the restart.
+  f.controller.Apply({.cable = kCableId, .cable_name = kCableName}, f.now);
+  CHECK(f.state() == State::kRestartNeeded && f.last().restart == RestartNeed::kNvidiaInstalled);
+  CHECK(!f.backend.chain_running);
+}
+
+TEST(CoreRestartsForNvidiasSdkWithoutWaitingForAnImport) {
+  // nv-filters only looks for the SDK as it loads, so the core asks the
+  // backend each second rather than waiting for OBS to close.
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.Advance(3s);
+  CHECK(f.state() == State::kRunning && f.backend.imports == 1);
+  f.backend.sdk_arrived = true;
+  f.Advance(1s);
+  CHECK(f.state() == State::kRestartNeeded && f.last().restart == RestartNeed::kNvidiaInstalled);
+  CHECK(!f.backend.chain_running && f.backend.imports == 1);
+  // A pause or a resume doesn't lose it either.
+  f.controller.Pause(f.now);
+  f.controller.Resume(f.now);
+  CHECK(f.state() == State::kRestartNeeded && !f.backend.chain_running);
 }
 
 TEST(CoreStartsPausedAfterAPausedCopyRestarted) {
@@ -629,13 +661,15 @@ TEST(CoreUnloadsBeforeLettingAVstInstallerWriteAndWaitsForQuiet) {
   CHECK(f.backend.imports == 1 && f.backend.chain_starts == 1);
   // Another file in the install changes just before the quiet period ends.
   f.backend.folder_fingerprint = "new plugin and data";
-  f.backend.collection.front().chain_key = "updated plugin";
+  f.backend.collection.front().plugins_key = "updated plugin";
   f.Advance(1s);
   f.Advance(4s);
   CHECK(f.state() == State::kPausedForUpdate && f.backend.imports == 1);
   f.Advance(1s);
   CHECK(f.state() == State::kRunning && f.backend.imports == 2 && f.backend.chain_starts == 2);
-  CHECK(f.backend.last_plan->chain_key == "updated plugin" && f.backend.file_watches == 2);
+  CHECK(f.backend.last_plan->plugins_key == "updated plugin" && f.backend.file_watches == 2);
+  // A new plugin file isn't a change made in OBS.
+  CHECK(f.last().chain_revision == 1);
   // The new DLL is watched as well.
   f.backend.file_update.folders = {L"C:\\plugins"};
   f.Advance(1s);
@@ -690,6 +724,35 @@ TEST(CoreReportsAFailedImportAfterAPluginUpdate) {
   f.backend.import_error.reset();
   f.controller.Reimport(f.now);
   CHECK(f.state() == State::kRunning);
+}
+
+TEST(CoreWaitsForAPluginAnInstallerWentForAsTheChainStopped) {
+  // The chain stops for something else, and an installer goes for its plugin
+  // before its watch is released: the core waits for the plugin's folder
+  // rather than loading it again at once while the installer writes.
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.backend.update_as_chain_stops = FileUpdate{{L"C:\\plugins"}};
+  f.backend.collection.front().chain_key = "chain-2";
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kPausedForUpdate && !f.last().nvidia_update && !f.backend.chain_running);
+  CHECK(f.backend.chain_starts == 1 && f.backend.fingerprinted == std::vector<fs::path>{L"C:\\plugins"});
+  f.Advance(6s);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 2 && f.backend.last_plan->chain_key == "chain-2");
+}
+
+TEST(CoreStopsWaitingForFilesThatNeverSettle) {
+  // A plugin in a folder another program keeps writing to.
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.backend.file_update.folders = {L"C:\\plugins"};
+  f.Advance(1s);
+  int writes = 0;
+  f.backend.on_call = [&] { f.backend.folder_fingerprint = std::to_string(++writes); };
+  f.Advance(9min);
+  CHECK(f.state() == State::kPausedForUpdate && f.backend.chain_starts == 1);
+  f.Advance(1min);
+  CHECK(f.state() == State::kRunning && f.backend.imports == 2 && f.backend.chain_starts == 2);
 }
 
 TEST(CoreRestartsForAnNvidiaUpdateEvenWhilePaused) {
@@ -755,6 +818,25 @@ TEST(CoreReleasesSdkWatchesWhenTheTrayCantRestartPromptly) {
   CHECK(restarted && !f.backend.chain_running && f.backend.imports == 1);
 }
 
+TEST(CoreHoldsAnSdkInstallerFromWhenTheCoreSeesIt) {
+  // An installer goes for an SDK DLL during an import that takes seconds:
+  // its hold counts from when the core sees it, not from when that began.
+  Fixture f;
+  f.controller.Start(false, f.now);
+  const Clock::time_point began = f.now;
+  f.backend.on_import = [&] {
+    f.now += 3s;
+    f.backend.file_update = {{L"C:\\sdk"}, true};
+    f.backend.on_import = nullptr;
+  };
+  f.controller.Reimport(began);
+  CHECK(f.state() == State::kRestartNeeded && f.last().restart == RestartNeed::kNvidiaUpdating);
+  f.Advance(1999ms);
+  CHECK(f.backend.sdk_releases == 0 && !f.last().restart_delayed);
+  f.Advance(1ms);
+  CHECK(f.backend.sdk_releases == 1 && f.last().restart_delayed);
+}
+
 TEST(CoreReleasesSdkWatchesImmediatelyAfterAFailedRestart) {
   Fixture f;
   f.controller.Start(false, f.now);
@@ -776,7 +858,7 @@ TEST(CoreWaitsForNvidiaBeforeLoadingLibobsAfterARestart) {
   for (const bool paused : {false, true}) {
     Fixture f;
     f.controller.Start(false, f.now, paused, true);
-    CHECK(f.state() == State::kPausedForUpdate && f.last().paused_by_user == paused);
+    CHECK(f.state() == State::kPausedForUpdate && f.last().paused_by_user == paused && f.last().nvidia_update);
     CHECK(f.backend.libobs_starts == 0 && f.backend.imports == 0);
     CHECK(f.backend.fingerprinted == std::vector<fs::path>{L"C:\\sdk"});
     f.controller.Reimport(f.now);

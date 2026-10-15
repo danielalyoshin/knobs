@@ -20,6 +20,8 @@
 //   --wait-for-files <handles>
 //               Inherited process and oplock handles for an SDK update.
 //               Wait for the old process to exit, then release its writer.
+//               A handoff that fails releases it at once, and the copy
+//               starts as any restart does.
 //   --reopened  Started by Windows after an installer closed the copy before
 //               to replace a file it had open (Restart Manager): as
 //               --restart, but if a copy is already running, quit without a
@@ -130,7 +132,7 @@ bool IsWindows11() {
 }
 
 int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core::RestartNeed restarted_for,
-        bool paused, bool updated, bool reopened) {
+        bool wait_for_nvidia, bool paused, bool updated, bool reopened, std::string_view handoff_error) {
   const std::wstring window_class = std::format(L"{}.tray", kDisplayNameW);
   auto lock = tray::SingleInstance::Acquire(window_class, restart ? kRestartWait : 0ms);
   if (!lock) {
@@ -165,6 +167,11 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
                                      startup ? ", at sign-in" : "", resume_setup ? ", to carry on with setup" : "",
                                      restart ? ", to restart" : "", updated ? ", after an update" : "",
                                      reopened ? ", after an installer closed it" : "", paused ? ", paused" : ""));
+    if (!handoff_error.empty()) {
+      log->Write(LOG_WARNING, std::format("Couldn't hold NVIDIA's installer until the copy before quit, so it may "
+                                          "have found the files in use: {}",
+                                          handoff_error));
+    }
   }
   const tray::RunEntry run{std::wstring(kDisplayNameW), std::format(L"\"{}\" --startup", exe.native())};
 
@@ -204,6 +211,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     return Ok{};
   };
   options.restarted_for = restarted_for;
+  options.wait_for_nvidia = wait_for_nvidia;
   options.resume_after_restart = [exe](bool on) {
     return tray::RunOnceAtNextSignIn({.name = std::wstring(kDisplayNameW),
                                       .command = std::format(L"\"{}\" --resume-setup", exe.native()),
@@ -225,7 +233,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   options.updates.folder = dirs->local / L"updates";
   options.updates.current = {KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
   options.updates.can_install = !dirs->portable && InstalledByInstaller(exe.parent_path());
-  options.start_core = [log, restarted_for](core::Observer& observer, const core::Settings& settings, bool paused) {
+  options.start_core = [log, wait_for_nvidia](core::Observer& observer, const core::Settings& settings, bool paused) {
     core::ObsBackendOptions backend;
     backend.log = log;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
@@ -233,7 +241,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     core::CoreOptions core_options;
     core_options.settings = settings;
     core_options.paused = paused;
-    core_options.wait_for_nvidia = restarted_for == core::RestartNeed::kNvidiaUpdating;
+    core_options.wait_for_nvidia = wait_for_nvidia;
     return core::Core::Start(std::make_unique<core::ObsBackend>(std::move(backend)), observer,
                              std::move(core_options));
   };
@@ -281,11 +289,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
     LocalFree(argv);
   }
+  // An SDK update's restart. A handoff that fails lets the installer go on,
+  // which may then find the old copy still using the files, and this copy
+  // starts as any restart does: the old one quits by itself.
+  std::string handoff_error;
   if (!file_handoff.empty()) {
-    if (const Status waited = WaitForFileOplocks(file_handoff); !waited) {
-      tray::ShowStartupError(waited.error());
-      return 1;
-    }
+    if (const Status waited = WaitForFileOplocks(file_handoff); !waited) handoff_error = waited.error();
   }
   // The tray's thread is a single-threaded apartment: the shell's dialogs
   // and ShellExecute need one.
@@ -294,10 +303,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     tray::ShowStartupError(std::format("Couldn't initialize COM (0x{:08X}).", static_cast<uint32_t>(com)));
     return 1;
   }
+  // An SDK being installed or updated may still be writing its files. So may
+  // one whose installer the copy before held, whatever it restarted for.
+  const bool wait_for_nvidia = restarted_for == core::RestartNeed::kNvidiaUpdating ||
+                               restarted_for == core::RestartNeed::kNvidiaInstalled || !file_handoff.empty();
   // An update's new copy waits for the old one, as a restart's does, and so
   // does one Windows reopens.
-  const int code =
-      Run(instance, startup, resume_setup, restart || updated || reopened, restarted_for, paused, updated, reopened);
+  const int code = Run(instance, startup, resume_setup, restart || updated || reopened, restarted_for, wait_for_nvidia,
+                       paused, updated, reopened, handoff_error);
   CoUninitialize();
   return code;
 }

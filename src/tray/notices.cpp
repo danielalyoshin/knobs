@@ -185,7 +185,10 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       notice.kind = Kind::kRestartNeeded;
       notice.page = FirstRunPage::kProblem;
       notice.title = std::format("{} couldn't restart yet", kDisplayName);
-      notice.text = snapshot.detail;
+      // The detail says the title again.
+      notice.text = std::format("It let the NVIDIA installer continue. If the installer says a file is in use, quit "
+                                "{} and retry it.",
+                                kDisplayName);
       return notice;
     default:
       return std::nullopt;

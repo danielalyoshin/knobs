@@ -67,6 +67,7 @@ class ObsBackend : public Backend {
   FileUpdate FilesWanted() override;
   std::string FingerprintFolders(const std::vector<std::filesystem::path>& folders) override;
   std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion& obs) override;
+  bool NvidiaSdkArrived() override;
   Status Restart(const RestartHook& start) override;
   void ReleaseUpdateFiles() override;
   uint64_t ChainPackets() override;
@@ -83,7 +84,9 @@ class ObsBackend : public Backend {
   // packet's peak. It only reads the samples.
   static void OnChainAudio(void* param, obs_source_t* source, const audio_data* audio, bool muted);
   void WatchNvidiaFiles();
-  void WatchFile(const std::filesystem::path& file, std::vector<std::unique_ptr<FileOplock>>& watches);
+  // `advice` says what to do instead, for the log, if Windows can't watch it.
+  void WatchFile(const std::filesystem::path& file, std::vector<std::unique_ptr<FileOplock>>& watches,
+                 std::string_view advice);
 
   ObsBackendOptions options_;
   std::unique_ptr<runtime::ObsHost> host_;
@@ -91,9 +94,13 @@ class ObsBackend : public Backend {
   // Whether NVIDIA's Audio Effects SDK was there when nv-filters loaded, once
   // it has.
   std::optional<bool> nvidia_sdk_at_load_;
+  // Whether the last import's chain needs nv-filters.
+  bool chain_needs_nvidia_ = false;
   std::filesystem::path nvidia_folder_;
   std::vector<std::unique_ptr<FileOplock>> nvidia_files_;
   std::vector<std::unique_ptr<FileOplock>> vst_files_;
+  // Files Windows wouldn't watch, which the log has said.
+  std::vector<std::filesystem::path> unwatchable_;
   std::atomic<uint64_t> packets_ = 0;
   std::mutex level_mutex_;
   // Each packet's peak since the last TakeChainLevel, oldest first, before

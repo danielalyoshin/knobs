@@ -23,7 +23,8 @@ namespace knobs::core {
 // it on one thread.
 //
 // After every event it works out the state from what it knows, in this order:
-// a restart to free NVIDIA's SDK, or a pause while updated files settle;
+// a restart to free NVIDIA's SDK, a pause while updated files settle, or a
+// restart to load an SDK installed since nv-filters loaded without it;
 // problems with OBS, its settings or the import; a chain that failed to start,
 // or Windows' list of devices that couldn't be read; paused by the user;
 // paused while OBS runs, unless Settings::pause_for_obs is off; the cable
@@ -45,6 +46,9 @@ class Controller {
     // interval between folder fingerprints while an installer works.
     Clock::duration file_poll = std::chrono::seconds(1);
     Clock::duration file_settle = std::chrono::seconds(5);
+    // Files that never settle, as in a folder another program keeps writing
+    // to, end the wait after this long anyway.
+    Clock::duration file_wait_max = std::chrono::minutes(10);
     // How long to hold an SDK installer for a restart. If the tray can't
     // start one by then, let the installer proceed as without the watches.
     Clock::duration file_restart_wait = std::chrono::seconds(2);
@@ -144,7 +148,10 @@ class Controller {
   // Finds OBS, reads its settings, starts libobs if needed, and imports.
   void Refresh(Clock::time_point now);
   void CheckFileUpdates(Clock::time_point now);
-  void WaitForFiles(std::vector<std::filesystem::path> folders, Clock::time_point now);
+  // Waits for these folders to settle before importing again. Nothing of
+  // theirs may be loaded: StopChain unloads VST plugins first, and NVIDIA's
+  // SDK waits in a new process before anything loads.
+  void WaitForFiles(std::vector<std::filesystem::path> folders, bool nvidia, Clock::time_point now);
   void ReleaseUpdateFiles();
   // Works out the cable and the chain to run, from an import that found the
   // mic and the settings.
@@ -173,10 +180,15 @@ class Controller {
   bool wait_for_nvidia_ = false;
   bool file_restart_ = false;
   bool update_files_released_ = false;
+  // NVIDIA's SDK was installed after nv-filters loaded without it. Only a new
+  // process can load it, so it stays until then.
+  bool nvidia_installed_ = false;
   std::optional<Clock::time_point> file_restart_due_;
   std::vector<std::filesystem::path> updating_folders_;
+  bool updating_nvidia_ = false;  // Snapshot::nvidia_update
   std::string folder_fingerprint_;
   Clock::time_point files_quiet_since_;
+  Clock::time_point file_wait_since_;
   Clock::time_point next_file_check_;
 
   // From the last Refresh.
@@ -192,6 +204,7 @@ class Controller {
   std::string profile_cable_id_;
   std::string profile_cable_name_;
   std::string chain_key_;
+  std::string plugins_key_;
   uint32_t chain_revision_ = 0;
 
   audio::Endpoints devices_;

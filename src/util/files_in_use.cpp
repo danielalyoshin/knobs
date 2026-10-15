@@ -10,6 +10,7 @@
 #include <charconv>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -21,9 +22,9 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// FolderFingerprint's limits: an update writes a plugin's or NVIDIA's own
-// folders, which are small, but a plugin can sit in a folder shared with
-// many others.
+// FolderFingerprint's limits, for each folder: an update writes a plugin's
+// or NVIDIA's own folders, which are small, but a plugin can sit in a folder
+// shared with many others.
 constexpr int kFingerprintDepth = 2;
 constexpr size_t kFingerprintFiles = 5000;
 
@@ -59,71 +60,122 @@ struct FileOplock::Request {
   REQUEST_OPLOCK_INPUT_BUFFER input = {};
   REQUEST_OPLOCK_OUTPUT_BUFFER output = {};
   bool pending = false;
-  std::atomic<bool> wanted = false;
-  std::function<void()> on_wanted;
+  std::atomic<bool> completed = false;
 
-  // On a thread-pool thread, once the request completes: the oplock broke.
+  // Nothing owning-thread-specific runs here, even during shutdown.
   static void CALLBACK Broken(void* context, BOOLEAN) {
-    auto* request = static_cast<Request*>(context);
-    request->wanted = true;
-    if (request->on_wanted) request->on_wanted();
+    static_cast<Request*>(context)->completed = true;
+  }
+
+  ~Request() {
+    if (wait) UnregisterWaitEx(wait, INVALID_HANDLE_VALUE);
+    if (pending) {
+      // Unbroken, cancellation releases the oplock. Broken, the request has
+      // already completed, and only closing the last handle releases it.
+      CancelIoEx(file, &overlapped);
+      DWORD bytes = 0;
+      GetOverlappedResult(file, &overlapped, &bytes, TRUE);
+    }
+    // Closing the last handle acknowledges a break and lets the opener on.
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    if (event) CloseHandle(event);
+  }
+
+  static Result<std::unique_ptr<Request>> Take(const fs::path& path) {
+    auto request = std::make_unique<Request>();
+    request->file =
+        CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+    if (request->file == INVALID_HANDLE_VALUE) {
+      return Error{std::format("Couldn't open {}: {}", ToUtf8(path), DescribeWinError(GetLastError()))};
+    }
+    request->event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!request->event) return Error{std::format("Couldn't create an event: {}", DescribeWinError(GetLastError()))};
+    request->overlapped.hEvent = request->event;
+    request->input = {REQUEST_OPLOCK_CURRENT_VERSION, sizeof(request->input),
+                      OPLOCK_LEVEL_CACHE_READ | OPLOCK_LEVEL_CACHE_HANDLE, REQUEST_OPLOCK_INPUT_FLAG_REQUEST};
+    request->output = {REQUEST_OPLOCK_CURRENT_VERSION, sizeof(request->output)};
+    // Granted, the request stays pending until the oplock breaks. Done at
+    // once, it broke as it was granted.
+    const BOOL done = DeviceIoControl(request->file, FSCTL_REQUEST_OPLOCK, &request->input, sizeof(request->input),
+                                      &request->output, sizeof(request->output), nullptr, &request->overlapped);
+    const DWORD error = done ? ERROR_SUCCESS : GetLastError();
+    request->pending = done || error == ERROR_IO_PENDING;
+    if (error != ERROR_IO_PENDING) {
+      return Error{std::format("Windows didn't grant an oplock on {}: {}", ToUtf8(path),
+                               done ? "another program is opening it" : DescribeWinError(error))};
+    }
+    if (!RegisterWaitForSingleObject(&request->wait, request->event, &Request::Broken, request.get(), INFINITE,
+                                     WT_EXECUTEONLYONCE)) {
+      return Error{std::format("Couldn't wait for the oplock on {}: {}", ToUtf8(path), DescribeWinError(GetLastError()))};
+    }
+    return request;
   }
 };
 
-FileOplock::FileOplock(fs::path file) : file_(std::move(file)), request_(std::make_unique<Request>()) {}
+FileOplock::FileOplock(fs::path file) : file_(std::move(file)) {}
 
-Result<std::unique_ptr<FileOplock>> FileOplock::Take(const fs::path& file, std::function<void()> wanted) {
+Result<std::unique_ptr<FileOplock>> FileOplock::Take(const fs::path& file) {
+  auto request = Request::Take(file);
+  if (!request) return Error{request.error()};
   std::unique_ptr<FileOplock> oplock(new FileOplock(file));
-  Request& request = *oplock->request_;
-  request.on_wanted = std::move(wanted);
-  request.file =
-      CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
-  if (request.file == INVALID_HANDLE_VALUE) {
-    return Error{std::format("Couldn't open {}: {}", ToUtf8(file), DescribeWinError(GetLastError()))};
-  }
-  request.event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  if (!request.event) return Error{std::format("Couldn't create an event: {}", DescribeWinError(GetLastError()))};
-  request.overlapped.hEvent = request.event;
-  request.input = {REQUEST_OPLOCK_CURRENT_VERSION, sizeof(request.input),
-                   OPLOCK_LEVEL_CACHE_READ | OPLOCK_LEVEL_CACHE_HANDLE, REQUEST_OPLOCK_INPUT_FLAG_REQUEST};
-  request.output = {REQUEST_OPLOCK_CURRENT_VERSION, sizeof(request.output)};
-  // Granted, the request stays pending until the oplock breaks. Done at once,
-  // it broke as it was granted.
-  const BOOL done = DeviceIoControl(request.file, FSCTL_REQUEST_OPLOCK, &request.input, sizeof(request.input),
-                                    &request.output, sizeof(request.output), nullptr, &request.overlapped);
-  const DWORD error = done ? ERROR_SUCCESS : GetLastError();
-  if (error != ERROR_IO_PENDING) {
-    return Error{std::format("Windows didn't grant an oplock on {}: {}", ToUtf8(file),
-                             done ? "another program is opening it" : DescribeWinError(error))};
-  }
-  request.pending = true;
-  if (!RegisterWaitForSingleObject(&request.wait, request.event, &Request::Broken, &request, INFINITE,
-                                   WT_EXECUTEONLYONCE)) {
-    return Error{std::format("Couldn't wait for the oplock on {}: {}", ToUtf8(file), DescribeWinError(GetLastError()))};
-  }
+  oplock->request_ = std::move(*request);
   return oplock;
 }
 
-FileOplock::~FileOplock() {
-  Request& request = *request_;
-  // Waits for Broken to return, if it's running.
-  if (request.wait) UnregisterWaitEx(request.wait, INVALID_HANDLE_VALUE);
-  if (request.pending) {
-    // Unbroken, cancelling the request releases the oplock; broken, the
-    // request has completed already. Either way it has to complete before its
-    // buffers go.
-    CancelIoEx(request.file, &request.overlapped);
-    DWORD bytes = 0;
-    GetOverlappedResult(request.file, &request.overlapped, &bytes, TRUE);
+FileOplock::~FileOplock() = default;
+
+bool FileOplock::wanted() {
+  if (!request_) {
+    auto request = Request::Take(file_);
+    if (request) request_ = std::move(*request);
+    return false;
   }
-  // Closing the handle acknowledges a break, which lets the program go on.
-  if (request.file != INVALID_HANDLE_VALUE) CloseHandle(request.file);
-  if (request.event) CloseHandle(request.event);
+  if (!request_->completed) return false;
+  const auto& output = request_->output;
+  constexpr ACCESS_MASK modifying = FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE;
+  if ((output.Flags & REQUEST_OPLOCK_OUTPUT_FLAG_MODES_PROVIDED) && !(output.AccessMode & modifying)) {
+    // A reader with incompatible sharing needs only our handle closed.
+    // Retry on a later poll, so the reader gets to finish opening first.
+    request_.reset();
+    return false;
+  }
+  // Without modes, keep the conservative hold for the core to unload.
+  return true;
 }
 
-bool FileOplock::wanted() const { return request_->wanted; }
+uintptr_t FileOplock::handle() const { return request_ ? reinterpret_cast<uintptr_t>(request_->file) : 0; }
 
-uintptr_t FileOplock::handle() const { return reinterpret_cast<uintptr_t>(request_->file); }
+Status FileOplock::PrepareHandoff() {
+  if (!request_) return Ok{};  // A reader temporarily has the file.
+  DWORD bytes = 0;
+  if (!GetOverlappedResult(request_->file, &request_->overlapped, &bytes, FALSE) &&
+      GetLastError() == ERROR_IO_INCOMPLETE) {
+    // Even completion-port I/O is cancelled at process exit. Turn the
+    // pending request into an unacknowledged break before handing it off.
+    // An exclusive byte-range lock breaks RH to None and needs an ack, but
+    // the lock operation itself doesn't wait for that ack (IRP_MJ_LOCK_CONTROL).
+    // Use a separate open, with a different oplock key, and read access only.
+    const HANDLE probe = CreateFileW(file_.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                     nullptr, OPEN_EXISTING, 0, nullptr);
+    if (probe == INVALID_HANDLE_VALUE) {
+      return Error{std::format("Couldn't prepare {} for handoff: {}", ToUtf8(file_), DescribeWinError(GetLastError()))};
+    }
+    OVERLAPPED range = {};  // The first byte, which a loaded DLL always has.
+    const BOOL locked = LockFileEx(probe, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &range);
+    const DWORD error = locked ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(probe);  // Releases the byte-range lock, not the oplock.
+    if (!locked) {
+      return Error{std::format("Couldn't prepare {} for handoff: {}", ToUtf8(file_), DescribeWinError(error))};
+    }
+  }
+  // Don't hand off a request that could still be cancelled at exit, or a
+  // break that no longer holds an opener. No waiting on the core thread.
+  if (!GetOverlappedResult(request_->file, &request_->overlapped, &bytes, FALSE) ||
+      !(request_->output.Flags & REQUEST_OPLOCK_OUTPUT_FLAG_ACK_REQUIRED)) {
+    return Error{std::format("Windows didn't preserve the oplock on {} for handoff.", ToUtf8(file_))};
+  }
+  return Ok{};
+}
 
 Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, const std::vector<uintptr_t>& files) {
   if (files.empty()) return Error{"No waiting files were passed to the restart."};
@@ -175,7 +227,10 @@ Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, co
 Status WaitForFileOplocks(std::wstring_view handoff) {
   const std::string text = ToUtf8(handoff);
   std::string_view rest = text;
+  // Every inherited handle is closed as this returns, even after a bad one,
+  // so a handoff that doesn't check out can't keep an installer waiting.
   Handles inherited;
+  std::optional<std::string> invalid;
   while (!rest.empty()) {
     const size_t comma = rest.find(',');
     const std::string_view part = rest.substr(0, comma);
@@ -186,20 +241,22 @@ Status WaitForFileOplocks(std::wstring_view handoff) {
     if (parsed.ec != std::errc{} || parsed.ptr != part.data() + part.size() ||
         !GetHandleInformation(handle, &flags) || !(flags & HANDLE_FLAG_INHERIT) ||
         std::find(inherited.values.begin(), inherited.values.end(), handle) != inherited.values.end()) {
-      return Error{"The restart's file handoff is invalid."};
+      if (!invalid) invalid = "The restart's file handoff is invalid.";
+    } else {
+      // Only the inherited process and disk files expected by this protocol.
+      if (inherited.values.empty()) {
+        const DWORD pid = GetProcessId(handle);
+        if ((!pid || pid == GetCurrentProcessId()) && !invalid) invalid = "The restart's old process handle is invalid.";
+      } else if (GetFileType(handle) != FILE_TYPE_DISK && !invalid) {
+        invalid = "The restart's waiting file handle is invalid.";
+      }
+      inherited.values.push_back(handle);
+      SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
     }
-    // Only the inherited process and disk files expected by this protocol.
-    if (inherited.values.empty()) {
-      const DWORD pid = GetProcessId(handle);
-      if (!pid || pid == GetCurrentProcessId()) return Error{"The restart's old process handle is invalid."};
-    } else if (GetFileType(handle) != FILE_TYPE_DISK) {
-      return Error{"The restart's waiting file handle is invalid."};
-    }
-    inherited.values.push_back(handle);
-    SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
     if (comma == std::string_view::npos) break;
     rest.remove_prefix(comma + 1);
   }
+  if (invalid) return Error{*invalid};
   if (inherited.values.size() < 2) return Error{"The restart didn't inherit its waiting files."};
   // Windows signals the process only once its mappings are gone. Closing
   // these duplicates then acknowledges the breaks and releases the writers.
@@ -267,8 +324,11 @@ std::string FolderFingerprint(const std::vector<fs::path>& folders) {
       missing += std::format(" missing {}", ToUtf8(folder));
       continue;
     }
+    // A big shared folder mustn't hide the plugins' folders after it.
+    const size_t first = entries.size();
     fs::recursive_directory_iterator it(folder, fs::directory_options::skip_permission_denied, ec);
-    for (; !ec && it != fs::recursive_directory_iterator() && entries.size() < kFingerprintFiles; it.increment(ec)) {
+    for (; !ec && it != fs::recursive_directory_iterator() && entries.size() - first < kFingerprintFiles;
+         it.increment(ec)) {
       if (it.depth() >= kFingerprintDepth) it.disable_recursion_pending();
       Entry entry{it->path().native()};
       // NTFS directory entries can still have the size and time from before

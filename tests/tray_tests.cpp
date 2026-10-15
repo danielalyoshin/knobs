@@ -110,6 +110,9 @@ TEST(StatusLineFollowsTheState) {
   CHECK(StatusLine(snapshot) == "Paused while OBS is open: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.state = State::kPausedForUpdate;
   CHECK(StatusLine(snapshot) == "Paused for a plugin update: Mic/Aux › 4 filters › CABLE In 16ch");
+  snapshot.nvidia_update = true;
+  CHECK(StatusLine(snapshot) == "Paused for NVIDIA's SDK update: Mic/Aux › 4 filters › CABLE In 16ch");
+  snapshot.nvidia_update = false;
   snapshot.state = State::kMicMissing;
   CHECK(StatusLine(snapshot) == "Mic missing: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.state = State::kCableMissing;

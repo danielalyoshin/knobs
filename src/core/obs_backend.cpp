@@ -84,9 +84,8 @@ ObsBackend::~ObsBackend() {
   if (pruner_.joinable()) pruner_.join();
   StopChain();
   vst_files_.clear();
-  // On an SDK update, the new process already has duplicates of the broken
-  // oplocks. They keep the installer waiting until this process has exited,
-  // past both this shutdown and Windows unmapping NVIDIA's DLLs.
+  // A successful SDK handoff already completed its oplock requests, leaving
+  // breaks that the new copy acknowledges only once our DLLs are unmapped.
   if (!host_) return;
   const long leaks = host_->Shutdown();
   if (leaks != 0) host_->log().Write(LOG_WARNING, std::format("libobs leaked {} allocation(s).", leaks));
@@ -162,6 +161,7 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   runtime::ObsSession& session = host_->session();
   MicImport result;
   result.mics = (*collection)->Mics(session.module_errors());
+  chain_needs_nvidia_ = false;
   auto picked =
       options_.pick_by_number ? import::PickMic(result.mics, pick) : import::PickMicByName(result.mics, pick);
   if (!picked) {
@@ -172,8 +172,8 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   // the filters libobs has from the rest. A module never unloads, so one a
   // chain needed stays for the rest of the session.
   const std::vector<std::string> needed = (*collection)->NeededModules(result.mics[*picked]);
-  const bool needs_nvidia = std::find(needed.begin(), needed.end(), "nv-filters") != needed.end();
-  if (needs_nvidia && !nvidia_sdk_at_load_) {
+  chain_needs_nvidia_ = std::find(needed.begin(), needed.end(), "nv-filters") != needed.end();
+  if (chain_needs_nvidia_ && !nvidia_sdk_at_load_) {
     nvidia_sdk_at_load_ = import::NvidiaAudioEffectsInstalled(api);
     nvidia_folder_ = import::NvidiaAudioEffectsFolder(runtime::ObsVersion::FromLibobs(api.obs_get_version()));
   }
@@ -183,17 +183,13 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   if (session.module_errors().size() != failed_before) {
     for (const auto& [module, error] : failed) Log(std::format("Couldn't load the OBS module {}: {}", module, error));
   }
+  const bool sdk_arrived = NvidiaSdkArrived();
   if (!needed.empty()) result.mics = (*collection)->Mics(session.module_errors());
-  auto imported = (*collection)->Import(result.mics[*picked], session.module_errors());
+  auto imported = (*collection)->Import(result.mics[*picked], session.module_errors(), sdk_arrived);
   if (!imported) return Error{imported.error()};
   result.picked = *picked;
   result.mic = std::move(*imported);
-  // nv-filters registers its filter only if NVIDIA's SDK was there as it
-  // loaded (load_nvidia_afx), and a module never loads again.
-  if (needs_nvidia && session.module("nv-filters") && nvidia_sdk_at_load_ == false &&
-      api.obs_get_source_output_flags("nvidia_audiofx_filter") == 0 && import::NvidiaAudioEffectsInstalled(api)) {
-    result.restart = RestartNeed::kNvidiaInstalled;
-  }
+  if (sdk_arrived) result.restart = RestartNeed::kNvidiaInstalled;
   return result;
 }
 
@@ -229,35 +225,43 @@ void ObsBackend::StopChain() {
   chain_.reset();
 }
 
-void ObsBackend::WatchFile(const fs::path& file, std::vector<std::unique_ptr<FileOplock>>& watches) {
+void ObsBackend::WatchFile(const fs::path& file, std::vector<std::unique_ptr<FileOplock>>& watches,
+                           std::string_view advice) {
   if (std::any_of(watches.begin(), watches.end(), [&](const auto& watch) { return SamePath(watch->file(), file); })) {
     return;
   }
-  auto watch = FileOplock::Take(file, {});
+  auto watch = FileOplock::Take(file);
   if (watch) {
     watches.push_back(std::move(*watch));
-  } else {
-    Log(std::format("Couldn't watch for an update: {} Quit {} before replacing this file.",
-                    watch.error(), kDisplayName));
+  } else if (std::none_of(unwatchable_.begin(), unwatchable_.end(),
+                          [&](const fs::path& path) { return SamePath(path, file); })) {
+    // Once a file: every chain start would say it again, as on a drive
+    // without oplocks.
+    unwatchable_.push_back(file);
+    Log(std::format("Couldn't watch for an update: {} {}", watch.error(), advice));
   }
 }
 
 void ObsBackend::WatchNvidiaFiles() {
   if (nvidia_folder_.empty()) return;
+  // Only a new process lets go of NVIDIA's DLLs.
+  const std::string advice = std::format("Quit {} before replacing this file.", kDisplayName);
   for (const fs::path& file : LoadedModules()) {
-    if (InFolder(file, nvidia_folder_)) WatchFile(file, nvidia_files_);
+    if (InFolder(file, nvidia_folder_)) WatchFile(file, nvidia_files_, advice);
   }
 }
 
 void ObsBackend::WatchChainFiles(const ChainPlan* plan) {
   vst_files_.clear();  // The controller has already stopped the previous chain.
   if (!plan) return;
+  // Pausing unloads a plugin.
+  const std::string advice = std::format("Pause {} before replacing this file.", kDisplayName);
   const auto loaded = LoadedModules();
   for (const fs::path& plugin : plan->vst_plugins) {
     const auto file = std::find_if(loaded.begin(), loaded.end(), [&](const fs::path& path) {
       return SamePath(path, plugin);
     });
-    if (file != loaded.end()) WatchFile(*file, vst_files_);
+    if (file != loaded.end()) WatchFile(*file, vst_files_, advice);
   }
   // Some SDK DLLs only load as the chain starts.
   WatchNvidiaFiles();
@@ -265,13 +269,19 @@ void ObsBackend::WatchChainFiles(const ChainPlan* plan) {
 
 FileUpdate ObsBackend::FilesWanted() {
   const auto wanted = [](const auto& files) {
-    return std::any_of(files.begin(), files.end(), [](const auto& file) { return file->wanted(); });
+    bool found = false;
+    // Poll every watch, even after a writer, to let readers through and
+    // rearm their watches on the core thread.
+    for (const auto& file : files) found = file->wanted() || found;
+    return found;
   };
-  if (wanted(nvidia_files_)) {
+  const bool nvidia = wanted(nvidia_files_);
+  const bool vst = wanted(vst_files_);
+  if (nvidia) {
     return {{nvidia_folder_}, true};
   }
   FileUpdate update;
-  if (wanted(vst_files_)) {
+  if (vst) {
     // One installer may update several plugins. Releasing the chain releases
     // all of them, so wait for all their folders, not just the first file.
     for (const auto& file : vst_files_) {
@@ -295,12 +305,31 @@ std::vector<fs::path> ObsBackend::NvidiaUpdateFolders(const runtime::ObsVersion&
   return folder.empty() ? std::vector<fs::path>{} : std::vector<fs::path>{folder};
 }
 
+bool ObsBackend::NvidiaSdkArrived() {
+  // nv-filters registers its filter only if NVIDIA's SDK was there as it
+  // loaded (load_nvidia_afx), and a module never loads again.
+  if (!host_ || !chain_needs_nvidia_ || nvidia_sdk_at_load_.value_or(true)) return false;
+  const runtime::ObsApi& api = host_->api();
+  return host_->session().module("nv-filters") && api.obs_get_source_output_flags("nvidia_audiofx_filter") == 0 &&
+         import::NvidiaAudioEffectsInstalled(api);
+}
+
 Status ObsBackend::Restart(const RestartHook& start) {
+  // Only for an SDK installer that's waiting: other restarts hold nothing.
+  if (std::none_of(nvidia_files_.begin(), nvidia_files_.end(), [](const auto& file) { return file->wanted(); })) {
+    return start({});
+  }
   std::vector<uintptr_t> files;
   // Include watches that haven't broken yet: an installer can reach another
   // SDK DLL while this process is shutting down.
-  for (const auto& file : nvidia_files_) files.push_back(file->handle());
-  return start(files);
+  for (const auto& file : nvidia_files_) {
+    const Status prepared = file->PrepareHandoff();
+    if (!prepared) return prepared;
+    if (const uintptr_t handle = file->handle()) files.push_back(handle);
+  }
+  const Status started = start(files);
+  if (started) nvidia_files_.clear();
+  return started;
 }
 
 void ObsBackend::ReleaseUpdateFiles() { nvidia_files_.clear(); }

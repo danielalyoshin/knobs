@@ -235,11 +235,12 @@ std::string VstPluginState(const std::string& path) {
 }
 
 // Why an optional module's filter isn't one libobs has: the module didn't
-// load, or for nv-filters, NVIDIA's runtime isn't there or didn't start, so
-// nv-filters registered no filter (load_nvidia_afx, nvidia-audiofx-filter.c).
-// A warning, unless OBS can't run it either.
+// load, or for nv-filters, NVIDIA's runtime wasn't there or didn't start as
+// it loaded, so nv-filters registered no filter (load_nvidia_afx,
+// nvidia-audiofx-filter.c). A warning, unless OBS can't run it either, or a
+// restart will.
 ImportNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::string_view id,
-                        const std::string& plugin, const ModuleErrors& modules) {
+                        const std::string& plugin, const ModuleErrors& modules, bool nvidia_sdk_arrived) {
   const auto failed = modules.find(id == kVstFilterId ? "obs-vst" : "nv-filters");
   const std::string error = failed == modules.end() ? "" : failed->second;
   if (id == kVstFilterId) {
@@ -252,6 +253,13 @@ ImportNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::
     return {true, std::format("Filter \"{}\" is NVIDIA's noise removal, and {} couldn't load OBS's nv-filters "
                               "module: {} It passes audio through untouched.",
                               name, kDisplayName, error)};
+  }
+  if (nvidia_sdk_arrived) {
+    return {.text = std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK was installed "
+                                "after {} loaded OBS's NVIDIA filters, so the filter passes audio through untouched "
+                                "until {} restarts.",
+                                name, kDisplayName, kDisplayName),
+            .changes_expectations = true};
   }
   if (FindNvidiaAudioEffects(runtime::ObsVersion::FromLibobs(api.obs_get_version())).empty()) {
     return {.text = std::format("Filter \"{}\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. "
@@ -313,7 +321,7 @@ std::string FileName(std::string_view path) {
 // One filter's pre-flight. Returns whether to keep it, and sets `instead` to
 // a filter to load in its place, if any.
 bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& modules,
-                 std::vector<ImportNote>& notes, DataPtr& instead) {
+                 bool nvidia_sdk_arrived, std::vector<ImportNote>& notes, DataPtr& instead) {
   const std::string name = String(api, filter, "name");
   const std::string id = String(api, filter, "id");
   const std::string type = VersionedId(api, filter);
@@ -351,7 +359,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   if (!known) {
     // An optional module's filter, with the module or what it needs missing.
     const std::string plugin = id == kVstFilterId ? FileName(VstPluginPath(api, filter)) : "";
-    notes.push_back(WhyNotLoaded(api, name, id, plugin, modules));
+    notes.push_back(WhyNotLoaded(api, name, id, plugin, modules, nvidia_sdk_arrived));
     // Not 0.3.0's keys, "vst" and "unknown", which its own warnings left in
     // the warned list (Notifier::Options::warned) for these filters.
     key(id == kVstFilterId ? "vst-module" : "nvidia-module");
@@ -603,7 +611,8 @@ std::vector<std::string> SceneCollection::NeededModules(const MicCandidate& mic)
   return {needed.begin(), needed.end()};
 }
 
-Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const ModuleErrors& modules) const {
+Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const ModuleErrors& modules,
+                                            bool nvidia_sdk_arrived) const {
   DataPtr saved = SavedMic(api_, data_, mic);
   if (!saved || !AsMic(api_, saved.get(), modules)) {
     return Error{std::format("The scene collection has no mic at {}.", mic.location)};
@@ -623,7 +632,7 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
     for (size_t i = 0; i < count; ++i) {
       DataPtr filter = Own(api_, api_.obs_data_array_item(filters.get(), i));
       DataPtr instead;
-      const bool keep = CheckFilter(api_, filter.get(), modules, imported.notes, instead);
+      const bool keep = CheckFilter(api_, filter.get(), modules, nvidia_sdk_arrived, imported.notes, instead);
       changed |= !keep || instead;
       if (!keep) continue;
       api_.obs_data_array_push_back(kept.get(), instead ? instead.get() : filter.get());
@@ -647,7 +656,7 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
       // Every VST filter loads with its window off (audio::LoadSourceJson).
       DataPtr settings = Own(api_, api_.obs_data_get_obj(filter.get(), "settings"));
       if (settings) api_.obs_data_erase(settings.get(), kVstOpenWhenActive);
-      api_.obs_data_set_string(filter.get(), "knobs_plugin", VstPluginState(VstPluginPath(api_, filter.get())).c_str());
+      imported.plugins_key += std::format("{}\n", VstPluginState(plugin));
     }
   }
   const char* key_json = api_.obs_data_get_json(source.get());

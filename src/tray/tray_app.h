@@ -116,6 +116,9 @@ struct TrayOptions {
   std::function<Status(bool on, bool paused)> reopen_after_installer;
   // Why the copy before this one restarted it, if it did.
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
+  // This copy waits for NVIDIA's SDK folder to settle before it loads
+  // anything (core::CoreOptions::wait_for_nvidia).
+  bool wait_for_nvidia = false;
   UpdateHooks updates;
   // Starts OBS from its install, for the first run. Default: OpenObs.
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
@@ -220,6 +223,10 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // sending the mic to the cable, the user hasn't paused it, and nothing of
   // knobs's is open.
   bool CanRestart() const;
+  // A plugin's or NVIDIA's SDK's files are being replaced, or this copy waits
+  // for the SDK's before it loads anything. A copy that starts now, as an
+  // update's does, wouldn't wait for them.
+  bool FilesUpdating() const;
   // Turns on reopening after an installer (TrayOptions::reopen_after_installer),
   // paused or not as knobs is now, unless it's on that way already.
   void KeepReopening();
@@ -299,7 +306,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   Notifier notifier_;
   // The warnings the notifications have said, as last saved.
   std::optional<std::vector<std::string>> warned_;
-  bool restart_tried_ = false;  // Since the core said it needs a restart.
+  // The reason a restart was tried for, since the core said it needs one.
+  std::optional<core::RestartNeed> restart_tried_;
   // How Windows reopens knobs after an installer: paused or not, or not at
   // all (TrayOptions::reopen_after_installer).
   std::optional<bool> reopen_paused_;
@@ -313,6 +321,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   std::shared_ptr<UpdateWork> update_work_;
   std::thread update_thread_;
   // The version the menu's update asked for while a job ran.
+  // The version the user asked to update to while a job ran, or while files
+  // were being updated (FilesUpdating), to install once that's over.
   std::optional<update::Version> install_asked_;
   // An error to show once the code that hit it is done (kErrorMessage).
   std::string later_error_;

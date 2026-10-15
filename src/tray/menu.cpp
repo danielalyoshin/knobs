@@ -179,7 +179,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
     case State::kPausedForObs:
       return with_chain("Paused while OBS is open");
     case State::kPausedForUpdate:
-      return with_chain("Paused for a plugin update");
+      return with_chain(snapshot.nvidia_update ? "Paused for NVIDIA's SDK update" : "Paused for a plugin update");
     case State::kMicMissing:
       return with_chain("Mic missing");
     case State::kCableMissing:

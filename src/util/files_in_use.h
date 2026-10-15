@@ -3,7 +3,6 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -24,10 +23,9 @@ namespace knobs {
 // conflicts with it, which is what breaks the oplock.
 class FileOplock {
  public:
-  // Calls `wanted` once, on a thread-pool thread, when another program goes to
-  // write, rename or delete `file`. Fails where the file system has no
-  // oplocks, and on a file another program has open to write.
-  static Result<std::unique_ptr<FileOplock>> Take(const std::filesystem::path& file, std::function<void()> wanted);
+  // Fails where the file system has no oplocks, and on a file another
+  // program has open to write.
+  static Result<std::unique_ptr<FileOplock>> Take(const std::filesystem::path& file);
   // Lets go, and the program waiting, if any, goes on. Unload the file first,
   // or that program fails as it would have without the oplock.
   ~FileOplock();
@@ -35,10 +33,18 @@ class FileOplock {
   FileOplock& operator=(const FileOplock&) = delete;
 
   const std::filesystem::path& file() const { return file_; }
-  // Whether a program has gone for the file.
-  bool wanted() const;
-  // Borrowed native handle, for StartWithFileOplocks. Valid until destruction.
+  // Poll on the owning thread. True for a writer, renamer or deleter. A
+  // reader whose sharing conflicts releases just the watch; later polls
+  // take it again once the reader closes, without unloading the DLL.
+  bool wanted();
+  // Borrowed native handle, for StartWithFileOplocks. Zero while a reader
+  // has the file. Valid until the next poll or destruction.
   uintptr_t handle() const;
+  // Before handing handle() to StartWithFileOplocks, put an unbroken oplock
+  // into a break awaiting acknowledgment. Its request then completes, so
+  // neither destruction nor thread/process exit can cancel the hold. The
+  // replacement acknowledges it by closing the last duplicate.
+  Status PrepareHandoff();
 
  private:
   struct Request;
@@ -49,15 +55,19 @@ class FileOplock {
   std::unique_ptr<Request> request_;
 };
 
-// Starts a replacement process with duplicates of the broken oplocks and a
+// Starts a replacement process with duplicates of the oplocks and a
 // handle to this process. The child must call WaitForFileOplocks with the
 // --wait-for-files argument this adds, before loading any plugins. Closing
 // the old process's handles at exit happens before its DLLs are unmapped;
 // the inherited duplicates keep the writer waiting through that interval.
+// Call PrepareHandoff on every watch first; retain the watches until this
+// succeeds, then destroy them without polling them again.
 Status StartWithFileOplocks(const std::filesystem::path& exe, std::wstring_view arguments,
                            const std::vector<uintptr_t>& files);
 // Waits for the old process to finish, then closes the inherited file handles
 // to let its installer through. No audio or runtime has started in this copy.
+// A handoff that doesn't check out, or an old process that hasn't ended
+// within 30 s, fails, saying why, with the handles closed all the same.
 Status WaitForFileOplocks(std::wstring_view handoff);
 
 // The files of the modules loaded in this process, the program's own
@@ -73,7 +83,7 @@ bool InFolder(const std::filesystem::path& file, const std::filesystem::path& fo
 // A summary of the files in `folders` and the two levels of folders below
 // them: their names, sizes and times. It changes when a file is added,
 // removed, resized or rewritten, and says so when a folder is missing. Reads
-// at most a few thousand files.
+// at most a few thousand files in each.
 std::string FolderFingerprint(const std::vector<std::filesystem::path>& folders);
 
 }  // namespace knobs

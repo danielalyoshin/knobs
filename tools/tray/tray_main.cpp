@@ -151,8 +151,9 @@ Windows account (Alex's), c plugs the virtual cables in or out,
 m the mics, s stalls the chain or starts it again, f adds filters to OBS's mics
 without any, e adds Noise Suppression to the first mic's chain or takes it out,
 v adds a third-party filter to it or takes it out, u updates OBS (to 32.2.3,
-then to 34.0.0), i re-imports from OBS, a clicks the notification, . waits a
-second, and q quits. Changes in OBS are seen when it closes or at a re-import.
+then to 34.0.0), g has an installer go for NVIDIA's SDK, i re-imports from OBS,
+a clicks the notification, . waits a second, and q quits. Changes in OBS are
+seen when it closes or at a re-import.
 In the first run: y and n click the doors ("I set up my mic in OBS", "I'm new to
 OBS"), x Next, b Back, d Done, p Open OBS (which only says so: OBS would open
 the mic), 1 to 9 pick a choice, r opens or closes the dropdown of other playback
@@ -443,6 +444,10 @@ void Press(wchar_t key) {
     case L'v':
       session.world->Change(ToggleUnknownFilter);
       Print("the first mic gets a third-party filter in OBS, or loses it (seen at the next import)\n");
+      break;
+    case L'g':
+      session.world->Change([](FakeWorld& world) { world.file_update = {{L"C:\\sdk"}, true}; });
+      Print("an installer goes for NVIDIA's SDK\n");
       break;
     case L'u': {
       std::string version;
@@ -805,6 +810,8 @@ int Run(const Options& options) {
   if (options.settings) tray_options.settings_file = *options.settings;
   tray_options.first_run.done = !options.first_run;
   tray_options.restarted_for = options.restarted_for;
+  tray_options.wait_for_nvidia = options.restarted_for == core::RestartNeed::kNvidiaUpdating ||
+                                 options.restarted_for == core::RestartNeed::kNvidiaInstalled;
   tray_options.start_paused = options.paused;
   tray_options.windows11 = !options.windows10;
   tray_options.settings.obs_config = options.import_args.config_dir;
@@ -904,7 +911,8 @@ int Run(const Options& options) {
     core::CoreOptions core_options;
     core_options.settings = settings;
     core_options.paused = paused;
-    core_options.wait_for_nvidia = g_session->options.restarted_for == core::RestartNeed::kNvidiaUpdating;
+    core_options.wait_for_nvidia = g_session->options.restarted_for == core::RestartNeed::kNvidiaUpdating ||
+                                   g_session->options.restarted_for == core::RestartNeed::kNvidiaInstalled;
     core_options.obs_running = [] { return g_session->obs_running.load(); };
     core_options.other_obs = [] {
       if (!g_session->other_obs) return std::vector<core::OtherObs>();

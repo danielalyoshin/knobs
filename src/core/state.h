@@ -149,6 +149,9 @@ struct Snapshot {
   // The SDK restart couldn't happen promptly, or failed. Its installer is
   // no longer held waiting, though loaded DLLs can still block it.
   bool restart_delayed = false;
+  // With kPausedForUpdate: what's being updated is NVIDIA's Audio Effects
+  // SDK, not a VST plugin.
+  bool nvidia_update = false;
   // What happened, in a sentence or two, for states that need explaining.
   std::string detail;
   // The imported chain, once an import has got as far as the mic.
@@ -158,9 +161,9 @@ struct Snapshot {
   std::optional<size_t> picked_mic;
   // Pre-flight notes on the picked mic.
   std::vector<import::ImportNote> notes;
-  // Goes up each time an import finds that the mic or its chain changed in a
-  // way that reaches the cable (import::ImportedMic::chain_key). 0 until the
-  // first import, then 1.
+  // Goes up each time an import finds that the mic or its chain changed in
+  // OBS in a way that reaches the cable (import::ImportedMic::chain_key), but
+  // not when only a VST plugin's file did. 0 until the first import, then 1.
   uint32_t chain_revision = 0;
   bool obs_running = false;
   // OBS running in other Windows sessions, by session. It doesn't pause
