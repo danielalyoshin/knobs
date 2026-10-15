@@ -20,6 +20,7 @@
 #include "runtime/pe_imports.h"
 #include "runtime/runtime_copy.h"
 #include "util/text_file.h"
+#include "util/async_probe.h"
 #include "util/win_strings.h"
 
 namespace knobs::import {
@@ -113,11 +114,6 @@ std::string VstPluginPath(const runtime::ObsApi& api, obs_data_t* filter) {
   return settings ? String(api, settings.get(), "plugin_path") : "";
 }
 
-bool VstPluginFound(const std::string& path) {
-  std::error_code ec;
-  return !path.empty() && fs::is_regular_file(FromUtf8(path), ec);
-}
-
 // A module's file, however long its path, or none if it can't tell.
 fs::path ModuleFile(HMODULE module) {
   std::wstring path(MAX_PATH, L'\0');
@@ -150,6 +146,9 @@ std::vector<fs::path> PluginSearchFolders() {
 // A VST filter's plugin, as obs-vst would load it (VstPluginFiles::Check).
 struct VstPlugin {
   bool found = false;
+  bool pending = false;
+  bool unavailable = false;
+  std::vector<std::string> log;
   uint64_t size = 0;
   int64_t written = 0;
   // Whether it's a 64-bit DLL, which obs-vst can load, in OBS too. Yes if it
@@ -159,94 +158,96 @@ struct VstPlugin {
   // load it. Empty if it can't tell.
   std::vector<std::string> missing;
 
-  bool loads() const { return found && is64 && missing.empty(); }
+  bool loads() const { return pending || (found && is64 && missing.empty()); }
 };
 
 }  // namespace
 
-// Each VST plugin's file, read once per import while its size and time stay
-// the same: an import checks the same plugin for every mic's filter list,
-// then for the picked mic's pre-flight and chain key. Its imports are looked
-// up each time, since the loader also finds a DLL that's already loaded, and
-// an import loads modules along the way. A DLL a plugin imports that only
-// OBS's install has is copied into the runtime copy (AddFromInstall).
+// File work owns plain paths and a copy description, never an ObsApi or a
+// session. Even a local-looking path can be a junction to an offline share.
+// The app uses workers for every path; offline tools can wait for a check.
 class VstPluginFiles {
  public:
   explicit VstPluginFiles(const runtime::ObsApi& api) : api_(api) {}
-  VstPlugin Check(const std::string& path);
+  void UseWorkers() { async_ = true; }
+  void ResetPending(bool pending = false) { pending_ = pending; }
+  void CheckFiles(bool check) { check_ = check; }
+  bool pending() const { return pending_; }
+  VstPlugin Check(const std::string& path) {
+    if (path.empty()) return {};
+    if (!check_) return {.found = true};
+    if (const auto found = files_.find(path); found != files_.end()) return found->second;
+    if (!folders_) folders_ = PluginSearchFolders();
+    std::error_code path_error;
+    const fs::path file = fs::absolute(FromUtf8(path), path_error);
+    const auto work = [path, file, path_error, folders = *folders_,
+                       copy = runtime::LoadedRuntimeCopy()]() -> Result<VstPlugin> {
+      if (path_error) return Error{path_error.message()};
+      VstPlugin plugin;
+      std::error_code ec;
+      plugin.found = fs::is_regular_file(file, ec);
+      if (ec && ec != std::errc::no_such_file_or_directory) return Error{ec.message()};
+      if (!plugin.found) return plugin;
+      plugin.size = fs::file_size(file, ec);
+      if (ec) return Error{ec.message()};
+      plugin.written = fs::last_write_time(file, ec).time_since_epoch().count();
+      if (ec) return Error{ec.message()};
+      if (auto imports = runtime::ReadDllImports(file, false)) {
+        plugin.missing = runtime::UnresolvedDllImports(file, *imports, folders);
+        if (!plugin.missing.empty() && copy) {
+          const auto copied = runtime::AddInstallDlls(copy->install.root, copy->root, plugin.missing, folders);
+          for (const auto& dll : copied.added) {
+            plugin.log.push_back(std::format("Copied {} to {}, for the VST plugin {}.",
+                                             ToUtf8(dll.from), ToUtf8(dll.to), path));
+          }
+          for (const auto& error : copied.errors) {
+            plugin.log.push_back(std::format("Couldn't add a DLL the VST plugin {} needs to the runtime copy: {}",
+                                             path, error));
+          }
+          if (!copied.added.empty()) plugin.missing = runtime::UnresolvedDllImports(file, *imports, folders);
+        }
+      } else {
+        const auto is64 = runtime::IsWindows64Binary(file);
+        if (!is64) return Error{is64.error()};
+        plugin.is64 = *is64;
+        if (plugin.is64) return Error{imports.error()};
+      }
+      return plugin;
+    };
+    std::optional<Result<VstPlugin>> synchronous;
+    const Result<VstPlugin>* result = nullptr;
+    if (async_) {
+      auto& job = jobs_[path];
+      if (!job) job = std::make_unique<AsyncProbe<VstPlugin>>(work);
+      result = job->Poll();
+      if (!result) {
+        pending_ = true;
+        return {.pending = true};
+      }
+    } else {
+      synchronous = work();
+      result = &*synchronous;
+    }
+    VstPlugin plugin;
+    if (*result) {
+      plugin = **result;
+    } else {
+      plugin.unavailable = true;
+      api_.blog(LOG_WARNING, "Couldn't check VST plugin %s: %s", path.c_str(), result->error().c_str());
+    }
+    for (const auto& line : plugin.log) api_.blog(LOG_INFO, "%s", line.c_str());
+    return files_.emplace(path, std::move(plugin)).first->second;
+  }
 
  private:
-  struct Parsed {
-    uint64_t size = 0;
-    int64_t written = 0;
-    // Whether the file could be read. If not, the next check reads it again.
-    bool read = false;
-    bool is64 = true;
-    // What it imports, not delay-loaded, or nothing if it can't tell.
-    std::optional<std::vector<std::string>> imports;
-  };
-
-  // Copies the DLLs among `missing`, which `plugin` imports, that OBS's
-  // install has in bin\64bit into the runtime copy's (runtime::AddInstallDlls),
-  // and logs each. Returns whether it added any.
-  bool AddFromInstall(const fs::path& plugin, const std::vector<std::string>& missing);
-
-  const runtime::ObsApi& api_;  // For libobs's log, which is knobs's.
-  std::map<std::string, Parsed, std::less<>> files_;
-  std::optional<std::vector<fs::path>> folders_;  // PluginSearchFolders.
+  const runtime::ObsApi& api_;
+  bool async_ = false;
+  bool check_ = true;
+  bool pending_ = false;
+  std::map<std::string, VstPlugin, std::less<>> files_;
+  std::map<std::string, std::unique_ptr<AsyncProbe<VstPlugin>>, std::less<>> jobs_;
+  std::optional<std::vector<fs::path>> folders_;
 };
-
-VstPlugin VstPluginFiles::Check(const std::string& path) {
-  VstPlugin plugin;
-  plugin.found = VstPluginFound(path);
-  if (!plugin.found) return plugin;
-  const fs::path file = FromUtf8(path);
-  std::error_code ec;
-  plugin.size = fs::file_size(file, ec);
-  plugin.written = fs::last_write_time(file, ec).time_since_epoch().count();
-  Parsed& parsed = files_[path];
-  if (!parsed.read || parsed.size != plugin.size || parsed.written != plugin.written) {
-    parsed = {plugin.size, plugin.written};
-    // Only a 64-bit binary has imports to read.
-    if (auto imports = runtime::ReadDllImports(file, false)) {
-      parsed.read = true;
-      parsed.imports = std::move(*imports);
-    } else if (const auto is64 = runtime::IsWindows64Binary(file)) {
-      parsed.read = true;
-      parsed.is64 = *is64;
-    }
-  }
-  plugin.is64 = parsed.is64;
-  if (parsed.imports) {
-    if (!folders_) folders_ = PluginSearchFolders();
-    plugin.missing = runtime::UnresolvedDllImports(file, *parsed.imports, *folders_);
-    if (!plugin.missing.empty() && AddFromInstall(file, plugin.missing)) {
-      plugin.missing = runtime::UnresolvedDllImports(file, *parsed.imports, *folders_);
-    }
-  }
-  return plugin;
-}
-
-bool VstPluginFiles::AddFromInstall(const fs::path& plugin, const std::vector<std::string>& missing) {
-  // In OBS, the program's folder is OBS's bin\64bit, which can have DLLs a
-  // plugin needs that nothing knobs loads does, so the copy doesn't have
-  // them. Copied now, they're there for good, and loading the plugin, the
-  // loader finds them in the copy's bin\64bit (PluginSearchFolders).
-  const std::optional<runtime::LoadedCopy> copy = runtime::LoadedRuntimeCopy();
-  if (!copy) return false;
-  const runtime::AddedDlls copied = runtime::AddInstallDlls(copy->install.root, copy->root, missing, *folders_);
-  for (const runtime::AddedDlls::Added& dll : copied.added) {
-    api_.blog(LOG_INFO, "%s",
-              std::format("Copied {} to {}, for the VST plugin {}.", ToUtf8(dll.from), ToUtf8(dll.to), ToUtf8(plugin))
-                  .c_str());
-  }
-  for (const std::string& error : copied.errors) {
-    api_.blog(LOG_WARNING, "%s",
-              std::format("Couldn't add a DLL the VST plugin {} needs to the runtime copy: {}", ToUtf8(plugin), error)
-                  .c_str());
-  }
-  return !copied.added.empty();
-}
 
 namespace {
 
@@ -291,6 +292,8 @@ bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& fa
 // can't load. For the chain key, so a plugin that appears, is updated or
 // goes away restarts the chain.
 std::string VstPluginState(const VstPlugin& plugin) {
+  if (plugin.pending) return "pending";
+  if (plugin.unavailable) return "unavailable";
   if (!plugin.found) return "missing";
   return std::format("{} {} {}", plugin.size, plugin.written, JoinWithAnd(plugin.missing));
 }
@@ -452,6 +455,16 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
                                          "untouched, in OBS too.",
                                          name)});
       key("vst-none");
+    } else if (plugin.unavailable) {
+      notes.push_back({.warning = true,
+                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that {} couldn't read at {}, so it "
+                                           "passes audio through untouched. Check that its drive is connected, then "
+                                           "re-import from OBS.",
+                                           name, FileName(path), kDisplayName, path),
+                       .file = FileName(path)});
+      key("vst-unavailable");
+    } else if (plugin.pending) {
+      // No chain is loaded until the selected mic's checks finish.
     } else if (!plugin.found) {
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't at {} any more, so it "
@@ -468,7 +481,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
       key("vst-not-64-bit");
     } else if (!plugin.missing.empty()) {
       // DLLs the loader wouldn't find. Those OBS's bin\64bit has, with what
-      // they import, are in the copy by now (VstPluginFiles::AddFromInstall).
+      // they import, are in the copy by now (VstPluginFiles::Check).
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that needs {}, which {} can't find "
                                            "in Windows or in its copy of OBS, so it passes audio through untouched.",
@@ -654,9 +667,14 @@ SceneCollection::SceneCollection(const runtime::ObsApi& api, obs_data_t* data)
 
 SceneCollection::~SceneCollection() { api_.obs_data_release(data_); }
 
+void SceneCollection::ProbePluginsOnWorkers() { plugins_->UseWorkers(); }
+bool SceneCollection::plugins_pending() const { return plugins_->pending(); }
+
 std::string SceneCollection::name() const { return String(api_, data_, "name"); }
 
-std::vector<MicCandidate> SceneCollection::Mics(const ModuleErrors& modules) const {
+std::vector<MicCandidate> SceneCollection::Mics(const ModuleErrors& modules, bool check_plugins) const {
+  plugins_->ResetPending();
+  plugins_->CheckFiles(check_plugins);
   std::vector<MicCandidate> mics;
   for (const char* key : kGlobalDeviceKeys) {
     DataPtr source = Own(api_, api_.obs_data_get_obj(data_, key));
@@ -680,6 +698,7 @@ std::vector<MicCandidate> SceneCollection::Mics(const ModuleErrors& modules) con
       mics.push_back(std::move(*mic));
     }
   }
+  plugins_->CheckFiles(true);
   return mics;
 }
 
@@ -742,6 +761,19 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
   const char* key_json = api_.obs_data_get_json(source.get());
   if (!key_json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
   imported.chain_key = key_json;
+  DataPtr load = Own(api_, api_.obs_data_create_from_json(imported.source_json.c_str()));
+  ArrayPtr load_filters = Own(api_, api_.obs_data_get_array(load.get(), "filters"));
+  const size_t load_count = load_filters ? api_.obs_data_array_count(load_filters.get()) : 0;
+  for (size_t i = 0; i < load_count; ++i) {
+    DataPtr filter = Own(api_, api_.obs_data_array_item(load_filters.get(), i));
+    if (String(api_, filter.get(), "id") != kVstFilterId) continue;
+    const auto plugin = plugins_->Check(VstPluginPath(api_, filter.get()));
+    if (plugin.pending || plugin.unavailable || !plugin.found) {
+      DataPtr settings = Own(api_, api_.obs_data_get_obj(filter.get(), "settings"));
+      if (settings) api_.obs_data_set_string(settings.get(), "plugin_path", "");
+    }
+  }
+  imported.source_json = api_.obs_data_get_json(load.get());
   return imported;
 }
 
@@ -777,12 +809,24 @@ fs::path NvidiaAudioEffectsFolder(const runtime::ObsVersion& obs) {
   return dir;
 }
 
-ModuleErrors LoadModules(runtime::ObsSession& session, const std::vector<std::string>& modules) {
-  ModuleErrors errors;
-  for (const std::string& module : modules) {
-    if (const Status loaded = session.LoadOptionalModule(module); !loaded) errors.emplace(module, loaded.error());
+void LoadModules(runtime::ObsSession& session, const std::vector<std::string>& modules) {
+  for (const std::string& module : modules) session.LoadOptionalModule(module);
+}
+
+Result<PreparedMic> SceneCollection::LoadAndImport(runtime::ObsSession& session, const MicCandidate& mic,
+                                                   bool nvidia_sdk_arrived) const {
+  LoadModules(session, NeededModules(mic));
+  plugins_->ResetPending();
+  auto imported = Import(mic, session.module_errors(), nvidia_sdk_arrived);
+  if (!imported) return Error{imported.error()};
+  const bool pending = plugins_->pending();
+  auto mics = Mics(session.module_errors());
+  plugins_->ResetPending(pending);  // Only the selected mic holds up loading.
+  // Keep the selected candidate's filter count in step with pre-flight.
+  for (const auto& refreshed : mics) {
+    if (refreshed.location == mic.location) imported->mic = refreshed;
   }
-  return errors;
+  return PreparedMic{std::move(mics), std::move(*imported)};
 }
 
 Result<std::unique_ptr<SceneCollection>> ReadActiveCollection(const runtime::ObsApi& api,

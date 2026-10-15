@@ -645,4 +645,32 @@ TEST(OneCopyAtATime) {
   CHECK(waiting.get());
 }
 
+TEST(FakeBackendKeepsUpdateFoldersForDelayedAndFailedRestarts) {
+  const std::vector<fs::path> folders = {L"C:\\plugins", L"D:\\wrapper"};
+  for (const bool delayed : {false, true}) {
+    auto world = std::make_shared<tools::SharedWorld>(tools::DefaultWorld());
+    tools::FakeBackend backend(world, [](std::string_view) {});
+    auto now = core::Controller::Clock::time_point{};
+    core::Controller controller(backend, {}, [](const auto&) {}, {.clock = [&] { return now; }});
+    controller.Start(false, now);
+    world->Change([&](tools::FakeWorld& value) { value.file_update = {folders, true, false}; });
+    controller.PollFiles(now);
+    CHECK(controller.snapshot().restart == core::RestartNeed::kPluginUpdating);
+    if (delayed) {
+      now += 2s;
+      controller.Tick(now);
+    } else {
+      CHECK(!controller.Restart([&](const core::RestartFiles& files) -> Status {
+        CHECK(!files.handles.empty() && files.folders == folders);
+        return Error{"The replacement could not start."};
+      }, now));
+    }
+    CHECK(controller.snapshot().restart_delayed);
+    CHECK(controller.Restart([&](const core::RestartFiles& files) -> Status {
+      CHECK(files.handles.empty() && files.folders == folders);
+      return Ok{};
+    }, now));
+  }
+}
+
 }  // namespace

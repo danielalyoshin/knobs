@@ -297,7 +297,7 @@ core::ObsCheck FakeBackend::CheckObs(const core::Settings& settings) {
   // Picked folders, as import::ObsConfigRootFor and the install's check take
   // them, with the made-up folder OBS keeps its settings in.
   if (settings.obs_dir) check.install.root = *settings.obs_dir;
-  if (settings.obs_config && !(check.config && import::SameFolder(*settings.obs_config, check.config->path))) {
+  if (settings.obs_config && !(check.config && SamePath(*settings.obs_config, check.config->path))) {
     check.config = import::ObsConfigRootAt(*settings.obs_config);
   }
   return check;
@@ -337,7 +337,9 @@ Result<core::MicImport> FakeBackend::ImportMic(const import::ActiveObsConfig&, s
 }
 
 Status FakeBackend::StartChain(const core::ChainPlan& plan) {
-  return StartFakeChain(*world_, plan, *this, packets_);
+  const auto started = StartFakeChain(*world_, plan, *this, packets_);
+  files_watched_ = started.ok();
+  return started;
 }
 
 Status FixtureBackend::StartChain(const core::ChainPlan& plan) {

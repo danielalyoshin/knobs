@@ -16,10 +16,16 @@
 //   --restart   Started by a copy that's quitting to restart: wait for it.
 //   --restarted-for <reason>
 //               Why: obs-updated, obs-changed, audio-changed,
-//               nvidia-installed or nvidia-updating. The new copy says why.
+//               nvidia-installed, nvidia-updating, nvidia-unused or
+//               plugin-updating. The new copy says why.
 //   --wait-for-files <handles>
-//               Inherited process and oplock handles for an SDK update.
+//               Inherited process and oplock handles for an installer.
 //               Wait for the old process to exit, then release its writer.
+//   --wait-for-folder <folder>
+//               Wait for this folder's files to settle before loading them.
+//               May be repeated for updates across several folders.
+//   --handoff-failed
+//               Say the installer may need to retry a file after the restart.
 //               A handoff that fails releases it at once, and the copy
 //               starts as any restart does.
 //   --reopened  Started by Windows after an installer closed the copy before
@@ -132,7 +138,8 @@ bool IsWindows11() {
 }
 
 int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core::RestartNeed restarted_for,
-        bool wait_for_nvidia, bool paused, bool updated, bool reopened, std::string_view handoff_error) {
+        bool wait_for_nvidia, bool paused, bool updated, bool reopened, std::string_view handoff_error,
+        const std::vector<std::filesystem::path>& wait_folders) {
   const std::wstring window_class = std::format(L"{}.tray", kDisplayNameW);
   auto lock = tray::SingleInstance::Acquire(window_class, restart ? kRestartWait : 0ms);
   if (!lock) {
@@ -168,7 +175,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
                                      restart ? ", to restart" : "", updated ? ", after an update" : "",
                                      reopened ? ", after an installer closed it" : "", paused ? ", paused" : ""));
     if (!handoff_error.empty()) {
-      log->Write(LOG_WARNING, std::format("Couldn't hold NVIDIA's installer until the copy before quit, so it may "
+      log->Write(LOG_WARNING, std::format("Couldn't hold the installer until the copy before quit, so it may "
                                           "have found the files in use: {}",
                                           handoff_error));
     }
@@ -189,13 +196,28 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   if (log) options.log = [log](std::string_view line) { log->Write(LOG_INFO, line); };
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };
-  options.restart = [exe](core::RestartNeed why, bool paused, const std::vector<uintptr_t>& files) {
+  options.restart = [exe, log](core::RestartNeed why, bool paused, const core::RestartFiles& files) {
     std::wstring arguments = L"--restart";
     if (why != core::RestartNeed::kNone) {
       arguments += std::format(L" --restarted-for {}", FromUtf8(tray::RestartNeedName(why)));
     }
     if (paused) arguments += L" --paused";
-    if (!files.empty()) return StartWithFileOplocks(exe, arguments, files);
+    for (const auto& folder : files.folders) {
+      // A trailing separator would escape the closing quote in argv.
+      arguments += std::format(L" --wait-for-folder \"{}\"", (folder / L".").native());
+    }
+    if (files.incomplete) arguments += L" --handoff-failed";
+    if (!files.handles.empty()) {
+      const Status started = StartWithFileOplocks(exe, arguments, files.handles);
+      if (started) return started;
+      if (log) {
+        log->Write(LOG_WARNING, std::format("{} Starting a replacement without the waiting file handles.",
+                                           started.error()));
+      }
+      // A failed duplication or inherited-handle launch must still free the
+      // loaded DLLs. Start an ordinary replacement and explain the fallback.
+      arguments += L" --handoff-failed";
+    }
     return StartCopy(exe, arguments);
   };
   options.reopen_after_installer = [](bool on, bool paused) -> Status {
@@ -212,6 +234,8 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   };
   options.restarted_for = restarted_for;
   options.wait_for_nvidia = wait_for_nvidia;
+  options.wait_folders = wait_folders;
+  options.handoff_failed = !handoff_error.empty();
   options.resume_after_restart = [exe](bool on) {
     return tray::RunOnceAtNextSignIn({.name = std::wstring(kDisplayNameW),
                                       .command = std::format(L"\"{}\" --resume-setup", exe.native()),
@@ -233,7 +257,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
   options.updates.folder = dirs->local / L"updates";
   options.updates.current = {KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH};
   options.updates.can_install = !dirs->portable && InstalledByInstaller(exe.parent_path());
-  options.start_core = [log, wait_for_nvidia](core::Observer& observer, const core::Settings& settings, bool paused) {
+  options.start_core = [log, wait_for_nvidia, wait_folders](core::Observer& observer, const core::Settings& settings, bool paused) {
     core::ObsBackendOptions backend;
     backend.log = log;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
@@ -242,6 +266,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
     core_options.settings = settings;
     core_options.paused = paused;
     core_options.wait_for_nvidia = wait_for_nvidia;
+    core_options.wait_folders = wait_folders;
     return core::Core::Start(std::make_unique<core::ObsBackend>(std::move(backend)), observer,
                              std::move(core_options));
   };
@@ -272,6 +297,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   bool reopened = false;
   core::RestartNeed restarted_for = core::RestartNeed::kNone;
   std::wstring file_handoff;
+  std::vector<std::filesystem::path> wait_folders;
+  bool handoff_failed = false;
   int argc = 0;
   if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
     for (int i = 1; i < argc; ++i) {
@@ -282,6 +309,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
       paused |= arg == L"--paused";
       updated |= arg == L"--updated";
       reopened |= arg == L"--reopened";
+      handoff_failed |= arg == L"--handoff-failed";
+      if (arg == L"--wait-for-folder" && i + 1 < argc) wait_folders.emplace_back(argv[++i]);
       if (arg == L"--restarted-for" && i + 1 < argc) {
         restarted_for = tray::RestartNeedNamed(ToUtf8(argv[++i])).value_or(core::RestartNeed::kNone);
       }
@@ -292,7 +321,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   // An SDK update's restart. A handoff that fails lets the installer go on,
   // which may then find the old copy still using the files, and this copy
   // starts as any restart does: the old one quits by itself.
-  std::string handoff_error;
+  std::string handoff_error = handoff_failed ? "Some waiting files could not be passed to this copy." : "";
   if (!file_handoff.empty()) {
     if (const Status waited = WaitForFileOplocks(file_handoff); !waited) handoff_error = waited.error();
   }
@@ -306,11 +335,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   // An SDK being installed or updated may still be writing its files. So may
   // one whose installer the copy before held, whatever it restarted for.
   const bool wait_for_nvidia = restarted_for == core::RestartNeed::kNvidiaUpdating ||
-                               restarted_for == core::RestartNeed::kNvidiaInstalled || !file_handoff.empty();
+                               restarted_for == core::RestartNeed::kNvidiaInstalled || (!file_handoff.empty() && wait_folders.empty());
   // An update's new copy waits for the old one, as a restart's does, and so
   // does one Windows reopens.
   const int code = Run(instance, startup, resume_setup, restart || updated || reopened, restarted_for, wait_for_nvidia,
-                       paused, updated, reopened, handoff_error);
+                       paused, updated, reopened, handoff_error, wait_folders);
   CoUninitialize();
   return code;
 }

@@ -163,7 +163,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
     app->updater_.Reported();
     app->Save();
   }
-  app->notifier_ = Notifier({.restarted_for = opts.restarted_for, .updated = updated, .warned = app->warned_});
+  app->notifier_ = Notifier({.restarted_for = opts.restarted_for, .handoff_failed = opts.handoff_failed, .updated = updated, .warned = app->warned_});
 
   WNDCLASSEXW window_class = {sizeof(window_class)};
   window_class.lpfnWndProc = WindowProc;
@@ -234,10 +234,35 @@ Status TrayApp::Run() {
 void TrayApp::Quit() {
   if (quitting_) return;
   quitting_ = true;
+  const auto stop_due = Clock::now() + options_.core_stop_wait;
+  Notify(notifier_.Quitting());
   // An update job stops while the core does.
   if (update_work_) update_work_->cancel.Stop();
-  core_.reset();  // Stops the chain and libobs, which releases the mic and the cable.
+  if (core_) {
+    core_->RequestStop();
+    while (!core_->stopped()) {
+      // The replacement still holds an installer through process exit. A
+      // slow plugin or libobs shutdown must not silence the tray's deadline.
+      const auto now = Clock::now();
+      if (now >= stop_due) {
+        RemoveIcon();
+        Log(std::format("The core did not stop within {:.3g} s. Ending the process to release its files.",
+                        std::chrono::duration<double>(options_.core_stop_wait).count()));
+        // ExitProcess runs DLL detach code, which can deadlock on a lock
+        // the stuck thread owns. Termination also skips the core's join.
+        TerminateProcess(GetCurrentProcess(), ERROR_TIMEOUT);
+      }
+      if (const auto due = notifier_.NextDeadline(); due && now >= *due) Notify(notifier_.Tick(Quiet(), now));
+      Sleep(20);
+    }
+    core_.reset();
+  }
   StopUpdates();
+  RemoveIcon();
+  if (window_) DestroyWindow(window_);
+}
+
+void TrayApp::RemoveIcon() {
   if (icon_added_) {
     NOTIFYICONDATAW data = {sizeof(data)};
     data.hWnd = window_;
@@ -245,7 +270,6 @@ void TrayApp::Quit() {
     Shell_NotifyIconW(NIM_DELETE, &data);
     icon_added_ = false;
   }
-  if (window_) DestroyWindow(window_);
 }
 
 void TrayApp::OnSnapshot(const core::Snapshot& snapshot) {
@@ -314,9 +338,9 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         const core::Snapshot before = std::exchange(snapshot_, std::move(*snapshot));
         UpdateTip();
         KeepReopening();
+        Notify(notifier_.Changed(snapshot_, Quiet(), Clock::now()));
         if (RestartByItself()) return 0;
         if (setup_window_) setup_window_->Changed(before);
-        Notify(notifier_.Changed(snapshot_, Quiet(), Clock::now()));
         SaveWarned();
         KeepCable();
         if (options_.on_snapshot) options_.on_snapshot(snapshot_);
@@ -339,7 +363,8 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       }
       if (wparam == kRestartTimer) {
         KillTimer(window_, kRestartTimer);
-        RestartByItself();
+        if (restart_result_) FinishRestart();
+        else RestartByItself();
         return 0;
       }
       if (wparam == kCoreTimer) {
@@ -571,7 +596,8 @@ bool TrayApp::RestartByItself() {
   // over the first run and any dialog, which close as they do at sign-out,
   // and the menu closes for it. Other restarts wait for them: the menu and
   // the first run try again as they close.
-  const bool urgent = snapshot_.restart == core::RestartNeed::kNvidiaUpdating && !snapshot_.restart_delayed;
+  const bool urgent = (snapshot_.restart == core::RestartNeed::kNvidiaUpdating ||
+                       snapshot_.restart == core::RestartNeed::kPluginUpdating) && !snapshot_.restart_delayed;
   if (in_menu_) {
     if (urgent) {
       EndMenu();
@@ -829,6 +855,7 @@ void TrayApp::OpenLogFolder() {
 }
 
 bool TrayApp::Restart() {
+  if (restart_result_) return true;
   // Once by itself: if it fails, the menu and the first run offer it.
   restart_tried_ = snapshot_.restart;
   if (!options_.restart) return false;
@@ -836,16 +863,36 @@ bool TrayApp::Restart() {
   const auto start = [restart = options_.restart, why = snapshot_.restart, paused = Paused()](const auto& files) {
     return restart(why, paused, files);
   };
-  if (const Status started = core_ ? core_->Restart(start) : start(std::vector<uintptr_t>{}); !started) {
-    const std::string advice = snapshot_.restart == core::RestartNeed::kNvidiaUpdating
-                                  ? std::format("The NVIDIA installer is no longer held waiting. If it says a file "
-                                                "is in use, quit {} and retry it.", kDisplayName)
-                                  : std::format("Quit {}, then start it again.", kDisplayName);
+  if (core_) {
+    restart_result_ = core_->Restart(start);
+  } else {
+    std::promise<Status> result;
+    result.set_value(start(core::RestartFiles{}));
+    restart_result_ = result.get_future();
+  }
+  FinishRestart();
+  return true;
+}
+
+void TrayApp::FinishRestart() {
+  if (!restart_result_) return;
+  if (restart_result_->wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+    SetTimer(window_, kRestartTimer, 50, nullptr);
+    return;
+  }
+  const Status started = restart_result_->get();
+  restart_result_.reset();
+  if (!started) {
+    const bool updating = snapshot_.restart == core::RestartNeed::kNvidiaUpdating ||
+                          snapshot_.restart == core::RestartNeed::kPluginUpdating;
+    const std::string advice = updating
+        ? std::format("{0} let the installer continue. If it says a file is in use, quit {0} and retry it.",
+                      kDisplayName)
+        : std::format("Quit {}, then start it again.", kDisplayName);
     ShowError(std::format("{}\n\n{}", started.error(), advice));
-    return false;
+    return;
   }
   Quit();
-  return true;
 }
 
 void TrayApp::ShowAbout() {
@@ -920,8 +967,9 @@ void TrayApp::KeepReopening() {
 }
 
 bool TrayApp::FilesUpdating() const {
-  return snapshot_.state == core::State::kPausedForUpdate || snapshot_.restart == core::RestartNeed::kNvidiaUpdating ||
-         (snapshot_.state == core::State::kStarting && options_.wait_for_nvidia);
+  return snapshot_.files_waiting || snapshot_.state == core::State::kPausedForUpdate ||
+         snapshot_.restart == core::RestartNeed::kNvidiaUpdating || snapshot_.restart == core::RestartNeed::kPluginUpdating ||
+         (snapshot_.state == core::State::kStarting && (options_.wait_for_nvidia || !options_.wait_folders.empty()));
 }
 
 bool TrayApp::CanRestart() const {

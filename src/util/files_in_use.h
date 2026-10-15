@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -71,11 +72,14 @@ Status StartWithFileOplocks(const std::filesystem::path& exe, std::wstring_view 
 Status WaitForFileOplocks(std::wstring_view handoff);
 
 // The files of the modules loaded in this process, the program's own
-// included, by their full paths.
-std::vector<std::filesystem::path> LoadedModules();
+// included, by their full paths. `complete` is false if enumeration or any
+// path lookup fails; callers must not infer that omitted DLLs unloaded.
+std::vector<std::filesystem::path> LoadedModules(const std::function<void(std::string_view)>& log = {},
+                                                bool* complete = nullptr);
 
 // Whether two paths name the same file as Windows compares them, ignoring
-// case and the difference between / and \.
+// case, trailing separators and the difference between / and \.
+// An empty path matches nothing.
 bool SamePath(const std::filesystem::path& a, const std::filesystem::path& b);
 // Whether `file` is in `folder` or a folder below it, compared the same way.
 bool InFolder(const std::filesystem::path& file, const std::filesystem::path& folder);

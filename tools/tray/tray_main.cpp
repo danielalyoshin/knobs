@@ -103,7 +103,8 @@ Options:
   --start-with-windows   Start with "Start with Windows" checked.
   --restarted-for <why>  Start as the copy {0} starts after a restart, which says
                          why in a notification: obs-updated, obs-changed,
-                         audio-changed, nvidia-installed or nvidia-updating.
+                         audio-changed, nvidia-installed, nvidia-updating,
+                         nvidia-unused or plugin-updating.
   --paused               Start paused, as the copy does that a paused copy
                          restarted or updated.
   --windows10            Word Windows' Sound settings as Windows 10 does.
@@ -826,7 +827,7 @@ int Run(const Options& options) {
     Print(std::format("Start with Windows {}\n", on ? "on" : "off"));
     return Status(Ok{});
   };
-  tray_options.restart = [](core::RestartNeed why, bool paused, const std::vector<uintptr_t>&) {
+  tray_options.restart = [](core::RestartNeed why, bool paused, const core::RestartFiles&) {
     Print(std::format("{0} would restart now{1}{2}{3}\n", kDisplayName,
                       why == core::RestartNeed::kNone ? "" : ", and say why: knobs-tray --restarted-for ",
                       tray::RestartNeedName(why), paused ? " --paused" : ""));

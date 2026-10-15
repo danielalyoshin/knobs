@@ -31,6 +31,10 @@ inline int g_failures = 0;
 // when this returns true, and should exit.
 bool RunAsStandInObs();
 
+// Exercises the tray's real quit path in a child process, with no libobs or
+// audio devices. A stuck core is deliberately terminated (shutdown_tests.cpp).
+int RunShutdownHelper(const wchar_t* mode, const wchar_t* folder);
+
 }  // namespace knobs::test
 
 #define TEST(name)                                            \

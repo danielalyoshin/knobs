@@ -28,6 +28,8 @@ struct Notice {
     kObsMissing,
     kNeedsSetup,      // Something changed in OBS that only the user can settle.
     kFailed,
+    kFileHold,        // A held installer waits too long for the core.
+    kHandoffFailed,   // The previous copy could not pass every held file.
     kRestartNeeded,   // An SDK installer was released because a restart can't happen yet.
     kRestartWaits,    // A restart to run NVIDIA's SDK waits for a window to close.
     kChainChanged,    // The mic or its chain changed in OBS.
@@ -91,8 +93,8 @@ enum class RestartWait { kMenu, kSetup, kWindow };
 //   state itself. A problem or a pause that began meanwhile shows once it
 //   isn't quiet, if it's still there, and so do what an update did and what
 //   Say was given. News of the chain and its warnings doesn't: the window
-//   showed it. Only a restart that waits for the setup window says so while
-//   it's open.
+//   showed it. A restart that waits for setup and an installer held too
+//   long still get a notice while it's open.
 class Notifier {
  public:
   using Clock = std::chrono::steady_clock;
@@ -109,6 +111,8 @@ class Notifier {
     Clock::duration mic_back_after = std::chrono::seconds(5);
     // Why the copy before this one restarted it, if it did.
     core::RestartNeed restarted_for = core::RestartNeed::kNone;
+    bool handoff_failed = false;
+    Clock::duration file_hold_grace = std::chrono::seconds(5);
     // What an update did, said as the restart is, by the first copy that
     // runs after it (UpdatedNotice).
     std::optional<Notice> updated;
@@ -140,6 +144,9 @@ class Notifier {
   // Said once, even while quiet, since the setup window can be what it waits
   // for, and taken down once that restart isn't needed.
   Update RestartWaits(RestartWait window, Clock::time_point now);
+  // Quit is already underway. A held installer's advice must not ask the
+  // user to quit again, even if its warning was shown before this call.
+  Update Quitting();
   // Does what's due by `now` (NextDeadline), and shows what Say held back
   // if it's no longer quiet.
   Update Tick(bool quiet, Clock::time_point now);
@@ -191,6 +198,8 @@ class Notifier {
   Options options_;
   core::Snapshot snapshot_;
   bool started_ = false;
+  bool quitting_ = false;
+  std::optional<Clock::time_point> hold_due_;
   std::optional<Missing> mic_;
   std::optional<Missing> cable_;
   // The problem other than a missing device, as its state and setup need,

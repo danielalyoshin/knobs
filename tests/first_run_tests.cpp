@@ -123,9 +123,11 @@ TEST(WelcomeSaysWhatWasFound) {
   // A copy restarted for NVIDIA's SDK waits for it before its first import:
   // as when starting, the door for OBS users.
   core::Snapshot waiting;
-  waiting.state = State::kPausedForUpdate;
+  waiting.state = State::kStarting;
+  waiting.files_waiting = true;
+  waiting.detail = "Waiting for the updated files to stop changing.";
   waiting.nvidia_update = true;
-  CHECK(notes(waiting).starts_with("I set up my mic in OBS\nWaiting for NVIDIA's SDK update…"));
+  CHECK(notes(waiting).starts_with("I set up my mic in OBS\nWaiting for the updated files to stop changing."));
   CHECK(notes(waiting).ends_with("| obs"));
 
   core::Snapshot missing;
@@ -231,6 +233,8 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   updating.nvidia_update = true;
   CHECK(Contains(first_run.View(updating).content, "paused while NVIDIA's Audio Effects SDK is being updated"));
   updating.chain.reset();  // The new NVIDIA copy has not imported yet.
+  updating.state = State::kStarting;
+  updating.files_waiting = true;
   updating.detail = "Waiting for the updated files to stop changing.";
   CHECK(first_run.View(updating).page == Page::kLooking);
   CHECK(first_run.View(updating).instruction == "Waiting for NVIDIA's SDK update…");

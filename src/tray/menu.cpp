@@ -171,7 +171,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
   };
   switch (snapshot.state) {
     case State::kStarting:
-      return "Starting…";
+      return snapshot.detail.empty() ? "Starting…" : snapshot.detail;
     case State::kRunning:
       return chain;
     case State::kPausedByUser:

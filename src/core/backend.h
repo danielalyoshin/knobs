@@ -42,6 +42,7 @@ struct MicImport {
   std::string pick_error;
   // Set when the import found that only a new process can run the chain.
   RestartNeed restart = RestartNeed::kNone;
+  bool pending = false;
 };
 
 // What the chain runs: a mic's source object, loaded by libobs's own loader
@@ -68,12 +69,16 @@ struct ChainPlan {
 struct FileUpdate {
   std::vector<std::filesystem::path> folders;
   bool restart = false;
+  bool nvidia = true;
 };
 
-// Starts a replacement process. Before returning success, it must pass the
-// backend's borrowed file handles to that process, which releases them only
-// after this one exits (StartWithFileOplocks). Called on the core's thread.
-using RestartHook = std::function<Status(const std::vector<uintptr_t>& files)>;
+// Borrowed handles prepared for a replacement, and the folders it must let
+// settle before loading anything. A partial handoff still restarts.
+struct RestartFiles {
+  std::vector<uintptr_t> handles;
+  std::vector<std::filesystem::path> folders;
+  bool incomplete = false;
+};
 
 // How loud a running chain's output has been since the last look, from the
 // peak of each packet it filtered (10 ms each from win-wasapi), as the monitor
@@ -107,19 +112,20 @@ class Backend {
   virtual bool LibobsCanRetry() = 0;
   // Reads the scene collection, picks the mic and runs the pre-flight checks.
   virtual Result<MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) = 0;
+  // Completes a pending import without waiting for its file workers.
+  virtual std::optional<Result<MicImport>> PollImport() { return std::nullopt; }
   // Doesn't need libobs.
   virtual audio::Endpoints ListDevices() = 0;
   // Loads the chain and monitors it to its cable. Only one chain runs at a
   // time: the Controller stops one before starting the next.
   virtual Status StartChain(const ChainPlan& plan) = 0;
   virtual void StopChain() = 0;
-  // Watches the running chain's loaded VST DLLs. Null releases those watches,
-  // only after StopChain has unloaded the plugins. NVIDIA watches survive
-  // pauses and failed imports; a restart inherits any broken ones.
-  virtual void WatchChainFiles(const ChainPlan* plan) = 0;
   // The loaded files an installer wants to replace, since the last watch.
-  // NVIDIA's SDK needs a restart; a VST plugin needs the chain stopped.
+  // A VST plugin needs the chain stopped. DLLs still loaded after that,
+  // including NVIDIA's SDK, need a restart.
   virtual FileUpdate FilesWanted() = 0;
+  // Refresh loaded DLLs on the existing OBS tick; no work without plugins.
+  virtual void PollFileWatches() {}
   // Names, sizes and write times in these folders and their subfolders, for
   // noticing writes while an installer works. Doesn't need libobs.
   virtual std::string FingerprintFolders(const std::vector<std::filesystem::path>& folders) = 0;
@@ -131,11 +137,11 @@ class Backend {
   // looks only as it loads, so only a new process can run the SDK. Cheap
   // enough to ask every second.
   virtual bool NvidiaSdkArrived() = 0;
-  // Starts the replacement through `start`, passing the SDK watches to it
-  // when an installer went for one of them, and none otherwise. Keeps the
-  // originals until shutdown or ReleaseUpdateFiles.
-  virtual Status Restart(const RestartHook& start) = 0;
-  // Releases the SDK watches when a restart can't happen promptly or fails.
+  // Prepares borrowed handles for an installer waiting on DLLs that stay
+  // loaded until exit. The caller starts the replacement, then releases the
+  // originals. A failed preparation is logged and marks an incomplete handoff.
+  virtual RestartFiles UpdateFileHandles() = 0;
+  // Releases the persistent watches after a handoff or a delayed/failed restart.
   // The installer proceeds as without them; loaded DLLs can still block it.
   virtual void ReleaseUpdateFiles() = 0;
   // Audio packets the running chain has filtered since it started. Silence

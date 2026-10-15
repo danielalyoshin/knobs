@@ -91,6 +91,8 @@ struct FakeBackend : Backend {
   bool libobs_can_retry = true;
   std::optional<std::string> import_error;
   RestartNeed import_restart = RestartNeed::kNone;
+  bool import_pending = false;
+  bool import_ready = false;
   // NVIDIA's SDK appeared after nv-filters loaded without it.
   bool sdk_arrived = false;
   FileUpdate file_update;
@@ -101,6 +103,7 @@ struct FakeBackend : Backend {
   int file_watches = 0;
   int file_releases = 0;
   int sdk_releases = 0;
+  int fingerprints = 0;
   // The scene collection's mics. The only one is picked without a pick;
   // otherwise the pick names one.
   std::vector<import::ImportedMic> collection = {MakeMic("Mic/Aux", kMicId, "chain-1")};
@@ -173,7 +176,14 @@ struct FakeBackend : Backend {
     result.picked = picked;
     result.mic = collection[*picked];
     result.restart = import_restart;
+    result.pending = import_pending;
     return result;
+  }
+  std::optional<Result<MicImport>> PollImport() override {
+    Called();
+    if (!import_ready) return std::nullopt;
+    import_pending = false;
+    return ImportMic(config, {});
   }
   audio::Endpoints ListDevices() override {
     Called();
@@ -186,6 +196,7 @@ struct FakeBackend : Backend {
     if (chain_error) return Error{*chain_error};
     ++chain_starts;
     chain_running = true;
+    ++file_watches;
     last_plan = plan;
     packets = 0;
     return Ok{};
@@ -196,26 +207,17 @@ struct FakeBackend : Backend {
     ++chain_stops;
     chain_running = false;
     if (update_as_chain_stops) file_update = *std::exchange(update_as_chain_stops, std::nullopt);
-  }
-  void WatchChainFiles(const ChainPlan* plan) override {
-    Called();
-    if (plan) {
-      CHECK(chain_running);
-      ++file_watches;
-    } else {
-      CHECK(!chain_running);  // Never let a writer through before the DLL unloads.
-      ++file_releases;
-      if (!file_update.restart) file_update = {};
-    }
+    ++file_releases;
   }
   FileUpdate FilesWanted() override {
     Called();
-    return file_update;
+    return file_update.restart || chain_running ? file_update : std::exchange(file_update, {});
   }
   std::string FingerprintFolders(const std::vector<fs::path>& folders) override {
     Called();
     CHECK(!chain_running);
     fingerprinted = folders;
+    ++fingerprints;
     return folder_fingerprint;
   }
   std::vector<fs::path> NvidiaUpdateFolders(const runtime::ObsVersion&) override {
@@ -226,9 +228,9 @@ struct FakeBackend : Backend {
     Called();
     return sdk_arrived;
   }
-  Status Restart(const RestartHook& start) override {
+  RestartFiles UpdateFileHandles() override {
     Called();
-    return start(file_update.restart ? std::vector<uintptr_t>{11, 12} : std::vector<uintptr_t>{});
+    return file_update.restart ? RestartFiles{{11, 12}, {L"C:\\sdk"}} : RestartFiles{};
   }
   void ReleaseUpdateFiles() override {
     Called();
@@ -265,6 +267,7 @@ struct Fixture {
   std::vector<Snapshot> published;
   Controller controller;
   Clock::time_point now{};
+  Clock::time_point next_poll = now + 1s;
 
   explicit Fixture(Settings settings = {})
       : controller(backend, std::move(settings), [this](const Snapshot& snapshot) { published.push_back(snapshot); },
@@ -278,9 +281,14 @@ struct Fixture {
   void Advance(Clock::duration duration) {
     const Clock::time_point end = now + duration;
     for (int ticks = 0; ticks < 10'000; ++ticks) {
-      const auto next = controller.NextDeadline();
-      if (!next || *next > end) break;
-      now = std::max(now, *next);
+      const auto due = controller.NextDeadline();
+      const auto next = due ? std::min(*due, next_poll) : next_poll;
+      if (next > end) break;
+      now = std::max(now, next);
+      if (now >= next_poll) {
+        controller.PollFiles(now);
+        next_poll = now + 1s;
+      }
       controller.Tick(now);
     }
     now = end;
@@ -775,6 +783,124 @@ TEST(CoreRestartsForAnNvidiaUpdateEvenWhilePaused) {
   }
 }
 
+TEST(CorePollsFileWorkOnTheObsTickAndFingerprintsOnce) {
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.controller.Pause(f.now);
+  CHECK(!f.controller.NextDeadline());  // No second 1 Hz timer while idle.
+  f.controller.Resume(f.now);
+  f.backend.file_update = {{L"C:\\plugins"}, false};
+  f.controller.PollFiles(f.now);
+  CHECK(f.state() == State::kPausedForUpdate && f.backend.fingerprints == 1);
+  CHECK(std::any_of(f.published.begin(), f.published.end(), [](const Snapshot& snapshot) {
+    return snapshot.files_held;
+  }));
+  CHECK(!f.last().files_held);
+}
+
+TEST(CoreCanPauseAndStopWhilePluginChecksArePending) {
+  Fixture f;
+  f.backend.import_pending = true;
+  f.controller.Start(false, f.now);
+  CHECK(f.state() == State::kStarting && !f.backend.chain_running);
+  f.controller.Pause(f.now);
+  CHECK(f.state() == State::kPausedByUser);
+  f.Advance(1s);
+  CHECK(f.state() == State::kPausedByUser && !f.backend.chain_running);
+  f.backend.import_ready = true;
+  f.Advance(1s);
+  CHECK(f.state() == State::kPausedByUser && f.backend.chain_starts == 0);
+  f.controller.Resume(f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1);
+  f.controller.Pause(f.now);
+  f.backend.import_pending = true;
+  f.backend.import_ready = false;
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kPausedByUser && !f.backend.chain_running);
+  f.controller.Stop();
+  CHECK(!f.controller.NextDeadline());
+}
+
+TEST(CoreKeepsTheChainWhileAReimportChecksItsPlugins) {
+  for (const bool changed : {false, true}) {
+    Fixture f;
+    f.controller.Start(false, f.now);
+    const auto chain = f.last().chain;
+    f.backend.import_pending = true;
+    if (changed) f.backend.collection.front().plugins_key = "updated plugin";
+    f.controller.Reimport(f.now);
+    CHECK(f.state() == State::kRunning && f.last().chain == chain);
+    CHECK(f.backend.chain_starts == 1 && f.backend.chain_stops == 0);
+    f.Advance(1s);
+    CHECK(f.state() == State::kRunning && f.backend.chain_stops == 0);
+    f.backend.import_ready = true;
+    f.Advance(1s);
+    CHECK(f.state() == State::kRunning);
+    CHECK(f.backend.chain_starts == (changed ? 2 : 1));
+    CHECK(f.backend.chain_stops == (changed ? 1 : 0));
+  }
+}
+
+TEST(CoreDoesNotReloadAPendingReimportAfterPausing) {
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.backend.import_pending = true;
+  f.controller.Reimport(f.now);
+  f.controller.Pause(f.now);
+  CHECK(f.state() == State::kPausedByUser && f.backend.chain_stops == 1);
+  f.controller.Resume(f.now);
+  CHECK(f.state() == State::kStarting && f.backend.chain_starts == 1);
+  f.backend.import_ready = true;
+  f.Advance(1s);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 2);
+}
+
+TEST(CoreStopsTheOldChainIfAPendingReimportFails) {
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.backend.import_pending = true;
+  f.controller.Reimport(f.now);
+  f.backend.import_error = "The import failed.";
+  f.backend.import_ready = true;
+  f.Advance(1s);
+  CHECK(f.state() == State::kFailed && f.backend.chain_stops == 1);
+}
+
+TEST(CoreRestartsToFreeNvidiaMemoryAfterAnImportNoLongerNeedsIt) {
+  Fixture f;
+  f.controller.Start(false, f.now);
+  f.backend.import_restart = RestartNeed::kNvidiaUnused;
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kRestartNeeded && f.last().restart == RestartNeed::kNvidiaUnused);
+  CHECK(!f.backend.chain_running);
+  f.controller.Pause(f.now);
+  CHECK(f.last().paused_by_user && f.last().restart == RestartNeed::kNvidiaUnused);
+}
+
+TEST(CoreWaitsForGenericRestartFoldersBeforeLoadingAnything) {
+  Fixture f;
+  f.controller.Start(false, f.now, true, false, {L"C:\\plugins", L"D:\\wrapper"});
+  CHECK(f.state() == State::kStarting && f.last().files_waiting && !f.last().nvidia_update);
+  CHECK(f.backend.libobs_starts == 0 && f.backend.fingerprinted.size() == 2);
+  f.controller.Reimport(f.now);
+  CHECK(f.backend.libobs_starts == 0);
+  f.Advance(5s);
+  CHECK(f.state() == State::kPausedByUser && f.backend.libobs_starts == 1);
+}
+
+TEST(CoreKeepsTheSdkWaitWhenObsCannotBeFoundYet) {
+  Fixture f;
+  f.backend.obs.found = ObsFound::kMissing;
+  f.controller.Start(false, f.now, false, true);
+  CHECK(f.state() == State::kObsMissing && f.last().files_waiting);
+  CHECK(f.backend.libobs_starts == 0);
+  f.backend.obs.found = ObsFound::kYes;
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kStarting && f.last().files_waiting);
+  f.Advance(5s);
+  CHECK(f.state() == State::kRunning && !f.last().files_waiting);
+}
+
 TEST(CoreHandsSdkWatchesToTheRestartHookUntilExit) {
   Fixture f;
   f.controller.Start(false, f.now);
@@ -782,15 +908,15 @@ TEST(CoreHandsSdkWatchesToTheRestartHookUntilExit) {
   f.Advance(1s);
   std::vector<uintptr_t> inherited;
   CHECK(f.controller.Restart([&](const auto& files) -> Status {
-    inherited = files;
+    inherited = files.handles;
     return Ok{};
   }, f.now).ok());
   CHECK(inherited == std::vector<uintptr_t>({11, 12}));
   // Once handed off, shutdown owns the holds; the fallback must not run.
   f.Advance(30s);
-  CHECK(!f.last().restart_delayed && f.backend.sdk_releases == 0);
+  CHECK(!f.last().restart_delayed && f.backend.sdk_releases == 1);
   f.controller.Stop();
-  CHECK(f.backend.sdk_releases == 0);
+  CHECK(f.backend.sdk_releases == 1);
 }
 
 TEST(CoreReleasesSdkWatchesWhenTheTrayCantRestartPromptly) {
@@ -803,7 +929,7 @@ TEST(CoreReleasesSdkWatchesWhenTheTrayCantRestartPromptly) {
   // The core needs no acknowledgement from a busy menu or setup window.
   f.Advance(1ms);
   CHECK(f.backend.sdk_releases == 1 && f.last().restart_delayed);
-  CHECK(f.last().detail.find("let the NVIDIA installer continue") != std::string::npos);
+  CHECK(f.last().detail.find("let the installer continue") != std::string::npos);
   CHECK(f.last().detail.find("retry it") != std::string::npos);
   f.Advance(30s);
   f.controller.Reimport(f.now);
@@ -811,7 +937,7 @@ TEST(CoreReleasesSdkWatchesWhenTheTrayCantRestartPromptly) {
   // Closing the window can still restart, without stale handles.
   bool restarted = false;
   CHECK(f.controller.Restart([&](const auto& files) -> Status {
-    CHECK(files.empty());
+    CHECK(files.handles.empty());
     restarted = true;
     return Ok{};
   }, f.now).ok());
@@ -843,7 +969,7 @@ TEST(CoreReleasesSdkWatchesImmediatelyAfterAFailedRestart) {
   f.backend.file_update = {{L"C:\\sdk"}, true};
   f.Advance(1s);
   const auto fail = [](const auto& files) -> Status {
-    CHECK(files == std::vector<uintptr_t>({11, 12}));
+    CHECK(files.handles == std::vector<uintptr_t>({11, 12}));
     return Error{"Couldn't start the new process."};
   };
   const Status failed = f.controller.Restart(fail, f.now);
@@ -858,7 +984,8 @@ TEST(CoreWaitsForNvidiaBeforeLoadingLibobsAfterARestart) {
   for (const bool paused : {false, true}) {
     Fixture f;
     f.controller.Start(false, f.now, paused, true);
-    CHECK(f.state() == State::kPausedForUpdate && f.last().paused_by_user == paused && f.last().nvidia_update);
+    CHECK(f.state() == State::kStarting && f.last().files_waiting &&
+          f.last().paused_by_user == paused && f.last().nvidia_update);
     CHECK(f.backend.libobs_starts == 0 && f.backend.imports == 0);
     CHECK(f.backend.fingerprinted == std::vector<fs::path>{L"C:\\sdk"});
     f.controller.Reimport(f.now);
@@ -1568,12 +1695,26 @@ TEST(CoreRunsLibobsOnAThreadOfItsOwn) {
     CHECK(observer.WaitFor(State::kPausedByUser));
     (*core)->Resume();
     CHECK(observer.WaitFor(State::kRunning));
+    std::promise<void> release;
+    auto gate = release.get_future().share();
+    auto destroying = std::make_shared<std::promise<void>>();
+    auto destruction_started = destroying->get_future();
+    // Hold the core thread in a restart to check that both the future and
+    // the stop request return while it is still busy.
     DWORD restart_thread = 0;
-    CHECK((*core)->Restart([&](const auto& files) -> Status {
-      CHECK(files.empty());
+    auto restarting = (*core)->Restart([&](const auto& files) -> Status {
+      CHECK(files.handles.empty());
       restart_thread = GetCurrentThreadId();
+      destroying->set_value();
+      gate.wait();
       return Ok{};
-    }).ok());
+    });
+    CHECK(destruction_started.wait_for(3s) == std::future_status::ready);
+    CHECK(restarting.wait_for(0s) == std::future_status::timeout);
+    (*core)->RequestStop();
+    CHECK(!(*core)->stopped());
+    release.set_value();
+    CHECK(restarting.get().ok());
     CHECK(restart_thread != GetCurrentThreadId());
     {
       std::lock_guard lock(calls->mutex);

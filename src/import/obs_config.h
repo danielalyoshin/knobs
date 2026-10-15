@@ -39,17 +39,13 @@ ObsConfigRoot ObsConfigRootAt(const std::filesystem::path& folder);
 // The settings folder to read for the install at `install_root`: `picked`,
 // if there is one, else FindObsConfigRoot's. A picked folder stays picked,
 // even while it can't be read. OBS's own folder picked, however it's spelled
-// (SameFolder), is as good as no pick: OBS writes there.
+// (SamePath), is as good as no pick: OBS writes there.
 Result<ObsConfigRoot> ObsConfigRootFor(const std::filesystem::path& install_root,
                                        const std::optional<std::filesystem::path>& picked);
 
 // The settings folder someone means by picking `folder`: the folder holding
 // obs-studio\, or, when they picked obs-studio\ itself, the one above it.
 std::filesystem::path SettingsFolderFor(const std::filesystem::path& folder);
-
-// Whether two folders are the same as Windows names them: ignoring case and
-// a trailing separator. An empty path matches nothing.
-bool SameFolder(const std::filesystem::path& a, const std::filesystem::path& b);
 
 // A profile's [Audio] settings in basic.ini, with the defaults OBS uses for
 // missing keys (OBSBasic.cpp, InitBasicConfigDefaults).

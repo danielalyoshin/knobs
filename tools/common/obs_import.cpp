@@ -102,7 +102,8 @@ void ReportModules(const std::vector<std::string>& needed, const import::ModuleE
 
 void LoadModulesForSource(runtime::ObsHost& host, std::string_view source_json) {
   const std::vector<std::string> needed = import::NeededModulesForSource(host.api(), source_json);
-  ReportModules(needed, import::LoadModules(host.session(), needed));
+  import::LoadModules(host.session(), needed);
+  ReportModules(needed, host.session().module_errors());
 }
 
 Result<import::ImportedMic> ImportMic(runtime::ObsHost& host, const import::ActiveObsConfig& config,
@@ -126,20 +127,17 @@ Result<import::ImportedMic> ImportMic(runtime::ObsHost& host, const import::Acti
     return Error{mics.size() > 1 && args.pick.empty() ? picked.error() + "\nPass --pick with a number or a name."
                                                       : picked.error()};
   }
-  // As knobs does (core::ObsBackend::ImportMic): the optional modules the
-  // picked mic needs, then its mic and pre-flight again.
   const std::vector<std::string> needed = (*collection)->NeededModules(mics[*picked]);
-  ReportModules(needed, import::LoadModules(session, needed));
-  if (!needed.empty()) mics = (*collection)->Mics(session.module_errors());
-  const import::MicCandidate& mic = mics[*picked];
+  auto prepared = (*collection)->LoadAndImport(session, mics[*picked]);
+  ReportModules(needed, session.module_errors());
+  if (!prepared) return Error{prepared.error()};
+  const import::MicCandidate& mic = prepared->mic.mic;
   Check(true, "mic", std::format("{}, device {}", import::DescribeMic(mic, *picked + 1), mic.device_id));
-
-  auto imported = (*collection)->Import(mic, session.module_errors());
-  if (!imported) return Error{imported.error()};
-  for (const import::ImportNote& note : imported->notes) {
+  auto imported = std::move(prepared->mic);
+  for (const import::ImportNote& note : imported.notes) {
     Report(note.warning ? Outcome::kWarn : Outcome::kNote, "pre-flight", note.text);
   }
-  if (imported->notes.empty()) Check(true, "pre-flight", "nothing to report");
+  if (imported.notes.empty()) Check(true, "pre-flight", "nothing to report");
   return imported;
 }
 

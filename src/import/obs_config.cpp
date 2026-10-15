@@ -13,6 +13,7 @@
 #include "import/obs_ini.h"
 #include "util/app_dirs.h"
 #include "util/win_strings.h"
+#include "util/files_in_use.h"
 
 namespace knobs::import {
 namespace {
@@ -101,7 +102,7 @@ ObsConfigRoot ObsConfigRootAt(const fs::path& folder) {
 
 Result<ObsConfigRoot> ObsConfigRootFor(const fs::path& install_root, const std::optional<fs::path>& picked) {
   auto own = FindObsConfigRoot(install_root);
-  if (!picked || (own && SameFolder(*picked, own->path))) return own;
+  if (!picked || (own && SamePath(*picked, own->path))) return own;
   return ObsConfigRootAt(*picked);
 }
 
@@ -109,19 +110,6 @@ fs::path SettingsFolderFor(const fs::path& folder) {
   const fs::path path = folder.has_filename() ? folder : folder.parent_path();
   if (AsciiLower(ToUtf8(path.filename())) == "obs-studio" && !Exists(path / L"obs-studio")) return path.parent_path();
   return path;
-}
-
-bool SameFolder(const fs::path& a, const fs::path& b) {
-  if (a.empty() || b.empty()) return false;
-  const auto plain = [](const fs::path& path) {
-    std::wstring text = path.lexically_normal().native();
-    while (text.size() > 3 && (text.back() == L'\\' || text.back() == L'/')) text.pop_back();
-    return text;
-  };
-  const std::wstring x = plain(a);
-  const std::wstring y = plain(b);
-  return CompareStringOrdinal(x.data(), static_cast<int>(x.size()), y.data(), static_cast<int>(y.size()), TRUE) ==
-         CSTR_EQUAL;
 }
 
 Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {

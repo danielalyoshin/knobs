@@ -35,7 +35,13 @@ struct Handles {
   }
 };
 
-std::wstring Normalized(const fs::path& path) { return fs::path(path).lexically_normal().make_preferred().native(); }
+std::wstring Normalized(const fs::path& path) {
+  const fs::path normal = fs::path(path).lexically_normal().make_preferred();
+  std::wstring text = normal.native();
+  const size_t root = normal.root_path().native().size();
+  while (text.size() > root && text.back() == L'\\') text.pop_back();
+  return text;
+}
 
 bool SameText(std::wstring_view a, std::wstring_view b) {
   return CompareStringOrdinal(a.data(), static_cast<int>(a.size()), b.data(), static_cast<int>(b.size()), TRUE) ==
@@ -268,26 +274,46 @@ Status WaitForFileOplocks(std::wstring_view handoff) {
   return Ok{};
 }
 
-std::vector<fs::path> LoadedModules() {
+std::vector<fs::path> LoadedModules(const std::function<void(std::string_view)>& log, bool* complete) {
+  if (complete) *complete = false;
   std::vector<HMODULE> modules(256);
-  for (;;) {
+  DWORD error = ERROR_SUCCESS;
+  bool listed = false;
+  for (int attempt = 0; attempt < 4; ++attempt) {
     DWORD needed = 0;
     const DWORD size = static_cast<DWORD>(modules.size() * sizeof(HMODULE));
-    if (!EnumProcessModulesEx(GetCurrentProcess(), modules.data(), size, &needed, LIST_MODULES_ALL)) return {};
+    if (!EnumProcessModulesEx(GetCurrentProcess(), modules.data(), size, &needed, LIST_MODULES_ALL)) {
+      error = GetLastError();
+      continue;  // Module loads and unloads can race the scan.
+    }
     if (needed <= size) {
       modules.resize(needed / sizeof(HMODULE));
+      listed = true;
       break;
     }
+    error = ERROR_MORE_DATA;
     modules.resize(needed / sizeof(HMODULE) + 16);
   }
+  if (!listed) {
+    if (log) log(std::format("Couldn't list loaded DLLs after four tries: {}", DescribeWinError(error)));
+    return {};
+  }
+  bool paths_complete = true;
   std::vector<fs::path> files;
   files.reserve(modules.size());
   std::wstring path(MAX_PATH, L'\0');
   for (const HMODULE module : modules) {
     for (;;) {
       const DWORD length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
-      // Gone since the list was made.
-      if (length == 0) break;
+      if (length == 0) {
+        // It may have unloaded since enumeration. Callers deciding which
+        // watches to release must not treat this as a complete module list.
+        if (paths_complete && log) {
+          log(std::format("Couldn't read a loaded DLL's path: {}", DescribeWinError(GetLastError())));
+        }
+        paths_complete = false;
+        break;
+      }
       if (length < path.size()) {
         files.emplace_back(std::wstring_view(path.data(), length));
         break;
@@ -295,10 +321,13 @@ std::vector<fs::path> LoadedModules() {
       path.resize(path.size() * 2);
     }
   }
+  if (complete) *complete = paths_complete;
   return files;
 }
 
-bool SamePath(const fs::path& a, const fs::path& b) { return SameText(Normalized(a), Normalized(b)); }
+bool SamePath(const fs::path& a, const fs::path& b) {
+  return !a.empty() && !b.empty() && SameText(Normalized(a), Normalized(b));
+}
 
 bool InFolder(const fs::path& file, const fs::path& folder) {
   std::wstring inside = Normalized(folder);

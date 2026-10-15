@@ -17,13 +17,16 @@
 
 namespace knobs::core {
 
+// Called on the core thread. Inherit the handles before returning success.
+using RestartHook = std::function<Status(const RestartFiles& files)>;
+
 // The core's decisions. It has no threads of its own: it's told what
-// happened and when, and drives a Backend. It reads the time itself only
-// when a chain has started (Timing::clock). Not thread-safe; the Core runs
+// happened and when, and drives a Backend. It reads the time after work
+// that may take a while (Timing::clock). Not thread-safe; the Core runs
 // it on one thread.
 //
 // After every event it works out the state from what it knows, in this order:
-// a restart to free NVIDIA's SDK, a pause while updated files settle, or a
+// a restart to free DLLs an installer needs, a pause while updated files settle, or a
 // restart to load an SDK installed since nv-filters loaded without it;
 // problems with OBS, its settings or the import; a chain that failed to start,
 // or Windows' list of devices that couldn't be read; paused by the user;
@@ -42,9 +45,6 @@ class Controller {
   using Publish = std::function<void(const Snapshot&)>;
 
   struct Timing {
-    // Oplock breaks are just flags until the core checks them. Also the
-    // interval between folder fingerprints while an installer works.
-    Clock::duration file_poll = std::chrono::seconds(1);
     Clock::duration file_settle = std::chrono::seconds(5);
     // Files that never settle, as in a folder another program keeps writing
     // to, end the wait after this long anyway.
@@ -86,9 +86,8 @@ class Controller {
     // A mic without a gate is never silent. Then silent means as quiet as it
     // has been in this long: its noise floor.
     Clock::duration noise_floor_window = std::chrono::minutes(5);
-    // Read once a chain has started, since the watchdog times it from then.
-    // That can be seconds after the event that started it: the first start
-    // makes the runtime copy. Tests on a fake clock pass theirs.
+    // Read after starting or stopping a chain, importing, or fingerprinting
+    // files, so their deadlines start after that work. Tests pass their clock.
     std::function<Clock::time_point()> clock = Clock::now;
   };
 
@@ -97,7 +96,8 @@ class Controller {
   // Publishes kStarting, then imports and starts, or stays paused if
   // `paused`: a copy restarted while the user had paused it. With
   // wait_for_nvidia, lets the SDK folder settle before loading anything.
-  void Start(bool obs_running, Clock::time_point now, bool paused = false, bool wait_for_nvidia = false);
+  void Start(bool obs_running, Clock::time_point now, bool paused = false, bool wait_for_nvidia = false,
+             std::vector<std::filesystem::path> wait_folders = {});
   // OBS started or exited. When it exits, its settings are imported again.
   void SetObsRunning(bool running, Clock::time_point now);
   // OBS running in other Windows sessions (Snapshot::other_obs).
@@ -115,9 +115,11 @@ class Controller {
   // New settings, then a re-import if the install, OBS's settings folder or
   // the mic changed.
   void Apply(const Settings& settings, Clock::time_point now);
-  // Starts a replacement through the backend's restart hook. A failure
-  // releases any waiting SDK installer; success keeps it held through exit.
+  // Starts a replacement with the backend's prepared handles. A failure
+  // releases any waiting installer; success keeps it held through exit.
   Status Restart(const RestartHook& start, Clock::time_point now);
+  // Called on the existing OBS poll tick, including while paused.
+  void PollFiles(Clock::time_point now);
   // Does whatever is due: settled device changes, the watchdog, a retry.
   void Tick(Clock::time_point now);
   // When Tick next has something to do, if ever.
@@ -153,8 +155,10 @@ class Controller {
   // SDK waits in a new process before anything loads.
   void WaitForFiles(std::vector<std::filesystem::path> folders, bool nvidia, Clock::time_point now);
   void ReleaseUpdateFiles();
+  bool ReleaseIfDue(Clock::time_point now);
   // Works out the cable and the chain to run, from an import that found the
   // mic and the settings.
+  void AcceptImport(MicImport imported, Clock::time_point now);
   void PlanChain();
   // Works out the state, starts or stops the chain to match, publishes.
   void Reconcile(Clock::time_point now);
@@ -178,18 +182,18 @@ class Controller {
   Snapshot snapshot_;
   bool stopped_ = false;
   bool wait_for_nvidia_ = false;
-  bool file_restart_ = false;
-  bool update_files_released_ = false;
+  enum class FileRestart { kNone, kHolding, kReleased, kHandedOff };
+  FileRestart file_restart_ = FileRestart::kNone;
+  bool file_restart_nvidia_ = true;
   // NVIDIA's SDK was installed after nv-filters loaded without it. Only a new
   // process can load it, so it stays until then.
   bool nvidia_installed_ = false;
-  std::optional<Clock::time_point> file_restart_due_;
+  Clock::time_point file_restart_due_;
   std::vector<std::filesystem::path> updating_folders_;
   bool updating_nvidia_ = false;  // Snapshot::nvidia_update
   std::string folder_fingerprint_;
   Clock::time_point files_quiet_since_;
   Clock::time_point file_wait_since_;
-  Clock::time_point next_file_check_;
 
   // From the last Refresh.
   std::optional<Problem> problem_;
@@ -200,6 +204,7 @@ class Controller {
   // (Backend::LibobsCanRetry).
   bool libobs_spent_ = false;
   std::optional<MicImport> import_;
+  bool import_pending_ = false;
   std::optional<ChainPlan> plan_;
   std::string profile_cable_id_;
   std::string profile_cable_name_;

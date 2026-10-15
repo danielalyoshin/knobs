@@ -127,12 +127,17 @@ struct ImportedMic {
   size_t warning_count() const;
 };
 
+struct PreparedMic {
+  std::vector<MicCandidate> mics;
+  ImportedMic mic;
+};
+
 // The VST plugins' files pre-flight reads (mic_import.cpp).
 class VstPluginFiles;
 
 // A scene collection as libobs parses it. Pre-flight reads each VST plugin's
-// file once while it lasts, and again only if the file changes, so use it on
-// one thread, for one import.
+// file once while it lasts. Worker results return to its owning thread, so
+// use it on one thread, for one import.
 class SceneCollection {
  public:
   // Reads `file`, or `file`.bak if `file` doesn't parse. OBS falls back the
@@ -150,11 +155,15 @@ class SceneCollection {
 
   // The name it saves, or "" (see FindSceneCollectionFile).
   std::string name() const;
+  // The app polls plugin checks on workers, including local paths: junctions
+  // and mapped drives can point at offline shares. Tools check synchronously.
+  void ProbePluginsOnWorkers();
+  bool plugins_pending() const;
 
   // Every win-wasapi input: the global devices first, then "sources" in
   // order. Their filters count an optional module's as running until the
   // module has been tried; `modules` has those that failed.
-  std::vector<MicCandidate> Mics(const ModuleErrors& modules = {}) const;
+  std::vector<MicCandidate> Mics(const ModuleErrors& modules, bool check_plugins = true) const;
 
   // The optional modules (runtime::kOptionalObsModules) whose filters are on
   // in `mic`'s chain. Load them (LoadModules) before Import(), which tells the
@@ -167,8 +176,13 @@ class SceneCollection {
   // which filters it has. `modules` says why any it needed didn't load, and
   // `nvidia_sdk_arrived` that NVIDIA's SDK was installed after nv-filters
   // loaded without it, so a restart runs it.
-  Result<ImportedMic> Import(const MicCandidate& mic, const ModuleErrors& modules = {},
+  Result<ImportedMic> Import(const MicCandidate& mic, const ModuleErrors& modules,
                              bool nvidia_sdk_arrived = false) const;
+
+  // The shared import sequence for the app and tools: load the picked
+  // mic's optional modules, run its pre-flight, then refresh the mic list.
+  Result<PreparedMic> LoadAndImport(runtime::ObsSession& session, const MicCandidate& mic,
+                                   bool nvidia_sdk_arrived = false) const;
 
  private:
   SceneCollection(const runtime::ObsApi& api, obs_data_t* data);
@@ -190,9 +204,9 @@ bool NvidiaAudioEffectsInstalled(const runtime::ObsApi& api);
 // The folder that version's nv-filters searches, whether installed or not.
 std::filesystem::path NvidiaAudioEffectsFolder(const runtime::ObsVersion& obs);
 
-// Loads optional modules into the session, and returns those that didn't
-// load, with why.
-ModuleErrors LoadModules(runtime::ObsSession& session, const std::vector<std::string>& modules);
+// Loads optional modules into the session. Logs each new failure once;
+// the session owns the errors.
+void LoadModules(runtime::ObsSession& session, const std::vector<std::string>& modules);
 
 // Reads the active scene collection: the file FindSceneCollectionFile picks,
 // or its backup. Each file is parsed once along the way.

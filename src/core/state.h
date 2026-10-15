@@ -64,7 +64,8 @@ enum class State {
   // The OBS install is a version knobs doesn't support.
   kObsUnsupported,
   // OBS was updated, its profile's sample rate or channels changed, or
-  // NVIDIA's SDK was installed or is being updated.
+  // NVIDIA's SDK was installed, needs to free its memory, or is being
+  // updated. A plugin dependency that stays loaded needs a restart too.
   // knobs has to restart to follow: libobs can't be reloaded in a running
   // process, and OBS restarts for a format change too. Also, with
   // RestartNeed::kNone, when trying again after libobs failed to start with
@@ -110,6 +111,10 @@ enum class RestartNeed {
   kNvidiaInstalled,
   // An installer needs NVIDIA's loaded DLLs. Only process exit frees them.
   kNvidiaUpdating,
+  // A plugin dependency stays loaded after the chain stops.
+  kPluginUpdating,
+  // The selected chain no longer needs the loaded NVIDIA module.
+  kNvidiaUnused,
 };
 
 // The chain as the user knows it from OBS.
@@ -149,9 +154,12 @@ struct Snapshot {
   // The SDK restart couldn't happen promptly, or failed. Its installer is
   // no longer held waiting, though loaded DLLs can still block it.
   bool restart_delayed = false;
-  // With kPausedForUpdate: what's being updated is NVIDIA's Audio Effects
-  // SDK, not a VST plugin.
+  // While files_waiting: the update is NVIDIA's Audio Effects SDK's.
   bool nvidia_update = false;
+  // Updated files must settle before anything can load, including at startup.
+  bool files_waiting = false;
+  // An installer is held while the core unloads or prepares a restart.
+  bool files_held = false;
   // What happened, in a sentence or two, for states that need explaining.
   std::string detail;
   // The imported chain, once an import has got as far as the mic.

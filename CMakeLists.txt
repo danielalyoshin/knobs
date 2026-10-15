@@ -158,8 +158,14 @@ target_include_directories(knobs-tray PRIVATE assets src/tray/pictures)
 target_link_libraries(knobs-tray PRIVATE knobs_tray_fake dwmapi ole32 windowscodecs)
 
 add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp tests/first_run_tests.cpp
-                           tests/notices_tests.cpp tests/update_tests.cpp tests/walkthrough_tests.cpp)
+                           tests/notices_tests.cpp tests/update_tests.cpp tests/walkthrough_tests.cpp
+                           tests/shutdown_tests.cpp src/tray/knobs.rc src/tray/knobs.manifest)
+target_include_directories(knobs-tests PRIVATE assets src/tray/pictures)
 target_link_libraries(knobs-tests PRIVATE knobs_tray_fake delayimp)
+# The quit tests also cover a DLL that stalls after Core::Run returns.
+add_library(knobs-test-stuck-thread SHARED tests/fixtures/dep/test_stuck_thread.cpp)
+target_link_libraries(knobs-test-stuck-thread PRIVATE knobs_options)
+add_dependencies(knobs-tests knobs-test-stuck-thread)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
 # Stand-ins for obs.dll, next to the test binary: fake-obs-<major>.dll has
@@ -233,7 +239,8 @@ add_test(NAME core
           -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
           "-DOBS_DIR=${KNOBS_TEST_OBS_DIR}"
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/core_fixture.cmake)
-set_tests_properties(core PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
+set_tests_properties(core PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed."
+                     ENVIRONMENT "NVAFX_SDK_DIR=${CMAKE_CURRENT_BINARY_DIR}/no-nvidia-sdk")
 add_test(NAME vst
   COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-harness>
           -DPLUGIN=$<TARGET_FILE:knobs-test-vst>

@@ -41,6 +41,7 @@ struct CoreOptions {
   bool paused = false;
   // A copy restarted to free NVIDIA's SDK waits before loading it again.
   bool wait_for_nvidia = false;
+  std::vector<std::filesystem::path> wait_folders;
   Controller::Timing timing;
 };
 
@@ -59,6 +60,12 @@ class Core {
   Core(const Core&) = delete;
   Core& operator=(const Core&) = delete;
 
+  // Begins shutdown without joining. The tray bounds its wait, including
+  // when the thread is stuck before it can process this request.
+  void RequestStop();
+  // True only once the thread has exited, including DLL thread cleanup.
+  bool stopped();
+
   // Commands, from any thread, the observer's callback included. They return
   // at once; the observer hears what comes of them.
   void Pause();
@@ -73,9 +80,9 @@ class Core {
   void Log(std::string line);
 
   // Runs `start` on the core's thread with the backend's file watches, and
-  // waits for its result. Called only from outside the core's thread; the
-  // hook must return promptly and must not call back into the tray.
-  Status Restart(RestartHook start);
+  // returns a future for its result. Called only from outside the core's
+  // thread; the hook must return promptly and must not call back into the tray.
+  std::future<Status> Restart(RestartHook start);
 
  private:
   using Task = std::function<void(Controller& controller, Controller::Clock::time_point now)>;

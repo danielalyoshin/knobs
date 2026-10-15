@@ -186,7 +186,7 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       notice.page = FirstRunPage::kProblem;
       notice.title = std::format("{} couldn't restart yet", kDisplayName);
       // The detail says the title again.
-      notice.text = std::format("It let the NVIDIA installer continue. If the installer says a file is in use, quit "
+      notice.text = std::format("It let the installer continue. If the installer says a file is in use, quit "
                                 "{} and retry it.",
                                 kDisplayName);
       return notice;
@@ -345,6 +345,14 @@ std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& sna
       return Notice{.kind = Kind::kRestarted,
                     .title = "NVIDIA's Audio Effects SDK update",
                     .text = std::format("{} restarted so its installer could replace the files.{}", kDisplayName, paused)};
+    case core::RestartNeed::kPluginUpdating:
+      return Notice{.kind = Kind::kRestarted,
+                    .title = "A plugin update",
+                    .text = std::format("{} restarted so its installer could replace the files.{}", kDisplayName, paused)};
+    case core::RestartNeed::kNvidiaUnused:
+      return Notice{.kind = Kind::kRestarted,
+                    .title = "NVIDIA's noise removal is no longer needed",
+                    .text = std::format("{} restarted to free its memory.{}", kDisplayName, paused)};
     case core::RestartNeed::kNone:
       break;
   }
@@ -365,6 +373,10 @@ std::string_view RestartNeedName(core::RestartNeed need) {
       return "nvidia-installed";
     case core::RestartNeed::kNvidiaUpdating:
       return "nvidia-updating";
+    case core::RestartNeed::kPluginUpdating:
+      return "plugin-updating";
+    case core::RestartNeed::kNvidiaUnused:
+      return "nvidia-unused";
     case core::RestartNeed::kNone:
       break;
   }
@@ -374,7 +386,8 @@ std::string_view RestartNeedName(core::RestartNeed need) {
 std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name) {
   for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged,
                                        core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled,
-                                       core::RestartNeed::kNvidiaUpdating}) {
+                                       core::RestartNeed::kNvidiaUpdating, core::RestartNeed::kPluginUpdating,
+                                       core::RestartNeed::kNvidiaUnused}) {
     if (RestartNeedName(need) == name) return need;
   }
   return std::nullopt;
@@ -385,7 +398,21 @@ Notifier::Notifier(Options options) : options_(std::move(options)), warned_(opti
 Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, Clock::time_point now) {
   Update update;
   const core::Snapshot before = std::exchange(snapshot_, snapshot);
-  if (snapshot.state == State::kStarting) return update;
+  if (snapshot.files_held && !before.files_held) hold_due_ = now + options_.file_hold_grace;
+  if (!snapshot.files_held) {
+    hold_due_.reset();
+    Hide(Kind::kFileHold, update);
+  }
+  if (options_.handoff_failed) {
+    options_.handoff_failed = false;
+    options_.restarted_for = core::RestartNeed::kNone;
+    ShowOrHold(Notice{.kind = Kind::kHandoffFailed,
+                      .title = "An installer may need to try again",
+                      .text = std::format("{} restarted, but the installer may have found a file still in use. "
+                                          "If it says so, retry it.", kDisplayName),
+                      .sound = true}, quiet, update);
+  }
+  if (snapshot.state == State::kStarting && !snapshot.files_waiting) return update;
   const bool first = !started_;
   started_ = true;
 
@@ -438,7 +465,9 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   // A pause while an installer updates a plugin or NVIDIA's SDK, the same
   // way.
   std::optional<bool> update_pause;
-  if (snapshot.state == State::kPausedForUpdate) update_pause = snapshot.nvidia_update;
+  if ((snapshot.state == State::kStarting && snapshot.files_waiting) || snapshot.state == State::kPausedForUpdate) {
+    update_pause = snapshot.nvidia_update;
+  }
   if (update_pause != update_pause_) {
     Hide(Kind::kPausedForUpdate, update);
     update_pause_ = update_pause;
@@ -483,7 +512,8 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
 
   // After a restart or an update, the new copy says so, after anything shown
   // now. A problem says more than the restart.
-  if (snapshot.state != State::kPausedForUpdate && options_.restarted_for != core::RestartNeed::kNone) {
+  if (snapshot.state != State::kStarting && snapshot.state != State::kPausedForUpdate &&
+      options_.restarted_for != core::RestartNeed::kNone) {
     if (!Stopped(snapshot.state)) {
       if (auto notice = Restarted(options_.restarted_for, snapshot)) ShowOrHold(std::move(*notice), quiet, update);
     }
@@ -523,8 +553,35 @@ Notifier::Update Notifier::RestartWaits(RestartWait window, Clock::time_point no
   return update;
 }
 
+namespace {
+
+Notice FileHoldNotice(bool quitting) {
+  return Notice{.kind = Notice::Kind::kFileHold,
+                .title = "An installer is waiting",
+                .text = quitting
+                    ? std::format("{} is taking longer than usual to close. It will close by itself shortly. "
+                                  "Then retry the installer if it still can't continue.", kDisplayName)
+                    : std::format("{0} is taking longer than usual to release a file. If the installer can't continue, "
+                                  "quit {0}, wait for it to close, then retry it.", kDisplayName),
+                .sound = true};
+}
+
+}  // namespace
+
+Notifier::Update Notifier::Quitting() {
+  quitting_ = true;
+  Update update;
+  if (shown_ && shown_->kind == Kind::kFileHold) Show(FileHoldNotice(true), false, update);
+  return update;
+}
+
 Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   Update update;
+  if (hold_due_ && now >= *hold_due_) {
+    hold_due_.reset();
+    Show(FileHoldNotice(quitting_), false, update);
+    return update;
+  }
   if (mic_ && mic_->running_since && now - *mic_->running_since >= options_.mic_back_after) {
     mic_.reset();
     Hide(Kind::kMicMissing, update);
@@ -547,6 +604,7 @@ std::optional<Notifier::Clock::time_point> Notifier::NextDeadline() const {
   if (cable_ && !cable_->due && snapshot_.state == State::kCableMissing) {
     consider(cable_->since + options_.device_grace);
   }
+  if (hold_due_) consider(*hold_due_);
   if (!held_.empty() && held_after_) consider(*held_after_);
   return next;
 }

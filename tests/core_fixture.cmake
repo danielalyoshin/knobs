@@ -48,6 +48,18 @@ expect("${output}" "s] needs setup: The scene collection has 2 mics. Choose one:
 expect("${output}" "1. \"Mic/Aux\" (AuxAudioDevice1, monitored)")
 expect("${output}" "0 leaked allocations")
 
+# The selected mic's missing VST file is checked on a worker. Its result
+# completes the import, with the same pre-flight as knobs-import, while no
+# mic or cable opens. NVIDIA's SDK is absent in this test's environment.
+run_core(output code --pick 2 --seconds 4)
+message("${output}")
+if(NOT code EQUAL 0)
+  message(FATAL_ERROR "The core failed while checking the selected mic's plugins.")
+endif()
+expect("${output}" "Filter \"VST\" is a VST plugin (ReaComp-standalone.dll) that isn't at")
+expect("${output}" "s] cable missing: \"CABLE Input (VB-Audio Virtual Cable)\" isn't connected.")
+expect("${output}" "0 leaked allocations")
+
 # Mic/Aux: its device and the profile's cable are both made up, so neither is
 # connected. The cable comes first, under the name the profile saved.
 run_core(output code --pick 1)

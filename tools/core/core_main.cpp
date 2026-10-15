@@ -188,6 +188,7 @@ class DryBackend : public core::ObsBackend {
                                         {.type_id = kPushSourceId, .load_callbacks = plan.load_callbacks});
     if (!source) return Error{source.error()};
     source_ = *source;
+    WatchChainFiles(plan);
     started_ = Clock::now();
     Log(std::format("Dry run: loaded the chain as a stand-in source, not monitored to \"{}\".", plan.cable.name));
     return Ok{};
@@ -198,6 +199,7 @@ class DryBackend : public core::ObsBackend {
     host()->api().obs_source_release(source_);
     host()->session().DrainDestroyQueue();
     source_ = nullptr;
+    ReleaseChainFiles();
   }
 
   // 10 ms packets since the start, as win-wasapi delivers them, up to the

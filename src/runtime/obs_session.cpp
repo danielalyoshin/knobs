@@ -151,7 +151,11 @@ Status ObsSession::LoadOptionalModule(std::string_view name) {
     return InitModule(name, *module);
   };
   Status opened = open();
-  if (!opened) module_errors_.emplace(name, opened.error());
+  if (!opened) {
+    module_errors_.emplace(name, opened.error());
+    runtime_.api().blog(LOG_WARNING, "Couldn't load the OBS module %s: %s", std::string(name).c_str(),
+                        opened.error().c_str());
+  }
   return opened;
 }
 

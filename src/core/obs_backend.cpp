@@ -83,7 +83,7 @@ ObsBackend::~ObsBackend() {
   pruner_.request_stop();
   if (pruner_.joinable()) pruner_.join();
   StopChain();
-  vst_files_.clear();
+  importing_.reset();  // libobs data dies before its session. Workers own only paths.
   // A successful SDK handoff already completed its oplock requests, leaving
   // breaks that the new copy acknowledges only once our DLLs are unmapped.
   if (!host_) return;
@@ -121,6 +121,7 @@ Result<import::ActiveObsConfig> ObsBackend::ReadObsConfig(const import::ObsConfi
 
 Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) {
   if (host_) return Error{"libobs is already running."};
+  baseline_modules_ = ListLoadedFiles();
   runtime::HostOptions options;
   options.install = install;
   options.log = options_.log;
@@ -157,38 +158,59 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   if ((*collection)->from_backup()) {
     Log(std::format("The scene collection doesn't parse, so this is its backup: {}", ToUtf8((*collection)->file())));
   }
+  importing_ = std::move(*collection);
+  importing_->ProbePluginsOnWorkers();
+  importing_pick_ = pick;
+  auto result = FinishImport(*importing_, pick);
+  if (!result || !result->pending) importing_.reset();
+  return result;
+}
+
+std::optional<Result<MicImport>> ObsBackend::PollImport() {
+  if (!importing_) return std::nullopt;
+  auto result = FinishImport(*importing_, importing_pick_);
+  if (result && result->pending) return std::nullopt;
+  importing_.reset();
+  return result;
+}
+
+Result<MicImport> ObsBackend::FinishImport(import::SceneCollection& collection, std::string_view pick) {
   const runtime::ObsApi& api = host_->api();
   runtime::ObsSession& session = host_->session();
   MicImport result;
-  result.mics = (*collection)->Mics(session.module_errors());
+  result.mics = collection.Mics(session.module_errors(), false);
   chain_needs_nvidia_ = false;
   auto picked =
       options_.pick_by_number ? import::PickMic(result.mics, pick) : import::PickMicByName(result.mics, pick);
   if (!picked) {
+    result.mics = collection.Mics(session.module_errors());
+    result.pending = collection.plugins_pending();
     result.pick_error = picked.error();
+    if (session.module("nv-filters")) result.restart = RestartNeed::kNvidiaUnused;
     return result;
   }
   // The optional modules the picked mic needs, before its pre-flight tells
   // the filters libobs has from the rest. A module never unloads, so one a
   // chain needed stays for the rest of the session.
-  const std::vector<std::string> needed = (*collection)->NeededModules(result.mics[*picked]);
+  const std::vector<std::string> needed = collection.NeededModules(result.mics[*picked]);
   chain_needs_nvidia_ = std::find(needed.begin(), needed.end(), "nv-filters") != needed.end();
+  if (!chain_needs_nvidia_ && session.module("nv-filters")) {
+    result.restart = RestartNeed::kNvidiaUnused;
+    return result;
+  }
   if (chain_needs_nvidia_ && !nvidia_sdk_at_load_) {
     nvidia_sdk_at_load_ = import::NvidiaAudioEffectsInstalled(api);
     nvidia_folder_ = import::NvidiaAudioEffectsFolder(runtime::ObsVersion::FromLibobs(api.obs_get_version()));
   }
-  const size_t failed_before = session.module_errors().size();
-  const import::ModuleErrors failed = import::LoadModules(session, needed);
-  WatchNvidiaFiles();
-  if (session.module_errors().size() != failed_before) {
-    for (const auto& [module, error] : failed) Log(std::format("Couldn't load the OBS module {}: {}", module, error));
-  }
   const bool sdk_arrived = NvidiaSdkArrived();
-  if (!needed.empty()) result.mics = (*collection)->Mics(session.module_errors());
-  auto imported = (*collection)->Import(result.mics[*picked], session.module_errors(), sdk_arrived);
+  const bool nvidia_loaded = session.module("nv-filters") != nullptr;
+  auto imported = collection.LoadAndImport(session, result.mics[*picked], sdk_arrived);
+  if (!nvidia_loaded && session.module("nv-filters")) WatchNvidiaFiles(nvidia_folder_);
   if (!imported) return Error{imported.error()};
+  result.mics = std::move(imported->mics);
   result.picked = *picked;
-  result.mic = std::move(*imported);
+  result.mic = std::move(imported->mic);
+  result.pending = collection.plugins_pending();
   if (sdk_arrived) result.restart = RestartNeed::kNvidiaInstalled;
   return result;
 }
@@ -216,6 +238,7 @@ Status ObsBackend::StartChain(const ChainPlan& plan) {
   }
   volume_ = api.obs_source_get_volume(chain_->source());
   api.obs_source_add_audio_capture_callback(chain_->source(), OnChainAudio, this);
+  WatchChainFiles(plan);
   return Ok{};
 }
 
@@ -223,6 +246,7 @@ void ObsBackend::StopChain() {
   if (!chain_) return;
   host_->api().obs_source_remove_audio_capture_callback(chain_->source(), OnChainAudio, this);
   chain_.reset();
+  ReleaseChainFiles();
 }
 
 void ObsBackend::WatchFile(const fs::path& file, std::vector<std::unique_ptr<FileOplock>>& watches,
@@ -242,29 +266,92 @@ void ObsBackend::WatchFile(const fs::path& file, std::vector<std::unique_ptr<Fil
   }
 }
 
-void ObsBackend::WatchNvidiaFiles() {
-  if (nvidia_folder_.empty()) return;
-  // Only a new process lets go of NVIDIA's DLLs.
-  const std::string advice = std::format("Quit {} before replacing this file.", kDisplayName);
-  for (const fs::path& file : LoadedModules()) {
-    if (InFolder(file, nvidia_folder_)) WatchFile(file, nvidia_files_, advice);
+void ObsBackend::WatchNvidiaFiles(const fs::path& folder) {
+  nvidia_folder_ = folder;
+  WatchLoadedFiles(watch_plugins_);
+}
+
+void ObsBackend::WatchChainFiles(const ChainPlan& plan) {
+  watch_plugins_ = !plan.vst_plugins.empty();
+  stopped_update_ = {};
+  WatchLoadedFiles(watch_plugins_);
+}
+
+void ObsBackend::WatchLoadedFiles(bool plugins) {
+  if (!plugins && nvidia_folder_.empty()) return;
+  const auto loaded = ListLoadedFiles();
+  wchar_t windows[MAX_PATH] = {};
+  GetWindowsDirectoryW(windows, MAX_PATH);
+  wchar_t exe[32768] = {};
+  GetModuleFileNameW(nullptr, exe, 32768);
+  const fs::path app = fs::path(exe).parent_path();
+  for (const fs::path& file : loaded) {
+    if (InFolder(file, nvidia_folder_)) {
+      WatchFile(file, persistent_files_, std::format("Quit {} before replacing this file.", kDisplayName));
+    } else if (!InFolder(file, windows) && !InFolder(file, app) &&
+               !(host_ && InFolder(file, host_->copy().root)) &&
+               std::none_of(baseline_modules_.begin(), baseline_modules_.end(), [&](const fs::path& baseline) {
+                 return SamePath(file, baseline);
+               })) {
+      // Wrapper plugins and NVIDIA's SDK can load processing DLLs elsewhere.
+      // Without a VST chain, these belong to the persistent SDK runtime.
+      if (std::none_of(persistent_files_.begin(), persistent_files_.end(), [&](const auto& watch) {
+            return SamePath(watch->file(), file);
+          })) {
+        if (plugins) {
+          WatchFile(file, vst_files_, std::format("Pause {} before replacing this file.", kDisplayName));
+        } else {
+          WatchFile(file, persistent_files_, std::format("Quit {} before replacing this file.", kDisplayName));
+        }
+      }
+    }
   }
 }
 
-void ObsBackend::WatchChainFiles(const ChainPlan* plan) {
-  vst_files_.clear();  // The controller has already stopped the previous chain.
-  if (!plan) return;
-  // Pausing unloads a plugin.
-  const std::string advice = std::format("Pause {} before replacing this file.", kDisplayName);
-  const auto loaded = LoadedModules();
-  for (const fs::path& plugin : plan->vst_plugins) {
-    const auto file = std::find_if(loaded.begin(), loaded.end(), [&](const fs::path& path) {
-      return SamePath(path, plugin);
-    });
-    if (file != loaded.end()) WatchFile(*file, vst_files_, advice);
+void ObsBackend::ReleaseChainFiles() {
+  watch_plugins_ = false;
+  if (vst_files_.empty()) return;
+  // The source and Qt's posted deletes have finished. A wrapper may keep a
+  // dependency loaded; keep its watch until a restart can free it.
+  FileUpdate update = FilesWanted();
+  if (update.restart || !update.folders.empty()) {
+    // An installer can update the SDK and several plugins together. Keep
+    // the unloaded plugins' folders too if another DLL needs a restart.
+    for (const auto& file : vst_files_) {
+      const fs::path folder = file->file().parent_path();
+      if (std::none_of(update.folders.begin(), update.folders.end(), [&](const auto& path) {
+            return SamePath(path, folder);
+          })) update.folders.push_back(folder);
+    }
   }
-  // Some SDK DLLs only load as the chain starts.
-  WatchNvidiaFiles();
+  bool complete = false;
+  const auto loaded = ListLoadedFiles(&complete);
+  for (auto& watch : vst_files_) {
+    if (!complete || std::any_of(loaded.begin(), loaded.end(), [&](const fs::path& file) {
+          return SamePath(file, watch->file());
+        })) {
+      persistent_files_.push_back(std::move(watch));
+    }
+  }
+  vst_files_.clear();
+  if (const FileUpdate persistent = FilesWanted(); persistent.restart) {
+    update.restart = true;
+    update.nvidia = persistent.nvidia;
+  }
+  if (update.restart) {
+    for (const fs::path& folder : update.folders) {
+      if (std::none_of(restart_folders_.begin(), restart_folders_.end(), [&](const auto& path) {
+            return SamePath(path, folder);
+          })) restart_folders_.push_back(folder);
+    }
+  }
+  stopped_update_ = std::move(update);
+}
+
+void ObsBackend::PollFileWatches() { WatchLoadedFiles(watch_plugins_); }
+
+std::vector<fs::path> ObsBackend::ListLoadedFiles(bool* complete) {
+  return LoadedModules([this](std::string_view error) { Log(error); }, complete);
 }
 
 FileUpdate ObsBackend::FilesWanted() {
@@ -275,12 +362,16 @@ FileUpdate ObsBackend::FilesWanted() {
     for (const auto& file : files) found = file->wanted() || found;
     return found;
   };
-  const bool nvidia = wanted(nvidia_files_);
-  const bool vst = wanted(vst_files_);
-  if (nvidia) {
-    return {{nvidia_folder_}, true};
+  bool persistent = false, sdk = false;
+  for (const auto& file : persistent_files_) {
+    if (file->wanted()) {
+      persistent = true;
+      sdk |= InFolder(file->file(), nvidia_folder_);
+    }
   }
-  FileUpdate update;
+  const bool vst = wanted(vst_files_);
+  if (persistent) return {.restart = true, .nvidia = sdk};
+  FileUpdate update = std::exchange(stopped_update_, {});
   if (vst) {
     // One installer may update several plugins. Releasing the chain releases
     // all of them, so wait for all their folders, not just the first file.
@@ -314,25 +405,43 @@ bool ObsBackend::NvidiaSdkArrived() {
          import::NvidiaAudioEffectsInstalled(api);
 }
 
-Status ObsBackend::Restart(const RestartHook& start) {
-  // Only for an SDK installer that's waiting: other restarts hold nothing.
-  if (std::none_of(nvidia_files_.begin(), nvidia_files_.end(), [](const auto& file) { return file->wanted(); })) {
-    return start({});
+RestartFiles ObsBackend::UpdateFileHandles() {
+  RestartFiles result;
+  bool wanted = false;
+  // Poll them all: an exclusive reader must be released even if a writer
+  // has already been found on another DLL.
+  for (const auto& file : persistent_files_) wanted = file->wanted() || wanted;
+  if (!wanted) {
+    result.folders = restart_folders_;  // A delayed retry still waits.
+    return result;
   }
-  std::vector<uintptr_t> files;
-  // Include watches that haven't broken yet: an installer can reach another
-  // SDK DLL while this process is shutting down.
-  for (const auto& file : nvidia_files_) {
-    const Status prepared = file->PrepareHandoff();
-    if (!prepared) return prepared;
-    if (const uintptr_t handle = file->handle()) files.push_back(handle);
+  for (auto& file : persistent_files_) {
+    const fs::path folder = file->file().parent_path();
+    if (std::none_of(restart_folders_.begin(), restart_folders_.end(), [&](const auto& path) {
+          return SamePath(path, folder);
+        })) restart_folders_.push_back(folder);
+    if (const Status prepared = PrepareFileHandoff(*file); !prepared) {
+      Log(std::format("{} Restarting anyway; the installer may need to retry this file.", prepared.error()));
+      result.incomplete = true;
+      file.reset();
+    } else if (const uintptr_t handle = file->handle()) {
+      result.handles.push_back(handle);
+    }
   }
-  const Status started = start(files);
-  if (started) nvidia_files_.clear();
-  return started;
+  std::erase(persistent_files_, nullptr);
+  result.folders = restart_folders_;
+  return result;
 }
 
-void ObsBackend::ReleaseUpdateFiles() { nvidia_files_.clear(); }
+void ObsBackend::ReleaseUpdateFiles() {
+  for (const auto& file : persistent_files_) {
+    const fs::path folder = file->file().parent_path();
+    if (std::none_of(restart_folders_.begin(), restart_folders_.end(), [&](const auto& path) {
+          return SamePath(path, folder);
+        })) restart_folders_.push_back(folder);
+  }
+  persistent_files_.clear();
+}
 
 uint64_t ObsBackend::ChainPackets() { return packets_.load(std::memory_order_relaxed); }
 

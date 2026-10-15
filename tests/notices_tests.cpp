@@ -44,6 +44,7 @@ struct Fixture {
   core::Controller controller;
   Notifier notifier;
   Clock::time_point now{};
+  Clock::time_point next_poll = now + 1s;
   bool quiet = false;
   std::vector<std::string> events;
   // The last notification shown, or one with no title if none was.
@@ -90,8 +91,13 @@ struct Fixture {
     for (int ticks = 0; ticks < 10'000; ++ticks) {
       std::optional<Clock::time_point> next = controller.NextDeadline();
       if (const auto notice = notifier.NextDeadline(); notice && (!next || *notice < *next)) next = notice;
-      if (!next || *next > end) break;
+      if (!next || next_poll < *next) next = next_poll;
+      if (*next > end) break;
       now = std::max(now, *next);
+      if (now >= next_poll) {
+        controller.PollFiles(now);
+        next_poll = now + 1s;
+      }
       controller.Tick(now);
       Feed();
       Apply(notifier.Tick(quiet, now));
@@ -719,7 +725,7 @@ TEST(NoticesExplainWhenADelayedSdkRestartReleasesTheInstaller) {
     CHECK(f.events == std::vector<std::string>{std::format("{} couldn't restart yet", kDisplayName)});
     CHECK(f.last.kind == Notice::Kind::kRestartNeeded && f.last.problem);
     // What setup's page says, without saying the title again.
-    CHECK(f.last.text.starts_with("It let the NVIDIA installer continue."));
+    CHECK(f.last.text.starts_with("It let the installer continue."));
     CHECK(f.last.text.find("couldn't restart") == std::string::npos);
     CHECK(f.last.text.find("retry it") != std::string::npos);
     f.Advance(30s);
@@ -920,7 +926,8 @@ TEST(NoticesSayWhatStopsKnobs) {
 TEST(RestartReasonsHaveNames) {
   for (const core::RestartNeed need : {core::RestartNeed::kObsUpdated, core::RestartNeed::kAudioChanged,
                                        core::RestartNeed::kObsChanged, core::RestartNeed::kNvidiaInstalled,
-                                       core::RestartNeed::kNvidiaUpdating}) {
+                                       core::RestartNeed::kNvidiaUpdating, core::RestartNeed::kPluginUpdating,
+                                       core::RestartNeed::kNvidiaUnused}) {
     CHECK(RestartNeedNamed(RestartNeedName(need)) == need);
   }
   CHECK(RestartNeedName(core::RestartNeed::kObsChanged) == "obs-changed");
@@ -986,13 +993,72 @@ TEST(NoticesSayAPluginUpdatePausesKnobs) {
   CHECK(over.state() == State::kRunning && over.events == kNone);
 }
 
+TEST(TrayTimerExplainsAHoldWithoutAnotherCoreSnapshot) {
+  Notifier notifier;
+  core::Snapshot snapshot;
+  snapshot.state = State::kRunning;
+  snapshot.files_held = true;
+  const auto now = Clock::time_point{};
+  CHECK(!notifier.Changed(snapshot, true, now).show);
+  CHECK(notifier.NextDeadline() == now + 5s);
+  CHECK(!notifier.Tick(true, now + 4999ms).show);
+  const auto late = notifier.Tick(true, now + 5s);
+  CHECK(late.show && late.show->kind == Notice::Kind::kFileHold);
+  CHECK(late.show->title == "An installer is waiting");
+  CHECK(late.show->text == std::format("{0} is taking longer than usual to release a file. If the installer can't "
+                                     "continue, quit {0}, wait for it to close, then retry it.", kDisplayName));
+  CHECK(FromUtf8(late.show->text).size() <= 160);
+  CHECK(!notifier.Tick(true, now + 10s).show);
+  snapshot.files_held = false;
+  CHECK(notifier.Changed(snapshot, true, now + 11s).hide);
+}
+
+TEST(HeldInstallerAdviceChangesWhenQuitBegins) {
+  for (const bool already_shown : {false, true}) {
+    Notifier notifier;
+    core::Snapshot snapshot;
+    snapshot.state = State::kRunning;
+    snapshot.files_held = true;
+    const auto now = Clock::time_point{};
+    notifier.Changed(snapshot, true, now);
+    if (already_shown) CHECK(notifier.Tick(true, now + 5s).show);
+    auto closing = notifier.Quitting();
+    if (!already_shown) {
+      CHECK(!closing.show);
+      closing = notifier.Tick(true, now + 5s);
+    }
+    CHECK(closing.show && closing.show->kind == Notice::Kind::kFileHold);
+    if (!closing.show) continue;
+    CHECK(closing.show->text == std::format("{} is taking longer than usual to close. It will close by itself shortly. "
+                                           "Then retry the installer if it still can't continue.", kDisplayName));
+    CHECK(FromUtf8(closing.show->text).size() <= 160);
+    CHECK(!notifier.Tick(true, now + 6s).show);
+  }
+}
+
+TEST(NewCopyExplainsAFailedHandoffAndDoesNotClaimItProtectedTheInstaller) {
+  Notifier notifier({.restarted_for = core::RestartNeed::kNvidiaUpdating, .handoff_failed = true});
+  core::Snapshot snapshot;
+  snapshot.state = State::kStarting;
+  const auto now = Clock::time_point{};
+  const auto failed = notifier.Changed(snapshot, false, now);
+  CHECK(failed.show && failed.show->kind == Notice::Kind::kHandoffFailed);
+  CHECK(failed.show->title == "An installer may need to try again");
+  CHECK(failed.show->text == std::format("{} restarted, but the installer may have found a file still in use. "
+                                       "If it says so, retry it.", kDisplayName));
+  snapshot.state = State::kRunning;
+  CHECK(!notifier.Changed(snapshot, false, now + 1s).show);
+  CHECK(!notifier.Tick(false, now + 20s).show);
+}
+
 TEST(NvidiaRestartNoticeWaitsForTheFilesToSettle) {
   // The copy restarted for an SDK update says it's paused for it, then once
   // the files settle, why it restarted.
   Fixture f(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kNvidiaUpdating});
   f.controller.Start(false, f.now, false, true);
   f.Feed();
-  CHECK(f.state() == State::kPausedForUpdate && f.events == std::vector<std::string>{"Paused for NVIDIA's SDK update"});
+  CHECK(f.state() == State::kStarting && f.notifier.badge() == Badge::kNone &&
+        f.events == std::vector<std::string>{"Paused for NVIDIA's SDK update"});
   CHECK(f.last.kind == Notice::Kind::kPausedForUpdate && !f.last.problem);
   CHECK(f.last.text.starts_with(std::format("{} doesn't send your mic to the cable until", kDisplayName)));
   f.Advance(5s);
@@ -1006,7 +1072,7 @@ TEST(NvidiaRestartNoticeWaitsForTheFilesToSettle) {
   Fixture paused(tools::DefaultWorld(), {}, {.restarted_for = core::RestartNeed::kNvidiaUpdating});
   paused.controller.Start(false, paused.now, true, true);
   paused.Feed();
-  CHECK(paused.state() == State::kPausedForUpdate && paused.events.size() == 1);
+  CHECK(paused.state() == State::kStarting && paused.events.size() == 1);
   CHECK(paused.last.text ==
         std::format("{} waits for the updated files to stop changing. It's still paused.", kDisplayName));
   paused.Advance(5s);

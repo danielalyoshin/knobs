@@ -60,15 +60,16 @@ class ObsBackend : public Backend {
   Status StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) override;
   bool LibobsCanRetry() override;
   Result<MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override;
+  std::optional<Result<MicImport>> PollImport() override;
   audio::Endpoints ListDevices() override;
   Status StartChain(const ChainPlan& plan) override;
   void StopChain() override;
-  void WatchChainFiles(const ChainPlan* plan) override;
   FileUpdate FilesWanted() override;
+  void PollFileWatches() override;
   std::string FingerprintFolders(const std::vector<std::filesystem::path>& folders) override;
   std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion& obs) override;
   bool NvidiaSdkArrived() override;
-  Status Restart(const RestartHook& start) override;
+  RestartFiles UpdateFileHandles() override;
   void ReleaseUpdateFiles() override;
   uint64_t ChainPackets() override;
   ChainLevel TakeChainLevel() override;
@@ -78,12 +79,21 @@ class ObsBackend : public Backend {
  protected:
   // Null until StartLibobs succeeds.
   runtime::ObsHost* host() { return host_.get(); }
+  // The dry backend uses the same watch lifecycle around its stand-in source.
+  void WatchChainFiles(const ChainPlan& plan);
+  void ReleaseChainFiles();
+  // Watch loaded SDK files even without a chain. Also a seam for a scratch
+  // SDK in tests: no NVIDIA hardware or libobs is needed to test handoffs.
+  void WatchNvidiaFiles(const std::filesystem::path& folder);
+  virtual Status PrepareFileHandoff(FileOplock& file) { return file.PrepareHandoff(); }
+  virtual std::vector<std::filesystem::path> ListLoadedFiles(bool* complete = nullptr);
 
  private:
   // A capture callback on the chain: counts what it filters and keeps each
   // packet's peak. It only reads the samples.
   static void OnChainAudio(void* param, obs_source_t* source, const audio_data* audio, bool muted);
-  void WatchNvidiaFiles();
+  void WatchLoadedFiles(bool plugins);
+  Result<MicImport> FinishImport(import::SceneCollection& collection, std::string_view pick);
   // `advice` says what to do instead, for the log, if Windows can't watch it.
   void WatchFile(const std::filesystem::path& file, std::vector<std::unique_ptr<FileOplock>>& watches,
                  std::string_view advice);
@@ -91,14 +101,21 @@ class ObsBackend : public Backend {
   ObsBackendOptions options_;
   std::unique_ptr<runtime::ObsHost> host_;
   std::unique_ptr<audio::LiveChain> chain_;
+  std::unique_ptr<import::SceneCollection> importing_;
+  std::string importing_pick_;
   // Whether NVIDIA's Audio Effects SDK was there when nv-filters loaded, once
   // it has.
   std::optional<bool> nvidia_sdk_at_load_;
   // Whether the last import's chain needs nv-filters.
   bool chain_needs_nvidia_ = false;
   std::filesystem::path nvidia_folder_;
-  std::vector<std::unique_ptr<FileOplock>> nvidia_files_;
+  std::vector<std::unique_ptr<FileOplock>> persistent_files_;
   std::vector<std::unique_ptr<FileOplock>> vst_files_;
+  // A writer noticed while stopping a chain, retained after its watches go.
+  FileUpdate stopped_update_;
+  std::vector<std::filesystem::path> restart_folders_;
+  bool watch_plugins_ = false;
+  std::vector<std::filesystem::path> baseline_modules_;
   // Files Windows wouldn't watch, which the log has said.
   std::vector<std::filesystem::path> unwatchable_;
   std::atomic<uint64_t> packets_ = 0;

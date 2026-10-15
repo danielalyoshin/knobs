@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/backend.h"
@@ -116,20 +117,32 @@ class FakeBackend : public core::Backend {
   Result<core::MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override;
   audio::Endpoints ListDevices() override { return world_->Get().devices; }
   Status StartChain(const core::ChainPlan& plan) override;
-  void StopChain() override {}
-  void WatchChainFiles(const core::ChainPlan* plan) override { files_watched_ = plan != nullptr; }
+  void StopChain() override {
+    stopped_update_ = FilesWanted();
+    files_watched_ = false;
+  }
   // NVIDIA's SDK stays loaded, and watched, while the chain is stopped.
   core::FileUpdate FilesWanted() override {
     const core::FileUpdate update = world_->Get().file_update;
-    return files_watched_ || update.restart ? update : core::FileUpdate{};
+    if (files_watched_ || update.restart) return update;
+    return std::exchange(stopped_update_, {});
   }
   std::string FingerprintFolders(const std::vector<std::filesystem::path>&) override {
     return std::to_string(world_->Get().files_changing ? ++file_changes_ : file_changes_);
   }
   std::vector<std::filesystem::path> NvidiaUpdateFolders(const runtime::ObsVersion&) override { return {L"C:\\sdk"}; }
   bool NvidiaSdkArrived() override { return world_->Get().nvidia_sdk_arrived; }
-  Status Restart(const core::RestartHook& start) override { return start({}); }
-  void ReleaseUpdateFiles() override { world_->Change([](FakeWorld& world) { world.file_update = {}; }); }
+  core::RestartFiles UpdateFileHandles() override {
+    const auto update = world_->Get().file_update;
+    return update.restart ? core::RestartFiles{{11, 12}, update.folders}
+                          : core::RestartFiles{{}, restart_folders_};
+  }
+  void ReleaseUpdateFiles() override {
+    const auto update = world_->Get().file_update;
+    if (update.restart) restart_folders_ = update.folders;
+    stopped_update_ = {};
+    world_->Change([](FakeWorld& world) { world.file_update = {}; });
+  }
   // Flowing unless stalled: 10 ms packets, a second's worth each time it's
   // asked. Counted from the chain's start, as the real backend counts.
   uint64_t ChainPackets() override { return world_->Get().stalled ? packets_ : packets_ += 100; }
@@ -146,6 +159,8 @@ class FakeBackend : public core::Backend {
   int checks_ = 0;
   uint64_t packets_ = 0;
   bool files_watched_ = false;
+  core::FileUpdate stopped_update_;
+  std::vector<std::filesystem::path> restart_folders_;
   uint64_t file_changes_ = 0;
 };
 

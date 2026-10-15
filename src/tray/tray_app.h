@@ -82,6 +82,9 @@ struct TrayOptions {
   // The copy before this one was paused, and restarted: the core starts
   // paused.
   bool start_paused = false;
+  // A stuck core must not outlast the replacement's 30 s wait. Tests can
+  // shorten this to exercise process termination without a long delay.
+  std::chrono::milliseconds core_stop_wait{10000};
   // Where the settings are kept. Empty: `settings` and `first_run` are used
   // and nothing is saved.
   std::filesystem::path settings_file;
@@ -105,10 +108,10 @@ struct TrayOptions {
   // Starts a new copy, which waits for this one to quit, says why, and starts
   // paused if `paused`. The tray restarts by itself when the core needs it
   // to follow OBS.
-  // Called on the core's thread, through Backend::Restart. `files` must be
+  // Called on the core's thread, through Controller::Restart. `files` must be
   // inherited before returning success, then released by the new copy only
   // after this process exits (StartWithFileOplocks). Must return promptly.
-  std::function<Status(core::RestartNeed why, bool paused, const std::vector<uintptr_t>& files)> restart;
+  std::function<Status(core::RestartNeed why, bool paused, const core::RestartFiles& files)> restart;
   // Has Windows start knobs again, paused if `paused`, after an installer
   // closes it to replace a file it has open (Restart Manager), or not, if
   // `on` is false. The tray keeps it on, and in step with pausing, except
@@ -119,6 +122,8 @@ struct TrayOptions {
   // This copy waits for NVIDIA's SDK folder to settle before it loads
   // anything (core::CoreOptions::wait_for_nvidia).
   bool wait_for_nvidia = false;
+  std::vector<std::filesystem::path> wait_folders;
+  bool handoff_failed = false;
   UpdateHooks updates;
   // Starts OBS from its install, for the first run. Default: OpenObs.
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
@@ -154,7 +159,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // core couldn't start once an update at start had held it back: what
   // Create returns otherwise.
   Status Run();
-  // Stops the core, removes the icon and ends Run.
+  // Stops the core, removes the icon and ends Run. A core that exceeds
+  // core_stop_wait ends the process after removing the icon and logging why.
   void Quit();
 
   // Opens the menu at `point`, in screen coordinates, as a click on the icon
@@ -187,6 +193,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void LoadIcons();
   void DestroyIcons();
   void AddIcon();
+  void RemoveIcon();
   // Changes the icon as `data` says, with the tooltip.
   void ModifyIcon(NOTIFYICONDATAW& data);
   void UpdateTip();
@@ -277,6 +284,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void ApplySettings(const core::Settings& settings) override;
   void Reimport() override;
   bool Restart() override;
+  void FinishRestart();
   Status StartObs(const std::filesystem::path& install_root) override;
   void FinishFirstRun(const FinishChoices& finish) override;
   void SaveFirstRun(const FirstRunProgress& progress) override;
@@ -310,6 +318,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   std::optional<std::vector<std::string>> warned_;
   // The reason a restart was tried for, since the core said it needs one.
   std::optional<core::RestartNeed> restart_tried_;
+  std::optional<std::future<Status>> restart_result_;
   // How Windows reopens knobs after an installer: paused or not, or not at
   // all (TrayOptions::reopen_after_installer).
   std::optional<bool> reopen_paused_;

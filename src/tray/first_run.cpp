@@ -121,8 +121,6 @@ std::optional<Page> Blocking(const core::Snapshot& snapshot) {
   switch (snapshot.state) {
     case State::kStarting:
       return Page::kLooking;
-    case State::kPausedForUpdate:
-      return snapshot.chain ? std::nullopt : std::optional(Page::kLooking);
     case State::kObsMissing:
       return Page::kFindObs;
     case State::kObsUnsupported:
@@ -303,7 +301,7 @@ std::string UpdateWaitNote(const core::Snapshot& snapshot) {
 std::string ObsUserNote(const core::Snapshot& snapshot) {
   switch (snapshot.state) {
     case State::kStarting:
-      return "Looking for OBS…";
+      return snapshot.detail.empty() ? "Looking for OBS…" : snapshot.detail;
     case State::kPausedForUpdate:
       return UpdateWaitNote(snapshot);
     case State::kObsMissing:
@@ -352,11 +350,6 @@ bool ObsUserFits(const core::Snapshot& snapshot) {
     case State::kStarting:
     case State::kObsUnsupported:
       return true;
-    case State::kPausedForUpdate:
-      // Before the first import, as a copy waits for NVIDIA's SDK: as when
-      // starting, nothing is known yet.
-      if (!snapshot.chain) return true;
-      break;
     default:
       break;
   }
@@ -890,8 +883,8 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, const CheckS
       break;
     case Page::kLooking:
       view = Looking();
-      if (snapshot.state == State::kPausedForUpdate) {
-        view.instruction = UpdateWaitNote(snapshot);
+      if (!snapshot.detail.empty()) {
+        view.instruction = snapshot.files_waiting ? UpdateWaitNote(snapshot) : snapshot.detail;
         view.content = snapshot.detail;
       }
       break;

@@ -49,15 +49,16 @@ Controller::Controller(Backend& backend, Settings settings, Publish publish, Tim
   snapshot_.settings = settings_;
 }
 
-void Controller::Start(bool obs_running, Clock::time_point now, bool paused, bool wait_for_nvidia) {
+void Controller::Start(bool obs_running, Clock::time_point now, bool paused, bool wait_for_nvidia,
+                       std::vector<std::filesystem::path> wait_folders) {
   obs_running_ = obs_running;
   paused_by_user_ = paused;
   wait_for_nvidia_ = wait_for_nvidia;
-  next_file_check_ = now + timing_.file_poll;
   snapshot_.obs_running = obs_running;
   snapshot_.paused_by_user = paused;
   publish_(snapshot_);
   devices_ = backend_.ListDevices();
+  if (!wait_folders.empty()) WaitForFiles(std::move(wait_folders), wait_for_nvidia, now);
   Refresh(now);
   Reconcile(now);
 }
@@ -110,6 +111,7 @@ void Controller::Pause(Clock::time_point now) {
 void Controller::Resume(Clock::time_point now) {
   if (stopped_) return;
   paused_by_user_ = false;
+  CheckFileUpdates(now);
   ClearFailures();
   Reconcile(now);
 }
@@ -142,59 +144,73 @@ void Controller::Apply(const Settings& settings, Clock::time_point now) {
 }
 
 Status Controller::Restart(const RestartHook& start, Clock::time_point now) {
-  if (file_restart_due_ && now >= *file_restart_due_) ReleaseUpdateFiles();
-  const Status started = backend_.Restart(start);
-  if (started) {
-    file_restart_due_.reset();  // The replacement now holds the installer through exit.
-  } else {
-    ReleaseUpdateFiles();
-    Reconcile(now);
+  ReleaseIfDue(now);
+  const RestartFiles files = backend_.UpdateFileHandles();
+  const Status started = start(files);
+  // Successful duplicates keep their prepared breaks through our exit.
+  // Failure lets the installer through even when it still finds DLLs loaded.
+  backend_.ReleaseUpdateFiles();
+  if (file_restart_ != FileRestart::kNone) {
+    file_restart_ = started ? FileRestart::kHandedOff : FileRestart::kReleased;
   }
+  if (started) stopped_ = true;
+  else Reconcile(now);
   return started;
+}
+
+void Controller::PollFiles(Clock::time_point now) {
+  if (stopped_) return;
+  const FileRestart before = file_restart_;
+  const bool waiting_before = !updating_folders_.empty();
+  const bool installed_before = nvidia_installed_;
+  bool changed = ReleaseIfDue(now);
+  if (file_restart_ == FileRestart::kNone) backend_.PollFileWatches();
+  CheckFileUpdates(now);
+  // WaitForFiles already took the first fingerprint. Never scan twice on
+  // the tick which first notices a writer.
+  if (waiting_before && !updating_folders_.empty() && file_restart_ == FileRestart::kNone) {
+    const std::string fingerprint = backend_.FingerprintFolders(updating_folders_);
+    if (fingerprint != folder_fingerprint_) {
+      folder_fingerprint_ = fingerprint;
+      files_quiet_since_ = now;
+    }
+    const bool settled = now - files_quiet_since_ >= timing_.file_settle;
+    if (settled || now - file_wait_since_ >= timing_.file_wait_max) {
+      updating_folders_.clear();
+      wait_for_nvidia_ = false;
+      backend_.Log(settled ? std::string("The updated files stopped changing. Importing OBS's settings again.")
+                           : std::format("The updated files kept changing for {}. Importing OBS's settings again anyway.",
+                                         Minutes(now - file_wait_since_)));
+      ClearFailures();
+      devices_ = backend_.ListDevices();
+      Refresh(now);
+      changed = true;
+    }
+  }
+  if (import_pending_ && updating_folders_.empty() && file_restart_ == FileRestart::kNone) {
+    if (auto finished = backend_.PollImport()) {
+      if (*finished) AcceptImport(std::move(**finished), now);
+      else {
+        import_pending_ = false;
+        import_.reset();
+        plan_.reset();
+        problem_ = Problem{State::kFailed, finished->error()};
+      }
+      changed = true;
+    }
+  }
+  if (!nvidia_installed_ && backend_.NvidiaSdkArrived()) {
+    nvidia_installed_ = true;
+    backend_.Log("NVIDIA's Audio Effects SDK was installed since OBS's NVIDIA filters loaded without it.");
+  }
+  changed |= file_restart_ != before || updating_folders_.empty() == waiting_before ||
+             nvidia_installed_ != installed_before;
+  if (changed) Reconcile(now);
 }
 
 void Controller::Tick(Clock::time_point now) {
   if (stopped_) return;
-  bool changed = false;
-  if (file_restart_due_ && now >= *file_restart_due_) {
-    ReleaseUpdateFiles();
-    changed = true;
-  }
-  if (now >= next_file_check_) {
-    next_file_check_ = now + timing_.file_poll;
-    // Reconciled only for a change, not once a second for nothing.
-    const bool restart_before = file_restart_;
-    const bool waiting_before = !updating_folders_.empty();
-    const bool installed_before = nvidia_installed_;
-    CheckFileUpdates(now);
-    if (!updating_folders_.empty() && !file_restart_) {
-      const std::string fingerprint = backend_.FingerprintFolders(updating_folders_);
-      if (fingerprint != folder_fingerprint_) {
-        folder_fingerprint_ = fingerprint;
-        files_quiet_since_ = now;
-      }
-      const bool settled = now - files_quiet_since_ >= timing_.file_settle;
-      if (settled || now - file_wait_since_ >= timing_.file_wait_max) {
-        updating_folders_.clear();
-        backend_.Log(settled ? std::string("The updated files stopped changing. Importing OBS's settings again.")
-                             : std::format("The updated files kept changing for {}. Importing OBS's settings "
-                                           "again anyway.",
-                                           Minutes(now - file_wait_since_)));
-        ClearFailures();
-        devices_ = backend_.ListDevices();
-        Refresh(now);
-        changed = true;
-      }
-    }
-    // nv-filters looks for NVIDIA's SDK only as it loads, so nothing else
-    // would notice one installed since.
-    if (!nvidia_installed_ && backend_.NvidiaSdkArrived()) {
-      nvidia_installed_ = true;
-      backend_.Log("NVIDIA's Audio Effects SDK was installed since OBS's NVIDIA filters loaded without it.");
-    }
-    changed |= file_restart_ != restart_before || updating_folders_.empty() == waiting_before ||
-               nvidia_installed_ != installed_before;
-  }
+  bool changed = ReleaseIfDue(now);
   if (devices_due_ && now >= *devices_due_) {
     devices_due_.reset();
     devices_first_.reset();
@@ -241,8 +257,7 @@ std::optional<Controller::Clock::time_point> Controller::NextDeadline() const {
     if (time && (!next || *time < *next)) next = time;
   };
   consider(devices_due_);
-  consider(next_file_check_);
-  consider(file_restart_due_);
+  if (file_restart_ == FileRestart::kHolding) consider(file_restart_due_);
   if (loaded_) consider(next_check_);
   consider(retry_at_);
   return next;
@@ -254,17 +269,23 @@ void Controller::Stop() {
 }
 
 void Controller::CheckFileUpdates(Clock::time_point now) {
-  if (file_restart_) return;
+  if (file_restart_ != FileRestart::kNone) return;
   const FileUpdate update = backend_.FilesWanted();
   if (update.restart) {
     // The new process inherits the broken oplocks and releases them after
     // this process has exited. Stopping the chain doesn't unload the SDK.
-    file_restart_ = true;
+    file_restart_ = FileRestart::kHolding;
+    file_restart_nvidia_ = update.nvidia;
     // From now, not `now`: an import that took seconds may be how long ago
     // this check began.
     file_restart_due_ = std::max(now, timing_.clock()) + timing_.file_restart_wait;
+    snapshot_.files_held = true;
+    publish_(snapshot_);
   } else if (!update.folders.empty() && updating_folders_.empty()) {
-    // Unloads the plugins, waits for their folders, then lets the writer in.
+    // Publish before unloading: a plugin can take too long to close. The
+    // tray's own timer can explain the hold while the core is still busy.
+    snapshot_.files_held = true;
+    publish_(snapshot_);
     StopChain();
   }
 }
@@ -279,20 +300,26 @@ void Controller::WaitForFiles(std::vector<std::filesystem::path> folders, bool n
 }
 
 void Controller::ReleaseUpdateFiles() {
-  if (!file_restart_ || update_files_released_) return;
+  if (file_restart_ != FileRestart::kHolding) return;
   backend_.ReleaseUpdateFiles();
-  file_restart_due_.reset();
-  update_files_released_ = true;
+  file_restart_ = FileRestart::kReleased;
+}
+
+bool Controller::ReleaseIfDue(Clock::time_point now) {
+  if (file_restart_ != FileRestart::kHolding || now < file_restart_due_) return false;
+  ReleaseUpdateFiles();
+  return true;
 }
 
 void Controller::Refresh(Clock::time_point now) {
   CheckFileUpdates(now);
   // A re-import, OBS closing or a settings change cannot load files halfway
   // through an update. The eventual refresh uses the latest settings.
-  if (file_restart_ || !updating_folders_.empty()) return;
+  if (file_restart_ != FileRestart::kNone || !updating_folders_.empty()) return;
   problem_.reset();
-  import_.reset();
-  plan_.reset();
+  auto previous_import = std::exchange(import_, std::nullopt);
+  auto previous_plan = std::exchange(plan_, std::nullopt);
+  import_pending_ = false;
   obs_install_ = {};
   obs_writes_config_ = false;
   profile_cable_id_.clear();
@@ -363,7 +390,24 @@ void Controller::Refresh(Clock::time_point now) {
 
   auto imported = backend_.ImportMic(*config, settings_.mic);
   if (!imported) return fail(State::kFailed, imported.error());
-  import_ = std::move(*imported);
+  if (imported->pending && loaded_ && imported->restart == RestartNeed::kNone) {
+    // Keep the current chain and its description until the checks finish.
+    // An unchanged re-import must not interrupt audio just to check a file.
+    import_ = std::move(previous_import);
+    plan_ = std::move(previous_plan);
+  }
+  AcceptImport(std::move(*imported), now);
+}
+
+void Controller::AcceptImport(MicImport imported, Clock::time_point now) {
+  const auto fail = [this](State state, std::string detail, SetupNeed setup = SetupNeed::kNone,
+                           RestartNeed restart = RestartNeed::kNone) {
+    problem_ = Problem{state, std::move(detail), setup, restart};
+  };
+  import_pending_ = imported.pending;
+  CheckFileUpdates(std::max(now, timing_.clock()));
+  if (import_pending_ && loaded_ && imported.restart == RestartNeed::kNone) return;
+  import_ = std::move(imported);
   if (import_->restart == RestartNeed::kNvidiaInstalled) {
     // Kept apart from problem_, so that a new cable or another import can't
     // lose it.
@@ -371,6 +415,12 @@ void Controller::Refresh(Clock::time_point now) {
     nvidia_installed_ = true;
     return;
   }
+  if (import_->restart == RestartNeed::kNvidiaUnused) {
+    return fail(State::kRestartNeeded,
+                std::format("NVIDIA's noise removal is no longer needed. {} has to restart to free its memory.",
+                            kDisplayName), SetupNeed::kNone, RestartNeed::kNvidiaUnused);
+  }
+  if (import_->pending) return;
   if (!import_->mic) {
     return fail(State::kNeedsSetup, import_->pick_error,
                 import_->mics.empty() ? SetupNeed::kNoMic : SetupNeed::kPickMic);
@@ -407,9 +457,9 @@ void Controller::PlanChain() {
 
 void Controller::Reconcile(Clock::time_point now) {
   if (stopped_) return;
-  CheckFileUpdates(now);
   Snapshot next = Decide(now);
   const bool waiting = !updating_folders_.empty();
+  const auto restart_before = file_restart_;
   if (next.state != State::kRunning) {
     StopChain();
   } else if (!loaded_ || !loaded_->SameAs(*plan_) || (MicIsDefault() && loaded_default_mic_ != devices_.default_mic)) {
@@ -417,15 +467,15 @@ void Controller::Reconcile(Clock::time_point now) {
     // win-wasapi opens the device afresh.
     StopChain();
   }
-  if (!waiting && !updating_folders_.empty()) {
-    // Stopping the chain found an installer going for a plugin.
+  if ((!waiting && !updating_folders_.empty()) || restart_before != file_restart_ ||
+      (import_pending_ && !loaded_)) {
+    // Stopping found an installer, or checks must finish before a new load.
     next = Decide(now);
   } else if (next.state == State::kRunning && !loaded_) {
     ChainPlan plan = *plan_;
     plan.cable.name = CableName();
     const Status started = backend_.StartChain(plan);
     if (started) {
-      backend_.WatchChainFiles(&plan);
       // Not `now`: the import or the chain's start may have taken seconds.
       const Clock::time_point started_at = timing_.clock();
       loaded_ = std::move(plan);
@@ -468,6 +518,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   next.obs = obs_install_;
   next.obs_writes_config = obs_writes_config_;
   next.settings = settings_;
+  next.files_waiting = wait_for_nvidia_;
   if (import_) {
     next.mics = import_->mics;
     next.picked_mic = import_->picked;
@@ -480,19 +531,25 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.state = state;
     next.detail = std::move(detail);
   };
-  if (file_restart_) {
-    set(State::kRestartNeeded,
-        std::format("An installer is updating NVIDIA's Audio Effects SDK. {} has to restart to let it finish.",
-                    kDisplayName));
-    next.restart = RestartNeed::kNvidiaUpdating;
-    next.restart_delayed = update_files_released_;
-    if (update_files_released_) {
-      next.detail = std::format("{} couldn't restart yet, so it let the NVIDIA installer continue. "
+  if (file_restart_ != FileRestart::kNone) {
+    next.state = State::kRestartNeeded;
+    next.restart = file_restart_nvidia_ ? RestartNeed::kNvidiaUpdating : RestartNeed::kPluginUpdating;
+    next.restart_delayed = file_restart_ == FileRestart::kReleased;
+    next.files_held = file_restart_ == FileRestart::kHolding;
+    if (next.restart_delayed) {
+      next.detail = std::format("{} couldn't restart yet, so it let the installer continue. "
                                 "If the installer says a file is in use, quit {} and retry it.",
                                 kDisplayName, kDisplayName);
+    } else if (file_restart_nvidia_) {
+      next.detail = std::format("An installer is updating NVIDIA's Audio Effects SDK. {} has to restart to let it finish.",
+                                kDisplayName);
+    } else {
+      next.detail = std::format("An installer is updating a plugin {0} is using. {0} has to restart to let it finish.",
+                                kDisplayName);
     }
   } else if (!updating_folders_.empty()) {
-    set(State::kPausedForUpdate, "Waiting for the updated files to stop changing.");
+    set(libobs_ ? State::kPausedForUpdate : State::kStarting, "Waiting for the updated files to stop changing.");
+    next.files_waiting = true;
     next.nvidia_update = updating_nvidia_;
   } else if (nvidia_installed_) {
     set(State::kRestartNeeded,
@@ -504,6 +561,8 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     set(problem_->state, problem_->detail);
     next.setup = problem_->setup;
     next.restart = problem_->restart;
+  } else if (import_pending_ && !loaded_) {
+    set(paused_by_user_ ? State::kPausedByUser : State::kStarting, "Checking the mic's plugins…");
   } else if (chain_error_) {
     set(State::kFailed, *chain_error_);
   } else if (!devices_.error.empty()) {
@@ -530,14 +589,18 @@ Snapshot Controller::Decide(Clock::time_point now) const {
 void Controller::StopChain() {
   if (!loaded_) return;
   backend_.StopChain();
-  // An installer may have gone for a plugin since the last check, while the
-  // chain stopped for something else. Releasing the watches loses that, so
-  // wait for the plugins' folders before the writer is let in.
-  if (updating_folders_.empty() && !file_restart_) {
+  // The backend checks for late writers after unload, before releasing
+  // watches, and retains that result for the controller.
+  if (updating_folders_.empty() && file_restart_ == FileRestart::kNone) {
     FileUpdate update = backend_.FilesWanted();
-    if (!update.restart && !update.folders.empty()) WaitForFiles(std::move(update.folders), false, timing_.clock());
+    if (update.restart) {
+      file_restart_ = FileRestart::kHolding;
+      file_restart_nvidia_ = update.nvidia;
+      file_restart_due_ = timing_.clock() + timing_.file_restart_wait;
+    } else if (!update.folders.empty()) {
+      WaitForFiles(std::move(update.folders), false, timing_.clock());
+    }
   }
-  backend_.WatchChainFiles(nullptr);
   loaded_.reset();
 }
 

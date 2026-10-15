@@ -31,6 +31,8 @@
 #include "common/sha256.h"
 #include "common/wav.h"
 #include "compare/obs_run.h"
+#include "core/obs_backend.h"
+#include "core/controller.h"
 #include "import/mic_import.h"
 #include "import/obs_config.h"
 #include "import/obs_ini.h"
@@ -44,6 +46,7 @@
 #include "runtime/runtime_copy.h"
 #include "test_harness.h"
 #include "util/app_dirs.h"
+#include "util/async_probe.h"
 #include "util/files_in_use.h"
 #include "util/json.h"
 #include "util/process.h"
@@ -212,6 +215,239 @@ TEST(PeImportsRejectsNonBinaries) {
 }
 
 // --- Files in use --------------------------------------------------------------
+
+TEST(FileProbeCanBeAbandonedWhileItsWorkerWaits) {
+  using namespace std::chrono_literals;
+  auto release = std::make_shared<std::promise<void>>();
+  auto gate = release->get_future().share();
+  auto entered = std::make_shared<std::promise<void>>();
+  auto running = entered->get_future();
+  auto finished = std::make_shared<std::promise<void>>();
+  auto done = finished->get_future();
+  {
+    AsyncProbe<int> probe([gate, entered, finished]() -> Result<int> {
+      entered->set_value();
+      gate.wait();  // An offline share's file open, independent of the owner.
+      finished->set_value();
+      return 42;
+    });
+    CHECK(probe.Poll() == nullptr);
+    CHECK(running.wait_for(3s) == std::future_status::ready);
+    CHECK(probe.Poll() == nullptr);
+  }
+  // Destruction returned while the operation still waited; no owner or
+  // libobs objects are needed when it eventually finishes.
+  CHECK(done.wait_for(0s) == std::future_status::timeout);
+  release->set_value();
+  CHECK(done.wait_for(3s) == std::future_status::ready);
+  AsyncProbe<int> expired([]() -> Result<int> { return 7; }, 0s);
+  const auto result = expired.Poll();
+  CHECK(result && !*result && result->error() == "The file check took too long.");
+}
+
+struct WatchedBackend : core::ObsBackend {
+  WatchedBackend() : ObsBackend({}) {}
+  using ObsBackend::WatchNvidiaFiles;
+  using ObsBackend::WatchChainFiles;
+  using ObsBackend::ReleaseChainFiles;
+  fs::path fail_handoff;
+  bool incomplete_scan = false;
+  std::vector<std::string> logs;
+  void Log(std::string_view line) override { logs.emplace_back(line); }
+  Status PrepareFileHandoff(FileOplock& file) override {
+    if (SamePath(file.file(), fail_handoff)) return Error{"The scratch file could not be handed over."};
+    return file.PrepareHandoff();
+  }
+  std::vector<fs::path> ListLoadedFiles(bool* complete = nullptr) override {
+    if (!incomplete_scan) return ObsBackend::ListLoadedFiles(complete);
+    if (complete) *complete = false;
+    return {};
+  }
+};
+
+fs::path ScratchDependency() {
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+    if (entry.path().filename() == L"knobs-test-dep.dll") return entry.path();
+  }
+  return {};
+}
+
+bool WaitForBackendWriter(WatchedBackend& backend) {
+  const ULONGLONG until = GetTickCount64() + 3000;
+  while (GetTickCount64() < until) {
+    const auto update = backend.FilesWanted();
+    if (update.restart || !update.folders.empty()) return true;
+    Sleep(5);
+  }
+  return false;
+}
+
+TEST(ObsBackendHandsOffScratchSdkAndRestartsAfterAPartialFailure) {
+  using namespace std::chrono_literals;
+  const fs::path dependency = ScratchDependency();
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  for (const bool fail : {false, true}) {
+    TempDir dir(fail ? L"backend-partial" : L"backend-handoff");
+    const fs::path first = dir.path / L"first.dll", second = dir.path / L"second.dll";
+    fs::copy_file(dependency, first);
+    fs::copy_file(dependency, second);
+    const HMODULE a = LoadLibraryW(first.c_str()), b = LoadLibraryW(second.c_str());
+    CHECK(a && b);
+    WatchedBackend backend;
+    backend.WatchNvidiaFiles(dir.path);
+    if (fail) backend.fail_handoff = second;
+    std::atomic<bool> renamed = false;
+    std::thread writer([&] { renamed = MoveFileW(first.c_str(), (dir.path / L"updated.dll").c_str()) != FALSE; });
+    CHECK(WaitForBackendWriter(backend));
+    core::Controller controller(backend, {}, [](const auto&) {});
+    std::vector<HANDLE> inherited;
+    bool started = false;
+    const Status restart = controller.Restart([&](const core::RestartFiles& files) -> Status {
+      started = true;
+      CHECK(files.incomplete == fail);
+      CHECK(files.handles.size() == (fail ? 1 : 2));
+      CHECK(files.folders.size() == 1 && SamePath(files.folders.front(), dir.path));
+      for (const auto value : files.handles) {
+        HANDLE duplicate = nullptr;
+        CHECK(DuplicateHandle(GetCurrentProcess(), reinterpret_cast<HANDLE>(value), GetCurrentProcess(),
+                              &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS));
+        if (duplicate) inherited.push_back(duplicate);
+      }
+      return Ok{};
+    }, core::Controller::Clock::now());
+    CHECK(restart && started && !renamed);
+    CHECK(fail == !backend.logs.empty());
+    FreeLibrary(a);
+    FreeLibrary(b);
+    CHECK(!renamed);  // The replacement's duplicates still own the hold.
+    for (const HANDLE handle : inherited) CloseHandle(handle);
+    writer.join();
+    CHECK(renamed);
+  }
+}
+
+TEST(ObsBackendWatchesWrapperDependenciesAndRetainsLoadedOnes) {
+  const fs::path dependency = ScratchDependency();
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  for (const bool retained : {false, true}) {
+    TempDir dir(retained ? L"wrapper-retained" : L"wrapper-unloaded");
+    const fs::path file = dir.path / L"processing.dll";
+    fs::copy_file(dependency, file);
+    const HMODULE module = LoadLibraryW(file.c_str());
+    CHECK(module != nullptr);
+    WatchedBackend backend;
+    core::ChainPlan plan;
+    // The chain's named wrapper is elsewhere; processing.dll is still watched.
+    plan.vst_plugins = {dir.path / L"wrapper" / L"shell.dll"};
+    backend.WatchChainFiles(plan);
+    std::atomic<bool> renamed = false;
+    std::thread writer([&] { renamed = MoveFileW(file.c_str(), (dir.path / L"updated.dll").c_str()) != FALSE; });
+    CHECK(WaitForBackendWriter(backend));
+    CHECK(!renamed);
+    if (!retained) FreeLibrary(module);
+    backend.ReleaseChainFiles();
+    const auto update = backend.FilesWanted();
+    CHECK(update.restart == retained);
+    if (retained) {
+      CHECK(!update.nvidia && !renamed);
+      const auto files = backend.UpdateFileHandles();
+      CHECK(files.handles.size() == 1 && !files.incomplete);
+      FreeLibrary(module);
+      backend.ReleaseUpdateFiles();
+    } else {
+      CHECK(update.folders.size() == 1 && SamePath(update.folders.front(), dir.path));
+    }
+    writer.join();
+    CHECK(renamed);
+  }
+}
+
+TEST(ObsBackendWatchesDependenciesOutsideTheSdkFolder) {
+  const fs::path dependency = ScratchDependency();
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  TempDir sdk(L"sdk-dependencies"), other(L"sdk-other-folder");
+  const fs::path file = other.path / L"processing.dll";
+  fs::copy_file(dependency, file);
+  WatchedBackend backend;
+  backend.WatchNvidiaFiles(sdk.path);
+  // A delayed load in another folder is found by the regular OBS tick,
+  // even without a VST chain or a loaded DLL in the SDK's own folder.
+  const HMODULE module = LoadLibraryW(file.c_str());
+  CHECK(module != nullptr);
+  backend.PollFileWatches();
+  std::atomic<bool> renamed = false;
+  std::thread writer([&] { renamed = MoveFileW(file.c_str(), (other.path / L"updated.dll").c_str()) != FALSE; });
+  CHECK(WaitForBackendWriter(backend));
+  const auto update = backend.FilesWanted();
+  CHECK(update.restart && !renamed);
+  const auto files = backend.UpdateFileHandles();
+  CHECK(files.handles.size() == 1 && files.folders.size() == 1);
+  CHECK(!files.incomplete && SamePath(files.folders.front(), other.path));
+  FreeLibrary(module);
+  backend.ReleaseUpdateFiles();
+  writer.join();
+  CHECK(renamed);
+}
+
+TEST(ObsBackendKeepsUnloadedPluginFoldersThroughAnSdkRestart) {
+  const fs::path dependency = ScratchDependency();
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  TempDir sdk(L"mixed-update-sdk"), plugin(L"mixed-update-plugin");
+  const fs::path sdk_file = sdk.path / L"sdk.dll", plugin_file = plugin.path / L"plugin.dll";
+  fs::copy_file(dependency, sdk_file);
+  fs::copy_file(dependency, plugin_file);
+  const HMODULE sdk_module = LoadLibraryW(sdk_file.c_str());
+  WatchedBackend backend;
+  backend.WatchNvidiaFiles(sdk.path);
+  const HMODULE plugin_module = LoadLibraryW(plugin_file.c_str());
+  CHECK(sdk_module && plugin_module);
+  core::ChainPlan plan;
+  plan.vst_plugins = {plugin_file};
+  backend.WatchChainFiles(plan);
+  std::thread writer([&] { MoveFileW(sdk_file.c_str(), (sdk.path / L"updated.dll").c_str()); });
+  CHECK(WaitForBackendWriter(backend));
+  FreeLibrary(plugin_module);
+  backend.ReleaseChainFiles();
+  CHECK(backend.FilesWanted().restart);
+  const auto handed = backend.UpdateFileHandles();
+  CHECK(ContainsPath(handed.folders, sdk.path));
+  CHECK(ContainsPath(handed.folders, plugin.path));
+  backend.ReleaseUpdateFiles();
+  const auto retried = backend.UpdateFileHandles();
+  CHECK(retried.handles.empty() && retried.folders == handed.folders);
+  FreeLibrary(sdk_module);
+  writer.join();
+}
+
+TEST(ObsBackendRetainsWatchesWhenAModuleScanIsIncomplete) {
+  const fs::path dependency = ScratchDependency();
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  TempDir dir(L"incomplete-module-scan");
+  const fs::path file = dir.path / L"processing.dll";
+  fs::copy_file(dependency, file);
+  const HMODULE module = LoadLibraryW(file.c_str());
+  CHECK(module != nullptr);
+  WatchedBackend backend;
+  core::ChainPlan plan;
+  plan.vst_plugins = {file};
+  backend.WatchChainFiles(plan);
+  backend.incomplete_scan = true;
+  backend.ReleaseChainFiles();
+  std::atomic<bool> renamed = false;
+  std::thread writer([&] { renamed = MoveFileW(file.c_str(), (dir.path / L"updated.dll").c_str()) != FALSE; });
+  CHECK(WaitForBackendWriter(backend));
+  CHECK(backend.FilesWanted().restart && !renamed);
+  CHECK(backend.UpdateFileHandles().handles.size() == 1);
+  FreeLibrary(module);
+  backend.ReleaseUpdateFiles();
+  writer.join();
+  CHECK(renamed);
+}
 
 bool WaitUntilWanted(FileOplock& watch) {
   const ULONGLONG deadline = GetTickCount64() + 3000;
@@ -1688,13 +1924,17 @@ TEST(ConfigRootKeepsToAPickedFolder) {
   CHECK(!import::ObsConfigRootFor(dir.path / L"installed", install / L"config")->obs_writes_here);
 }
 
-TEST(SameFolderComparesAsWindowsDoes) {
-  CHECK(import::SameFolder(L"C:\\Users\\you\\AppData\\Roaming", L"c:\\users\\YOU\\appdata\\roaming\\"));
-  CHECK(import::SameFolder(L"E:/Portable/config", L"E:\\Portable\\config"));
-  CHECK(import::SameFolder(L"E:\\Portable\\obs\\..\\config", L"E:\\Portable\\config"));
-  CHECK(!import::SameFolder(L"E:\\Portable\\config", L"E:\\Portable\\config2"));
-  CHECK(!import::SameFolder(L"E:\\Portable\\config", L""));
-  CHECK(!import::SameFolder(L"", L""));
+TEST(SamePathComparesAsWindowsDoes) {
+  CHECK(SamePath(L"a/", L"A"));
+  CHECK(SamePath(L"ab/", L"ab"));
+  CHECK(SamePath(L"C:/", L"c:\\"));
+  CHECK(!SamePath(L"C:", L"C:\\"));
+  CHECK(SamePath(L"C:\\Users\\you\\AppData\\Roaming", L"c:\\users\\YOU\\appdata\\roaming\\"));
+  CHECK(SamePath(L"E:/Portable/config", L"E:\\Portable\\config"));
+  CHECK(SamePath(L"E:\\Portable\\obs\\..\\config", L"E:\\Portable\\config"));
+  CHECK(!SamePath(L"E:\\Portable\\config", L"E:\\Portable\\config2"));
+  CHECK(!SamePath(L"E:\\Portable\\config", L""));
+  CHECK(!SamePath(L"", L""));
 }
 
 TEST(ConfigReportsWhatsMissing) {
@@ -2071,6 +2311,9 @@ TEST(EnvelopeIgnoresFramesOffTheGrid) {
 int wmain(int argc, wchar_t** argv) {
   using knobs::test::g_failures;
   using knobs::test::Tests;
+  if (argc == 4 && std::wstring_view(argv[1]) == L"--tray-shutdown") {
+    return knobs::test::RunShutdownHelper(argv[2], argv[3]);
+  }
   if (argc == 5 && std::wstring_view(argv[1]) == L"--hold-dll") {
     return HoldDllForUpdate(argv[2], argv[3], argv[4]);
   }
