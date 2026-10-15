@@ -59,7 +59,7 @@ class ShutdownBackend : public tools::FakeBackend {
   }
 
   Result<core::MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override {
-    if (mode_ == L"busy") {
+    if (mode_ == L"busy" || mode_ == L"hold-busy") {
       entered_.set_value();
       Sleep(INFINITE);
     }
@@ -73,7 +73,10 @@ class ShutdownBackend : public tools::FakeBackend {
   }
 
   void StopChain() override {
-    if (mode_ == L"stop") Sleep(INFINITE);
+    if (mode_ == L"stop" || mode_ == L"hold-stop") {
+      Note(folder_ / L"stopping", "stopping");
+      Sleep(INFINITE);
+    }
     FakeBackend::StopChain();
   }
 
@@ -150,6 +153,48 @@ TEST(TrayForcedQuitPreservesTheInstallersHandoff) {
   fs::remove_all(folder);
 }
 
+TEST(FileWatchdogWarnsAndReleasesWhileTheCoreIsStuck) {
+  for (const std::wstring mode : {L"hold-busy", L"hold-stop"}) {
+    const fs::path folder = fs::temp_directory_path() /
+        std::format(L"knobs-tests-{}-{}", GetCurrentProcessId(), mode);
+    fs::create_directories(folder);
+    fs::path dependency;
+    for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+      if (entry.path().filename() == L"knobs-test-dep.dll") dependency = entry.path();
+    }
+    CHECK(!dependency.empty());
+    if (dependency.empty()) return;
+    const fs::path file = folder / L"loaded.dll";
+    fs::copy_file(dependency, file, fs::copy_options::overwrite_existing);
+    auto child = StartProcessToWait(SelfPath(), std::format(L"--tray-shutdown {} \"{}\"", mode, folder.native()), folder);
+    CHECK(child.ok());
+    if (!child) continue;
+    CHECK(WaitForFile(folder / (mode == L"hold-stop" ? L"stopping" : L"ready")));
+    auto writer = std::async(std::launch::async, [&] {
+      const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+      const DWORD error = out == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+      if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
+      return error;
+    });
+    const bool released = writer.wait_for(3s) == std::future_status::ready;
+    CHECK(released);
+    CHECK(WaitForFile(folder / L"waiting"));
+    CHECK(WaitForFile(folder / L"released"));
+    CHECK(WaitForSingleObject(*child, 0) == WAIT_TIMEOUT);  // No Quit was needed to release the installer.
+    const HWND window = FindWindowW(std::format(L"knobs-tests-{}-shutdown", GetProcessId(*child)).c_str(), nullptr);
+    CHECK(window != nullptr);
+    PostMessageW(window, WM_CLOSE, 0, 0);
+    if (WaitForSingleObject(*child, 5000) != WAIT_OBJECT_0) {
+      CHECK(false);
+      TerminateProcess(*child, 1);
+      WaitForSingleObject(*child, 5000);
+    }
+    CloseHandle(*child);
+    CHECK(writer.get() == ERROR_SHARING_VIOLATION);
+    fs::remove_all(folder);
+  }
+}
+
 }  // namespace
 
 int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folder_arg) {
@@ -157,10 +202,10 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   const fs::path folder = folder_arg;
   if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 1;
   std::unique_ptr<FileOplock> watch;
-  if (mode == L"restart") {
+  if (mode == L"restart" || mode.starts_with(L"hold-")) {
     const fs::path file = folder / L"loaded.dll";
     if (!LoadLibraryW(file.c_str())) return 2;
-    auto taken = FileOplock::Take(file);
+    auto taken = mode == L"restart" ? FileOplock::Take(file) : FileOplock::Take(file, 500ms, 50ms);
     if (!taken) return 3;
     watch = std::move(*taken);
   }
@@ -194,7 +239,12 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
     if (!Shell_NotifyIconW(NIM_MODIFY, &icon)) Note(folder / L"log", "icon removed");
   };
   options.on_snapshot = [&](const core::Snapshot& snapshot) {
-    if (snapshot.state == core::State::kRunning) core->Reimport();
+    if (mode == L"restart" && snapshot.state == core::State::kRunning) core->Reimport();
+  };
+  options.on_notice = [&](const std::optional<tray::Notice>& notice) {
+    if (notice && notice->kind == tray::Notice::Kind::kFileHold) {
+      Note(folder / (notice->title == "An installer is waiting" ? L"waiting" : L"released"), notice->text);
+    }
   };
   options.restart = [&](core::RestartNeed, bool, const core::RestartFiles&) -> Status {
     const auto due = std::chrono::steady_clock::now() + 5s;
@@ -208,8 +258,9 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   if (!app) return 4;
   window = (*app)->window();
   if (ready.wait_for(3s) != std::future_status::ready) return 5;
-  if (mode == L"restart") {
+  if (mode == L"restart" || mode.starts_with(L"hold-")) {
     Note(folder / L"ready", "ready");
+    if (mode == L"hold-stop") core->Pause();
     (*app)->Run();
   } else {
     (*app)->Quit();

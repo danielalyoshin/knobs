@@ -147,6 +147,8 @@ class Notifier {
   // Quit is already underway. A held installer's advice must not ask the
   // user to quit again, even if its warning was shown before this call.
   Update Quitting();
+  // The file watchdog reports directly, even when the core cannot publish.
+  Update FileHold(bool waiting, bool released);
   // Does what's due by `now` (NextDeadline), and shows what Say held back
   // if it's no longer quiet.
   Update Tick(bool quiet, Clock::time_point now);
@@ -199,6 +201,8 @@ class Notifier {
   core::Snapshot snapshot_;
   bool started_ = false;
   bool quitting_ = false;
+  bool watch_waiting_ = false;
+  bool watch_released_ = false;
   std::optional<Clock::time_point> hold_due_;
   std::optional<Missing> mic_;
   std::optional<Missing> cable_;

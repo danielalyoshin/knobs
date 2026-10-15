@@ -401,7 +401,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   if (snapshot.files_held && !before.files_held) hold_due_ = now + options_.file_hold_grace;
   if (!snapshot.files_held) {
     hold_due_.reset();
-    Hide(Kind::kFileHold, update);
+    if (!watch_waiting_ && !watch_released_) Hide(Kind::kFileHold, update);
   }
   if (options_.handoff_failed) {
     options_.handoff_failed = false;
@@ -555,7 +555,16 @@ Notifier::Update Notifier::RestartWaits(RestartWait window, Clock::time_point no
 
 namespace {
 
-Notice FileHoldNotice(bool quitting) {
+Notice FileHoldNotice(bool quitting, bool released = false) {
+  if (released) {
+    return Notice{.kind = Notice::Kind::kFileHold,
+                  .title = "An installer may need to try again",
+                  .text = quitting
+                      ? std::format("{} is closing. Once it has closed, retry the installer if it still can't continue.", kDisplayName)
+                      : std::format("A file may still be in use. If the installer can't continue, quit {}, "
+                                    "wait for it to close, then retry it.", kDisplayName),
+                  .sound = true};
+  }
   return Notice{.kind = Notice::Kind::kFileHold,
                 .title = "An installer is waiting",
                 .text = quitting
@@ -571,7 +580,21 @@ Notice FileHoldNotice(bool quitting) {
 Notifier::Update Notifier::Quitting() {
   quitting_ = true;
   Update update;
-  if (shown_ && shown_->kind == Kind::kFileHold) Show(FileHoldNotice(true), false, update);
+  if (shown_ && shown_->kind == Kind::kFileHold) Show(FileHoldNotice(true, watch_released_), false, update);
+  return update;
+}
+
+Notifier::Update Notifier::FileHold(bool waiting, bool released) {
+  Update update;
+  if (watch_waiting_ == waiting && watch_released_ == released) return update;
+  watch_waiting_ = waiting;
+  watch_released_ = released;
+  if (waiting || released) {
+    hold_due_.reset();
+    Show(FileHoldNotice(quitting_, released), false, update);
+  } else if (!snapshot_.files_held) {
+    Hide(Kind::kFileHold, update);
+  }
   return update;
 }
 
@@ -579,7 +602,7 @@ Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   Update update;
   if (hold_due_ && now >= *hold_due_) {
     hold_due_.reset();
-    Show(FileHoldNotice(quitting_), false, update);
+    Show(FileHoldNotice(quitting_, watch_released_), false, update);
     return update;
   }
   if (mic_ && mic_->running_since && now - *mic_->running_since >= options_.mic_back_after) {

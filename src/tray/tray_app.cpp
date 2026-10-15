@@ -40,6 +40,7 @@ constexpr UINT kErrorMessage = WM_APP + 6;  // Show later_error_.
 // The installer this copy started ended without closing it, with its exit
 // code in wParam.
 constexpr UINT kInstallerMessage = WM_APP + 7;
+constexpr UINT kFileHoldMessage = WM_APP + 8;
 constexpr UINT_PTR kNoticeTimer = 1;   // Notifier::NextDeadline.
 constexpr UINT_PTR kRestartTimer = 2;  // RestartByItself, while a window is open.
 constexpr UINT_PTR kUpdateTimer = 3;   // Updater::NextDeadline.
@@ -183,6 +184,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   app->LoadIcons();
   ApplyMenuTheme(opts.theme);
   app->AddIcon();
+  WatchFileHolds(reinterpret_cast<uintptr_t>(app->window_), kFileHoldMessage);
 
   // An update downloaded before installs now, before knobs sends the mic:
   // once knobs runs, it waits for a moment the mic isn't sent anyway.
@@ -216,6 +218,7 @@ TrayApp::TrayApp(TrayOptions options)
 
 TrayApp::~TrayApp() {
   Quit();
+  StopWatchingFileHolds(reinterpret_cast<uintptr_t>(window_));
   StopWaitingForInstaller();
   DestroyIcons();
 }
@@ -241,6 +244,7 @@ void TrayApp::Quit() {
   if (core_) {
     core_->RequestStop();
     while (!core_->stopped()) {
+      FollowFileHolds();
       // The replacement still holds an installer through process exit. A
       // slow plugin or libobs shutdown must not silence the tray's deadline.
       const auto now = Clock::now();
@@ -258,6 +262,7 @@ void TrayApp::Quit() {
     core_.reset();
   }
   StopUpdates();
+  StopWatchingFileHolds(reinterpret_cast<uintptr_t>(window_));
   RemoveIcon();
   if (window_) DestroyWindow(window_);
 }
@@ -310,6 +315,9 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     return 0;
   }
   switch (message) {
+    case kFileHoldMessage:
+      FollowFileHolds();
+      return 0;
     case kTrayMessage:
       switch (LOWORD(lparam)) {
         case NIN_SELECT:
@@ -559,6 +567,21 @@ void TrayApp::HideBalloon() {
   NOTIFYICONDATAW data = {sizeof(data)};
   data.uFlags = NIF_INFO;
   ModifyIcon(data);
+}
+
+void TrayApp::FollowFileHolds() {
+  const FileHoldStatus holds = FileHolds();
+  if (holds == file_holds_) return;
+  Notify(notifier_.FileHold(holds.waiting, !holds.released.empty()));
+  for (const auto& file : holds.released) {
+    if (std::find(file_holds_.released.begin(), file_holds_.released.end(), file) == file_holds_.released.end()) {
+      Log(std::format("The file hold expired for {}. The installer may need to retry after the app closes.", ToUtf8(file)));
+    }
+  }
+  for (const auto& error : holds.errors) {
+    if (std::find(file_holds_.errors.begin(), file_holds_.errors.end(), error) == file_holds_.errors.end()) Log(error);
+  }
+  file_holds_ = holds;
 }
 
 bool TrayApp::Quiet() const { return setup_window_ != nullptr || setup_due_; }

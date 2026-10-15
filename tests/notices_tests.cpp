@@ -1036,6 +1036,22 @@ TEST(HeldInstallerAdviceChangesWhenQuitBegins) {
   }
 }
 
+TEST(FileWatchdogWarnsWithoutSnapshotsAndSurvivesAStaleSnapshot) {
+  Notifier notifier;
+  const auto waiting = notifier.FileHold(true, false);
+  CHECK(waiting.show && waiting.show->title == "An installer is waiting");
+  core::Snapshot stale;
+  stale.state = State::kStarting;
+  CHECK(!notifier.Changed(stale, true, Clock::time_point{}).hide);
+  CHECK(!notifier.FileHold(true, false).show);
+  const auto released = notifier.FileHold(false, true);
+  CHECK(released.show && released.show->title == "An installer may need to try again");
+  CHECK(released.show && FromUtf8(released.show->text).size() <= 160);
+  const auto quitting = notifier.Quitting();
+  CHECK(quitting.show && quitting.show->text.find("is closing") != std::string::npos);
+  CHECK(notifier.FileHold(false, false).hide);
+}
+
 TEST(NewCopyExplainsAFailedHandoffAndDoesNotClaimItProtectedTheInstaller) {
   Notifier notifier({.restarted_for = core::RestartNeed::kNvidiaUpdating, .handoff_failed = true});
   core::Snapshot snapshot;

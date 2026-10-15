@@ -29,6 +29,7 @@
 #include "update/release.h"
 #include "update/signature.h"
 #include "util/result.h"
+#include "util/files_in_use.h"
 
 // The tray icon and its menu (docs/design.md, The tray app). It runs the core
 // and shows its state: the icon's tooltip and the menu's first line are the
@@ -194,6 +195,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void DestroyIcons();
   void AddIcon();
   void RemoveIcon();
+  void FollowFileHolds();
   // Changes the icon as `data` says, with the tooltip.
   void ModifyIcon(NOTIFYICONDATAW& data);
   void UpdateTip();
@@ -314,6 +316,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   SetupWindow* setup_window_ = nullptr;  // While it's open.
   bool setup_due_ = false;               // Asked to open, by kFirstRunMessage.
   Notifier notifier_;
+  FileHoldStatus file_holds_;
   // The warnings the notifications have said, as last saved.
   std::optional<std::vector<std::string>> warned_;
   // The reason a restart was tried for, since the core said it needs one.
