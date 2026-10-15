@@ -90,6 +90,35 @@ class RuntimeCopyLock {
 Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install,
                                       const std::filesystem::path& runtime_base, bool force);
 
+// What AddInstallDlls did.
+struct AddedDlls {
+  struct Added {
+    std::filesystem::path from;  // In the install's bin\64bit.
+    std::filesystem::path to;    // In the copy's.
+  };
+  std::vector<Added> added;
+  // The DLLs that wouldn't copy, each with why.
+  std::vector<std::string> errors;
+};
+
+// Copies DLLs a VST plugin imports into the runtime copy's bin\64bit from the
+// install's, where the loader finds them in OBS, as OBS's program's folder:
+// each of `names` that the loader wouldn't find in `folders`, the folders it
+// searches, nor in the copy's bin\64bit, with the DLLs it imports, directly
+// or not, that are likewise only in the install. The plugin then loads as it
+// does in OBS. A name one of whose DLLs imports a DLL found nowhere, which
+// OBS couldn't load either, gets nothing copied. Each file is copied whole
+// under another name, then renamed into place, so an interrupted copy leaves
+// none half written, and one that's there already, as another process
+// added, is left alone. Holds the RuntimeCopyLock named `lock` while it
+// copies. Loads nothing: it reads the install's DLLs' import tables, as
+// PlanRuntimeCopy does. The copy's manifest doesn't list what it adds, so
+// EnsureRuntimeCopy reuses the copy as before, and one made again goes
+// without them until they're added again.
+AddedDlls AddInstallDlls(const std::filesystem::path& install_root, const std::filesystem::path& copy_root,
+                         const std::vector<std::string>& names, const std::vector<std::filesystem::path>& folders,
+                         const std::wstring& lock = RuntimeCopyLockName());
+
 struct PrunedCopies {
   struct Left {
     std::filesystem::path folder;

@@ -23,6 +23,7 @@ namespace knobs::runtime {
   X(bfree)                                    \
   X(bnum_allocs)                              \
   X(base_set_log_handler)                     \
+  X(blog)                                     \
   /* Lifecycle */                             \
   X(obs_startup)                              \
   X(obs_shutdown)                             \

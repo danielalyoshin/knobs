@@ -29,7 +29,7 @@ Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
     log->set_echo(options.verbose);
     log->set_verbose(options.verbose);
   }
-  auto runtime = ObsRuntime::Load(copy->root, install->version);
+  auto runtime = ObsRuntime::Load(copy->root, *install);
   copy_lock.reset();
   if (!runtime) return Error{runtime.error()};
 

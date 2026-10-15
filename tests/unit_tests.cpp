@@ -36,6 +36,7 @@
 #include "import/obs_ini.h"
 #include "runtime/obs_api.h"
 #include "runtime/obs_install.h"
+#include "runtime/obs_layout.h"
 #include "runtime/obs_log.h"
 #include "runtime/obs_runtime.h"
 #include "runtime/obs_version.h"
@@ -1207,6 +1208,104 @@ TEST(PruneTouchesOnlyItsOwnFolders) {
   CHECK(fs::exists(local / L"logs" / L"core 2026-10-05.txt"));
 }
 
+// --- DLLs added from the install -----------------------------------------------
+
+// knobs-test-dep.dll, which knobs-test-needs-dep.dll imports, in a folder of
+// its own (CMakeLists.txt).
+fs::path TestDepDll() {
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+    if (entry.path().filename() == L"knobs-test-dep.dll") return entry.path();
+  }
+  return {};
+}
+
+fs::path SystemFolder() {
+  wchar_t system[MAX_PATH] = {};
+  GetSystemDirectoryW(system, MAX_PATH);
+  return system;
+}
+
+TEST(AddInstallDllsCopiesWhatOnlyTheInstallHas) {
+  // A scratch install whose bin\64bit has knobs-test-needs-dep.dll, which
+  // imports knobs-test-dep.dll, also there, and a runtime copy with neither,
+  // as with a DLL OBS ships that nothing knobs loads imports.
+  const fs::path dependency = TestDepDll();
+  CHECK(!dependency.empty() && !GetModuleHandleW(L"knobs-test-dep.dll"));
+  if (dependency.empty()) return;
+  TempDir dir(L"install-dlls");
+  const fs::path install = dir.path / L"obs";
+  const fs::path copy = dir.path / L"runtime" / L"32.2.2";
+  fs::create_directories(BinDir(install));
+  fs::create_directories(BinDir(copy));
+  fs::copy_file(SelfPath().parent_path() / L"knobs-test-needs-dep.dll", BinDir(install) / L"knobs-test-needs-dep.dll");
+  fs::copy_file(dependency, BinDir(install) / L"knobs-test-dep.dll");
+  const std::vector<fs::path> folders = {BinDir(copy), SystemFolder()};
+
+  // A plugin that imports knobs-test-needs-dep.dll gets it, and what it
+  // imports in turn.
+  AddedDlls added = AddInstallDlls(install, copy, {"knobs-test-needs-dep.dll"}, folders, TestCopyLock());
+  CHECK(added.errors.empty() && added.added.size() == 2);
+  if (added.added.size() == 2) {
+    CHECK(added.added[0].from == BinDir(install) / L"knobs-test-needs-dep.dll");
+    CHECK(added.added[0].to == BinDir(copy) / L"knobs-test-needs-dep.dll");
+    CHECK(added.added[1].to == BinDir(copy) / L"knobs-test-dep.dll");
+  }
+  auto missing = UnresolvedDllImports(BinDir(copy) / L"knobs-test-needs-dep.dll", folders);
+  CHECK(missing.ok() && missing->empty());
+  // Copied whole, with nothing left beside them.
+  CHECK(fs::file_size(BinDir(copy) / L"knobs-test-dep.dll") == fs::file_size(dependency));
+  CHECK(Names(BinDir(copy)) == (std::vector<std::wstring>{L"knobs-test-dep.dll", L"knobs-test-needs-dep.dll"}));
+  // There already: nothing to do.
+  added = AddInstallDlls(install, copy, {"knobs-test-needs-dep.dll", "knobs-test-dep.dll"}, folders, TestCopyLock());
+  CHECK(added.added.empty() && added.errors.empty());
+}
+
+TEST(AddInstallDllsLeavesOutWhatWouldStillNotLoad) {
+  const fs::path dependency = TestDepDll();
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  TempDir dir(L"install-dlls-missing");
+  const fs::path install = dir.path / L"obs";
+  const fs::path copy = dir.path / L"runtime" / L"32.2.2";
+  fs::create_directories(BinDir(install));
+  fs::create_directories(BinDir(copy));
+  const std::vector<fs::path> folders = {BinDir(copy), SystemFolder()};
+  // The install has knobs-test-needs-dep.dll, but nowhere has the DLL it
+  // imports, so it wouldn't load in OBS either: nothing is copied, and the
+  // plugin's warning stays.
+  fs::copy_file(SelfPath().parent_path() / L"knobs-test-needs-dep.dll", BinDir(install) / L"knobs-test-needs-dep.dll");
+  AddedDlls added = AddInstallDlls(install, copy, {"knobs-test-needs-dep.dll"}, folders, TestCopyLock());
+  CHECK(added.added.empty() && added.errors.empty() && fs::is_empty(BinDir(copy)));
+  // Nor is a DLL the install doesn't have, or a name that would reach outside
+  // its bin\64bit.
+  fs::copy_file(dependency, install / L"knobs-test-dep.dll");
+  added = AddInstallDlls(install, copy, {"missing.dll", "..\\..\\knobs-test-dep.dll", "../../knobs-test-dep.dll"},
+                         folders, TestCopyLock());
+  CHECK(added.added.empty() && added.errors.empty() && fs::is_empty(BinDir(copy)));
+  CHECK(!fs::exists(dir.path / L"knobs-test-dep.dll") && !fs::exists(dir.path / L"runtime" / L"knobs-test-dep.dll"));
+}
+
+TEST(EnsureReusesACopyWithDllsAddedFromTheInstall) {
+  // The copy's manifest doesn't list what pre-flight added, so the copy is
+  // still intact, and it keeps them.
+  const fs::path dependency = TestDepDll();
+  CHECK(!dependency.empty());
+  if (dependency.empty()) return;
+  TempDir dir(L"copy-added");
+  const ObsInstall install{MakeFakeInstall(dir.path / L"obs"), {32, 2, 2}};
+  fs::copy_file(dependency, BinDir(install.root) / L"knobs-test-dep.dll");  // Nothing imports it.
+  const fs::path base = dir.path / L"runtime";
+  auto copy = EnsureRuntimeCopy(install, base, false);
+  CHECK(copy.ok() && !fs::exists(BinDir(copy->root) / L"knobs-test-dep.dll"));
+  if (!copy) return;
+  const std::vector<fs::path> folders = {BinDir(copy->root), SystemFolder()};
+  const AddedDlls added = AddInstallDlls(install.root, copy->root, {"knobs-test-dep.dll"}, folders, TestCopyLock());
+  CHECK(added.added.size() == 1 && added.errors.empty());
+  auto again = EnsureRuntimeCopy(install, base, false);
+  CHECK(again.ok() && again->reused && again->file_count == copy->file_count);
+  CHECK(fs::exists(BinDir(copy->root) / L"knobs-test-dep.dll"));
+}
+
 // --- Runtime load --------------------------------------------------------------
 
 TEST(FailedLoadRestoresWorkingDirectory) {
@@ -1215,8 +1314,8 @@ TEST(FailedLoadRestoresWorkingDirectory) {
   // none of the libobs functions.
   const fs::path root = MakeFakeInstall(dir.path / L"runtime");
   const fs::path before = fs::current_path();
-  auto runtime = ObsRuntime::Load(root, {32, 2, 2});
-  CHECK(!runtime.ok());
+  auto runtime = ObsRuntime::Load(root, {root, {32, 2, 2}});
+  CHECK(!runtime.ok() && !LoadedRuntimeCopy());
   CHECK(!runtime.ok() && runtime.error().find("missing") != std::string::npos);
   CHECK(fs::current_path() == before);
 }

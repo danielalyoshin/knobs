@@ -3,8 +3,10 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 #include "runtime/obs_api.h"
+#include "runtime/obs_install.h"
 #include "runtime/obs_version.h"
 #include "util/result.h"
 
@@ -39,10 +41,11 @@ class ObsRuntime {
   // once at startup, so plain LoadLibrary calls skip PATH and the working
   // directory too, and SetObsProcessPolicies.
   //
-  // `install_version` is the version of the install the copy was made from
-  // (ObsInstall::version), which decides where its modules are.
+  // `install` is the install the copy was made from. Its version decides
+  // where the copy's modules are, and pre-flight copies the DLLs a VST
+  // plugin needs that only its bin\64bit has (LoadedRuntimeCopy).
   static Result<std::unique_ptr<ObsRuntime>> Load(const std::filesystem::path& runtime_root,
-                                                  const ObsVersion& install_version);
+                                                  const ObsInstall& install);
 
   ~ObsRuntime();
   ObsRuntime(const ObsRuntime&) = delete;
@@ -66,6 +69,18 @@ class ObsRuntime {
   std::filesystem::path root_;
   void* module_ = nullptr;          // HMODULE
   void* dll_directory_ = nullptr;   // DLL_DIRECTORY_COOKIE
+  bool recorded_ = false;           // As LoadedRuntimeCopy's.
 };
+
+// The runtime copy obs.dll was loaded from, and the install it was made
+// from.
+struct LoadedCopy {
+  std::filesystem::path root;
+  ObsInstall install;
+};
+
+// The runtime copy this process loaded obs.dll from, while an ObsRuntime has
+// it loaded: libobs runs once per process.
+std::optional<LoadedCopy> LoadedRuntimeCopy();
 
 }  // namespace knobs::runtime

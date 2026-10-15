@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <format>
+#include <mutex>
 #include <string>
 
 #include "app_info.h"
@@ -12,6 +13,17 @@
 
 namespace knobs::runtime {
 namespace {
+
+// LoadedRuntimeCopy's answer.
+struct Loaded {
+  std::mutex mutex;
+  std::optional<LoadedCopy> copy;
+};
+
+Loaded& TheLoadedCopy() {
+  static Loaded loaded;
+  return loaded;
+}
 
 // Restores the working directory when a load fails, so a failed load doesn't
 // leave the process inside a runtime copy (which would also keep that folder
@@ -49,12 +61,12 @@ void SetObsProcessPolicies() {
 }
 
 Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path& runtime_root,
-                                                     const ObsVersion& install_version) {
+                                                     const ObsInstall& install) {
   const std::filesystem::path bin = BinDir(runtime_root);
   const std::filesystem::path dll = ObsDll(runtime_root);
   std::unique_ptr<ObsRuntime> runtime(new ObsRuntime());
   runtime->root_ = runtime_root;
-  runtime->install_version_ = install_version;
+  runtime->install_version_ = install.version;
 
   runtime->dll_directory_ = AddDllDirectory(bin.c_str());
   if (!runtime->dll_directory_) {
@@ -105,12 +117,29 @@ Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path
                              missing.size(), kDisplayName, names)};
   }
   working_directory.Keep();
+  {
+    Loaded& record = TheLoadedCopy();
+    std::lock_guard lock(record.mutex);
+    record.copy = LoadedCopy{runtime_root, install};
+    runtime->recorded_ = true;
+  }
   return runtime;
 }
 
 ObsRuntime::~ObsRuntime() {
+  if (recorded_) {
+    Loaded& record = TheLoadedCopy();
+    std::lock_guard lock(record.mutex);
+    record.copy.reset();
+  }
   if (module_) FreeLibrary(static_cast<HMODULE>(module_));
   if (dll_directory_) RemoveDllDirectory(static_cast<DLL_DIRECTORY_COOKIE>(dll_directory_));
+}
+
+std::optional<LoadedCopy> LoadedRuntimeCopy() {
+  Loaded& record = TheLoadedCopy();
+  std::lock_guard lock(record.mutex);
+  return record.copy;
 }
 
 }  // namespace knobs::runtime

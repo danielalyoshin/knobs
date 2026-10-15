@@ -14,9 +14,11 @@
 #include "app_info.h"
 #include "runtime/obs_data.h"
 #include "runtime/obs_layout.h"
+#include "runtime/obs_runtime.h"
 #include "runtime/obs_session.h"
 #include "runtime/obs_version.h"
 #include "runtime/pe_imports.h"
+#include "runtime/runtime_copy.h"
 #include "util/text_file.h"
 #include "util/win_strings.h"
 
@@ -166,9 +168,11 @@ struct VstPlugin {
 // the same: an import checks the same plugin for every mic's filter list,
 // then for the picked mic's pre-flight and chain key. Its imports are looked
 // up each time, since the loader also finds a DLL that's already loaded, and
-// an import loads modules along the way.
+// an import loads modules along the way. A DLL a plugin imports that only
+// OBS's install has is copied into the runtime copy (AddFromInstall).
 class VstPluginFiles {
  public:
+  explicit VstPluginFiles(const runtime::ObsApi& api) : api_(api) {}
   VstPlugin Check(const std::string& path);
 
  private:
@@ -181,6 +185,13 @@ class VstPluginFiles {
     // What it imports, not delay-loaded, or nothing if it can't tell.
     std::optional<std::vector<std::string>> imports;
   };
+
+  // Copies the DLLs among `missing`, which `plugin` imports, that OBS's
+  // install has in bin\64bit into the runtime copy's (runtime::AddInstallDlls),
+  // and logs each. Returns whether it added any.
+  bool AddFromInstall(const fs::path& plugin, const std::vector<std::string>& missing);
+
+  const runtime::ObsApi& api_;  // For libobs's log, which is knobs's.
   std::map<std::string, Parsed, std::less<>> files_;
   std::optional<std::vector<fs::path>> folders_;  // PluginSearchFolders.
 };
@@ -209,8 +220,32 @@ VstPlugin VstPluginFiles::Check(const std::string& path) {
   if (parsed.imports) {
     if (!folders_) folders_ = PluginSearchFolders();
     plugin.missing = runtime::UnresolvedDllImports(file, *parsed.imports, *folders_);
+    if (!plugin.missing.empty() && AddFromInstall(file, plugin.missing)) {
+      plugin.missing = runtime::UnresolvedDllImports(file, *parsed.imports, *folders_);
+    }
   }
   return plugin;
+}
+
+bool VstPluginFiles::AddFromInstall(const fs::path& plugin, const std::vector<std::string>& missing) {
+  // In OBS, the program's folder is OBS's bin\64bit, which can have DLLs a
+  // plugin needs that nothing knobs loads does, so the copy doesn't have
+  // them. Copied now, they're there for good, and loading the plugin, the
+  // loader finds them in the copy's bin\64bit (PluginSearchFolders).
+  const std::optional<runtime::LoadedCopy> copy = runtime::LoadedRuntimeCopy();
+  if (!copy) return false;
+  const runtime::AddedDlls copied = runtime::AddInstallDlls(copy->install.root, copy->root, missing, *folders_);
+  for (const runtime::AddedDlls::Added& dll : copied.added) {
+    api_.blog(LOG_INFO, "%s",
+              std::format("Copied {} to {}, for the VST plugin {}.", ToUtf8(dll.from), ToUtf8(dll.to), ToUtf8(plugin))
+                  .c_str());
+  }
+  for (const std::string& error : copied.errors) {
+    api_.blog(LOG_WARNING, "%s",
+              std::format("Couldn't add a DLL the VST plugin {} needs to the runtime copy: {}", ToUtf8(plugin), error)
+                  .c_str());
+  }
+  return !copied.added.empty();
 }
 
 namespace {
@@ -432,8 +467,8 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
                        .file = FileName(path)});
       key("vst-not-64-bit");
     } else if (!plugin.missing.empty()) {
-      // In OBS, the program's folder is OBS's bin\64bit, which can have
-      // them (PluginSearchFolders).
+      // DLLs the loader wouldn't find. Those OBS's bin\64bit has, with what
+      // they import, are in the copy by now (VstPluginFiles::AddFromInstall).
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that needs {}, which {} can't find "
                                            "in Windows or in its copy of OBS, so it passes audio through untouched.",
@@ -615,7 +650,7 @@ Result<std::unique_ptr<SceneCollection>> SceneCollection::Read(const runtime::Ob
 }
 
 SceneCollection::SceneCollection(const runtime::ObsApi& api, obs_data_t* data)
-    : api_(api), data_(data), plugins_(std::make_unique<VstPluginFiles>()) {}
+    : api_(api), data_(data), plugins_(std::make_unique<VstPluginFiles>(api)) {}
 
 SceneCollection::~SceneCollection() { api_.obs_data_release(data_); }
 

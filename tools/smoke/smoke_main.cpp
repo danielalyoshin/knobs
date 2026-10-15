@@ -419,7 +419,7 @@ int Run(const Options& options) {
   (*log)->set_verbose(options.verbose);
 
   // Load obs.dll from the copy.
-  auto runtime = ObsRuntime::Load(copy->root, install->version);
+  auto runtime = ObsRuntime::Load(copy->root, *install);
   copy_lock.reset();
   if (!runtime) {
     Check(false, "load obs.dll", runtime.error());

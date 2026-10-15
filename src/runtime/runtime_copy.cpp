@@ -389,6 +389,33 @@ std::optional<PrunedCopies::Left> RemoveCopyFolder(const fs::path& runtime_base,
   return std::nullopt;
 }
 
+// Whether `name`, from an import table, names a file in a folder and nothing
+// more. One with a path in it would reach outside the folder.
+bool IsPlainFileName(std::string_view name) {
+  return !name.empty() && name != "." && name != ".." && name.find_first_of("\\/:") == std::string_view::npos;
+}
+
+// Copies `from` to `to`, which isn't there, whole: into a file beside it,
+// flushed to disk, then renamed into place, without replacing a file that's
+// there by then.
+Status CopyWhole(const fs::path& from, const fs::path& to) {
+  fs::path part = to;
+  part += L".partial";
+  std::error_code ec;
+  fs::copy_file(from, part, fs::copy_options::overwrite_existing, ec);
+  if (ec) return Error{std::format("Couldn't copy {} to {}: {}", ToUtf8(from), ToUtf8(part), Describe(ec))};
+  ClearReadOnly(part);
+  std::string error;
+  if (!FlushToDisk(part)) {
+    error = std::format("Couldn't write {}: {}", ToUtf8(part), DescribeWinError(GetLastError()));
+  } else if (!MoveFileExW(part.c_str(), to.c_str(), MOVEFILE_WRITE_THROUGH)) {
+    error = std::format("Couldn't move {} to {}: {}", ToUtf8(part), ToUtf8(to), DescribeWinError(GetLastError()));
+  }
+  if (error.empty()) return Ok{};
+  fs::remove(part, ec);
+  return Error{error};
+}
+
 // Deletes <version>.old-<n> folders left by earlier swaps. Ones still in use
 // by a running knobs stay until later.
 void RemoveRetiredCopies(const fs::path& runtime_base, const std::string& version) {
@@ -625,6 +652,75 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   }
   RemoveRetiredCopies(runtime_base, version);
   return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes, std::move(skipped)};
+}
+
+AddedDlls AddInstallDlls(const fs::path& install_root, const fs::path& copy_root, const std::vector<std::string>& names,
+                         const std::vector<fs::path>& folders, const std::wstring& lock) {
+  const fs::path install_bin = BinDir(install_root);
+  const fs::path copy_bin = BinDir(copy_root);
+  // Where the loader finds a DLL without the install: an API set, one
+  // already loaded, or a file in a folder it searches, the copy's bin\64bit
+  // included. As UnresolvedDllImports looks, but for side-by-side
+  // assemblies, which the DLLs OBS ships don't use.
+  std::vector<fs::path> search = folders;
+  search.push_back(copy_bin);
+  const auto found = [&search](const std::string& name) {
+    if (IsApiSet(AsciiLower(name))) return true;
+    const std::wstring wide = FromUtf8(name);
+    if (GetModuleHandleW(wide.c_str())) return true;
+    return std::any_of(search.begin(), search.end(), [&wide](const fs::path& folder) {
+      std::error_code ec;
+      return !folder.empty() && fs::is_regular_file(folder / wide, ec);
+    });
+  };
+
+  // Each name's DLLs to copy: itself, and those it imports, directly or not,
+  // that only the install has. None if one of them imports a DLL found
+  // nowhere, which OBS couldn't load either: the name stays missing.
+  std::vector<std::string> to_copy;
+  std::set<std::string, std::less<>> planned;  // Lowercase.
+  for (const std::string& name : names) {
+    if (found(name)) continue;
+    std::vector<std::string> closure;
+    std::set<std::string, std::less<>> visited;  // Lowercase.
+    std::vector<std::string> pending = {name};
+    bool complete = true;
+    while (complete && !pending.empty()) {
+      const std::string dll = std::move(pending.back());
+      pending.pop_back();
+      if (!visited.insert(AsciiLower(dll)).second || (dll != name && found(dll))) continue;
+      const fs::path from = install_bin / FromUtf8(dll);
+      std::error_code ec;
+      // Read, not loaded, as the copy is planned (PlanRuntimeCopy).
+      auto imports = IsPlainFileName(dll) && fs::is_regular_file(from, ec)
+                         ? ReadDllImports(from, false)
+                         : Result<std::vector<std::string>>(Error{"not in the install"});
+      complete = imports.ok();
+      if (!complete) break;
+      closure.push_back(dll);
+      pending.insert(pending.end(), imports->begin(), imports->end());
+    }
+    if (!complete) continue;
+    for (std::string& dll : closure) {
+      if (planned.insert(AsciiLower(dll)).second) to_copy.push_back(std::move(dll));
+    }
+  }
+
+  AddedDlls result;
+  if (to_copy.empty()) return result;
+  const RuntimeCopyLock held(true, lock);
+  for (const std::string& dll : to_copy) {
+    const fs::path from = install_bin / FromUtf8(dll);
+    const fs::path to = copy_bin / FromUtf8(dll);
+    std::error_code ec;
+    if (fs::exists(to, ec)) continue;  // Another process added it meanwhile.
+    if (const Status copied = CopyWhole(from, to); !copied) {
+      result.errors.push_back(copied.error());
+    } else {
+      result.added.push_back({from, to});
+    }
+  }
+  return result;
 }
 
 PrunedCopies PruneRuntimeCopies(const fs::path& runtime_base, const fs::path& keep, const PruneOptions& options) {
