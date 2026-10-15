@@ -15,7 +15,8 @@ using Kind = Notice::Kind;
 Notice Available(const update::Version& version) {
   return {.kind = Kind::kUpdateAvailable,
           .title = std::format("{} {} is out", kDisplayName, version.ToString()),
-          .text = "Click to download it.",
+          // The click opens the release's page.
+          .text = "Click to see what's new and download it.",
           .url = update::ReleasePageUrl(version)};
 }
 

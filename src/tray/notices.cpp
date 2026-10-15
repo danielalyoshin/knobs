@@ -28,6 +28,9 @@ constexpr size_t kMaxText = 255;
 // the rest with no "…".
 constexpr size_t kShownText = 160;
 
+// A text's length as a balloon holds it (kMaxText): in UTF-16 units.
+size_t Length(std::string_view text) { return FromUtf8(text).size(); }
+
 bool Connected(const std::vector<audio::AudioDevice>& devices, std::string_view id) {
   return FindById(devices, id) != nullptr;
 }
@@ -123,11 +126,8 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
                             : std::format("It's too old for {}, so {} stopped. Click for what you can do.",
                                           kDisplayName, kDisplayName);
       } else {
-        notice.title = "This version of OBS isn't supported";
-        notice.text = newer ? std::format("{} doesn't support OBS {} yet, so it stopped. Click for what you can do.",
-                                          kDisplayName, version)
-                            : std::format("OBS {} is too old for {}, so it stopped. Click for what you can do.",
-                                          version, kDisplayName);
+        notice.title = ObsUnsupportedLine(snapshot.obs.version);
+        notice.text = std::format("{} stopped. Click for what you can do.", kDisplayName);
       }
       return notice;
     }
@@ -145,7 +145,7 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
         case SetupNeed::kObsSettings:
           notice.page = FirstRunPage::kObsSettings;
           notice.title = "Can't read OBS's settings";
-          notice.text = std::format("{} reads your mic from them, so it stopped. Click for what to do.",
+          notice.text = std::format("{} reads your mic from OBS's settings, so it stopped. Click for what to do.",
                                     kDisplayName);
           return notice;
         case SetupNeed::kNoMic:
@@ -178,7 +178,12 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       notice.kind = Kind::kFailed;
       notice.page = FirstRunPage::kProblem;
       notice.title = std::format("{} stopped after an error", kDisplayName);
-      notice.text = snapshot.detail.empty() ? "Click for what to do." : snapshot.detail + " Click for what to do.";
+      // The error, if Windows shows all of it with what to do after it.
+      // Otherwise the page says it.
+      notice.text = "Click to see the error and try again.";
+      if (!snapshot.detail.empty() && Length(snapshot.detail + " Click for what to do.") <= kShownText) {
+        notice.text = snapshot.detail + " Click for what to do.";
+      }
       return notice;
     case State::kRestartNeeded:
       if (!snapshot.restart_delayed) return std::nullopt;
@@ -187,7 +192,7 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       notice.title = std::format("{} couldn't restart yet", kDisplayName);
       // The detail says the title again.
       notice.text = std::format("It let the installer continue. If the installer says a file is in use, quit "
-                                "{} and retry it.",
+                                "{}, then retry the installer.",
                                 kDisplayName);
       return notice;
     default:
@@ -203,7 +208,7 @@ Notice RestartWaitsNotice(RestartWait window) {
   if (window == RestartWait::kSetup) {
     what = std::format("{} setup", kDisplayName);  // As its title bar names it.
   } else if (window == RestartWait::kWindow) {
-    what = std::format("the {} window", kDisplayName);
+    what = std::format("the {} dialog", kDisplayName);
   }
   return {.kind = Kind::kRestartWaits,
           // The menu's words: the whole chain is off, not just NVIDIA's filter.
@@ -219,7 +224,7 @@ Notice RestartWaitsNotice(RestartWait window) {
 // problem: the mic comes back by itself, and the icon has the pause badge.
 Notice PausedForUpdate(const core::Snapshot& snapshot) {
   return {.kind = Kind::kPausedForUpdate,
-          .title = snapshot.nvidia_update ? "Paused for NVIDIA's SDK update" : "Paused for a plugin update",
+          .title = snapshot.nvidia_update ? "Paused while NVIDIA's Audio Effects SDK updates" : "Paused while a plugin updates",
           // Paused by the user, it stays paused after.
           .text = snapshot.paused_by_user
                       ? std::format("{} waits for the updated files to stop changing. It's still paused.", kDisplayName)
@@ -227,9 +232,6 @@ Notice PausedForUpdate(const core::Snapshot& snapshot) {
                                     "it resumes by itself.",
                                     kDisplayName)};
 }
-
-// A text's length as a balloon holds it (kMaxText): in UTF-16 units.
-size_t Length(std::string_view text) { return FromUtf8(text).size(); }
 
 Notice ChainChanged(const core::Snapshot& snapshot, std::string_view mic_before) {
   const std::string& mic = snapshot.chain->mic;
@@ -315,7 +317,7 @@ Notice OtherObs(const core::Snapshot& snapshot) {
 Notice SoundIntoCable(std::string_view cable) {
   return {.kind = Kind::kSoundIntoCable,
           .title = std::format("Windows plays your PC's sound into {}", cable),
-          .text = "So you can't hear it, and your other apps hear it with your mic. Click to set Output back to your "
+          .text = "You can't hear it, and your other apps hear it with your mic. Click to set Output back to your "
                   "speakers or headphones.",
           .sound = true,
           .url = "ms-settings:sound"};
@@ -343,11 +345,11 @@ std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& sna
                     .text = std::format("{} restarted to run NVIDIA's noise removal with it.{}", kDisplayName, paused)};
     case core::RestartNeed::kNvidiaUpdating:
       return Notice{.kind = Kind::kRestarted,
-                    .title = "NVIDIA's Audio Effects SDK update",
+                    .title = "NVIDIA's Audio Effects SDK is being updated",
                     .text = std::format("{} restarted so its installer could replace the files.{}", kDisplayName, paused)};
     case core::RestartNeed::kPluginUpdating:
       return Notice{.kind = Kind::kRestarted,
-                    .title = "A plugin update",
+                    .title = "A plugin is being updated",
                     .text = std::format("{} restarted so its installer could replace the files.{}", kDisplayName, paused)};
     case core::RestartNeed::kNvidiaUnused:
       return Notice{.kind = Kind::kRestarted,
@@ -409,7 +411,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
     ShowOrHold(Notice{.kind = Kind::kHandoffFailed,
                       .title = "An installer may need to try again",
                       .text = std::format("{} restarted, but the installer may have found a file still in use. "
-                                          "If it says so, retry it.", kDisplayName),
+                                          "If the installer says so, retry it.", kDisplayName),
                       .sound = true}, quiet, update);
   }
   if (snapshot.state == State::kStarting && !snapshot.files_waiting) return update;
@@ -562,7 +564,7 @@ Notice FileHoldNotice(bool quitting, bool released = false) {
                   .text = quitting
                       ? std::format("{} is closing. Once it has closed, retry the installer if it still can't continue.", kDisplayName)
                       : std::format("A file may still be in use. If the installer can't continue, quit {}, "
-                                    "wait for it to close, then retry it.", kDisplayName),
+                                    "wait for it to close, then retry the installer.", kDisplayName),
                   .sound = true};
   }
   return Notice{.kind = Notice::Kind::kFileHold,
@@ -571,7 +573,7 @@ Notice FileHoldNotice(bool quitting, bool released = false) {
                     ? std::format("{} is taking longer than usual to close. It will close by itself shortly. "
                                   "Then retry the installer if it still can't continue.", kDisplayName)
                     : std::format("{0} is taking longer than usual to release a file. If the installer can't continue, "
-                                  "quit {0}, wait for it to close, then retry it.", kDisplayName),
+                                  "quit {0}, wait for it to close, then retry the installer.", kDisplayName),
                 .sound = true};
 }
 

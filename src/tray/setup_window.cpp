@@ -122,7 +122,8 @@ void SetupWindow::Show() {
   // What the first run starts from, such as a page asked for.
   host_.SaveFirstRun(saved_);
   if (!Create()) {
-    ShowError("The setup window couldn't open: Direct2D or DirectWrite isn't working on this PC.");
+    ShowError("The setup window couldn't open, because Windows' graphics (Direct2D or DirectWrite) aren't working on "
+              "this PC. You can still choose the mic and the cable in the tray menu.");
     return;
   }
   // Snapshots that came before the window did.
@@ -710,7 +711,7 @@ void SetupWindow::Click(int id) {
       }
       break;
     case FirstRunAction::Kind::kChooseObsSettings:
-      if (const auto folder = PickFolder(window_, L"Choose OBS's settings folder")) {
+      if (const auto folder = PickFolder(window_, L"Choose the folder that holds obs-studio")) {
         core::Settings settings = snapshot.settings;
         settings.obs_config = import::SettingsFolderFor(*folder);
         Apply(settings);
@@ -724,7 +725,7 @@ void SetupWindow::Click(int id) {
               window_, L"open",
               action.kind == FirstRunAction::Kind::kOpenSoundOutput ? L"ms-settings:sound" : L"ms-settings:sound-devices",
               nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
-        ShowError("Couldn't open Windows' Sound settings. Open Settings, then System, then Sound.");
+        ShowError("Couldn't open Windows' Sound settings. Open them from Settings › System › Sound.");
       }
       break;
     case FirstRunAction::Kind::kRestart:

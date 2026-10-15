@@ -427,13 +427,13 @@ TEST(NoticesFitWarningsInTheBalloon) {
                                                              std::string_view::npos;
   };
   const auto ducking = [](std::string_view sidechain) {
-    return std::format("Compressor \"Duck\" turns the mic down under \"{0}\" in OBS. {1} loads only the mic, so it "
+    return std::format("Compressor \"Duck\" turns the mic down while \"{0}\" plays, in OBS. {1} loads only the mic, so it "
                        "keeps only this compressor's output gain (+3.0 dB), and the mic sounds as it does in OBS "
-                       "while nothing plays on \"{0}\".",
+                       "while \"{0}\" is silent.",
                        sidechain, kDisplayName);
   };
   const auto unknown = [](std::string_view name, std::string_view type) {
-    return std::format("Filter \"{}\" ({}) isn't one {} has. It passes audio through untouched.", name, type,
+    return std::format("Filter \"{}\" ({}) isn't one {} can run, so it passes audio through untouched.", name, type,
                        kDisplayName);
   };
   const std::string pitch = unknown("Pitch Shift", "pitch_shift_filter");
@@ -474,9 +474,9 @@ TEST(NoticesKeepWarningsThatFitWhole) {
   // The balloon's limit falls in the first word of the second warning: the
   // first, which fits, is kept whole.
   const std::string start = "2 warnings. Click to see them all.\n";
-  std::string first = std::format("Filter \"A\" isn't one {} has.", kDisplayName);
+  std::string first = std::format("Filter \"A\" isn't one {} can run.", kDisplayName);
   while (start.size() + first.size() + 1 < 245) first += " More.";
-  const std::string second = "Compressor \"Duck\" turns the mic down under \"Discord\" in OBS.";
+  const std::string second = "Compressor \"Duck\" turns the mic down while \"Discord\" plays, in OBS.";
   CHECK(start.size() + first.size() + 1 <= 254 && start.size() + first.size() + 1 + second.size() > 255);
   const Notice notice = WarningsNotice({first, second});
   CHECK(notice.text == start + first);
@@ -728,7 +728,7 @@ TEST(NoticesExplainWhenADelayedSdkRestartReleasesTheInstaller) {
     // What setup's page says, without saying the title again.
     CHECK(f.last.text.starts_with("It let the installer continue."));
     CHECK(f.last.text.find("couldn't restart") == std::string::npos);
-    CHECK(f.last.text.find("retry it") != std::string::npos);
+    CHECK(f.last.text.find("retry the installer") != std::string::npos);
     f.Advance(30s);
     CHECK(f.events.size() == 1);
   }
@@ -783,7 +783,7 @@ TEST(NoticesSayARestartForNvidiasSdkWaitsForAWindow) {
     CHECK(g.events == std::vector<std::string>{title});
     CHECK(g.last.text.ends_with(window == RestartWait::kSetup
                                     ? std::format(" once you close {} setup.", kDisplayName)
-                                    : std::format(" once you close the {} window.", kDisplayName)));
+                                    : std::format(" once you close the {} dialog.", kDisplayName)));
   }
 }
 
@@ -829,9 +829,8 @@ TEST(NoticesSayKnobsStoppedForAnUnsupportedObs) {
   // Found at start: a problem says so even then.
   Fixture start(f.world->Get());
   start.Start();
-  CHECK(start.events == std::vector<std::string>{"This version of OBS isn't supported"});
-  CHECK(start.last.text ==
-        std::format("{} doesn't support OBS 34.0.0 yet, so it stopped. Click for what you can do.", kDisplayName));
+  CHECK(start.events == std::vector<std::string>{std::format("{} doesn't support OBS 34.0.0 yet", kDisplayName)});
+  CHECK(start.last.text == std::format("{} stopped. Click for what you can do.", kDisplayName));
 
   // Too old, at start and when OBS changes to it: not "yet", since no update
   // will support it.
@@ -840,9 +839,8 @@ TEST(NoticesSayKnobsStoppedForAnUnsupportedObs) {
                    runtime::UnsupportedObsMessage("31.1.4")};
   Fixture old(old_world);
   old.Start();
-  CHECK(old.events == std::vector<std::string>{"This version of OBS isn't supported"});
-  CHECK(old.last.text ==
-        std::format("OBS 31.1.4 is too old for {}, so it stopped. Click for what you can do.", kDisplayName));
+  CHECK(old.events == std::vector<std::string>{std::format("OBS 31.1.4 is too old for {}", kDisplayName)});
+  CHECK(old.last.text == std::format("{} stopped. Click for what you can do.", kDisplayName));
   Fixture changed;
   changed.Start();
   changed.ObsOpens();
@@ -922,6 +920,20 @@ TEST(NoticesSayWhatStopsKnobs) {
   CHECK(f.state() == State::kFailed && notice.title == std::format("{} stopped after an error", kDisplayName));
   CHECK(notice.text == "libobs couldn't load the mic's source. Click for what to do." &&
         notice.page == FirstRunPage::kProblem);
+
+  // An error too long for Windows to show with what to do after it: the
+  // page says it instead.
+  after([](FakeWorld& world) {
+    world.chain_error.reset();
+    tools::EditChain(world);
+  });
+  CHECK(f.state() == State::kRunning);
+  notice = after([](FakeWorld& world) {
+    world.chain_error = std::string(150, 'x') + ".";
+    tools::EditChain(world);
+  });
+  CHECK(f.state() == State::kFailed && notice.title == std::format("{} stopped after an error", kDisplayName));
+  CHECK(notice.text == "Click to see the error and try again.");
 }
 
 TEST(RestartReasonsHaveNames) {
@@ -958,7 +970,7 @@ TEST(NoticesSayAPluginUpdatePausesKnobs) {
   f.Start();
   f.Advance(1s);
   CHECK(f.state() == State::kPausedForUpdate && f.notifier.badge() == Badge::kPaused);
-  CHECK(f.events == std::vector<std::string>{"Paused for a plugin update"});
+  CHECK(f.events == std::vector<std::string>{"Paused while a plugin updates"});
   CHECK(f.last.text == std::format("{} doesn't send your mic to the cable until the updated files stop changing. Then "
                                     "it resumes by itself.",
                                     kDisplayName));
@@ -970,7 +982,7 @@ TEST(NoticesSayAPluginUpdatePausesKnobs) {
   f.world->Change(PluginUpdated);
   f.Advance(10s);
   CHECK(f.state() == State::kRunning && f.notifier.badge() == Badge::kNone);
-  CHECK((f.events == std::vector<std::string>{"Paused for a plugin update", "-"}));
+  CHECK((f.events == std::vector<std::string>{"Paused while a plugin updates", "-"}));
 
   // One that began while the setup window was open is said once it closes,
   // if it's still on.
@@ -981,7 +993,7 @@ TEST(NoticesSayAPluginUpdatePausesKnobs) {
   CHECK(quiet.state() == State::kPausedForUpdate && quiet.events == kNone);
   quiet.quiet = false;
   quiet.Apply(quiet.notifier.Tick(false, quiet.now));
-  CHECK(quiet.events == std::vector<std::string>{"Paused for a plugin update"});
+  CHECK(quiet.events == std::vector<std::string>{"Paused while a plugin updates"});
   // Over before it closes: nothing to say.
   Fixture over(PluginUpdate());
   over.quiet = true;
@@ -1007,7 +1019,7 @@ TEST(TrayTimerExplainsAHoldWithoutAnotherCoreSnapshot) {
   CHECK(late.show && late.show->kind == Notice::Kind::kFileHold);
   CHECK(late.show->title == "An installer is waiting");
   CHECK(late.show->text == std::format("{0} is taking longer than usual to release a file. If the installer can't "
-                                     "continue, quit {0}, wait for it to close, then retry it.", kDisplayName));
+                                     "continue, quit {0}, wait for it to close, then retry the installer.", kDisplayName));
   CHECK(FromUtf8(late.show->text).size() <= 160);
   CHECK(!notifier.Tick(true, now + 10s).show);
   snapshot.files_held = false;
@@ -1062,7 +1074,7 @@ TEST(NewCopyExplainsAFailedHandoffAndDoesNotClaimItProtectedTheInstaller) {
   CHECK(failed.show && failed.show->kind == Notice::Kind::kHandoffFailed);
   CHECK(failed.show->title == "An installer may need to try again");
   CHECK(failed.show->text == std::format("{} restarted, but the installer may have found a file still in use. "
-                                       "If it says so, retry it.", kDisplayName));
+                                       "If the installer says so, retry it.", kDisplayName));
   snapshot.state = State::kRunning;
   CHECK(!notifier.Changed(snapshot, false, now + 1s).show);
   CHECK(!notifier.Tick(false, now + 20s).show);
@@ -1075,12 +1087,12 @@ TEST(NvidiaRestartNoticeWaitsForTheFilesToSettle) {
   f.controller.Start(false, f.now, false, true);
   f.Feed();
   CHECK(f.state() == State::kStarting && f.notifier.badge() == Badge::kNone &&
-        f.events == std::vector<std::string>{"Paused for NVIDIA's SDK update"});
+        f.events == std::vector<std::string>{"Paused while NVIDIA's Audio Effects SDK updates"});
   CHECK(f.last.kind == Notice::Kind::kPausedForUpdate && !f.last.problem);
   CHECK(f.last.text.starts_with(std::format("{} doesn't send your mic to the cable until", kDisplayName)));
   f.Advance(5s);
   CHECK(f.state() == State::kRunning);
-  CHECK((f.events == std::vector<std::string>{"Paused for NVIDIA's SDK update", "NVIDIA's Audio Effects SDK update"}));
+  CHECK((f.events == std::vector<std::string>{"Paused while NVIDIA's Audio Effects SDK updates", "NVIDIA's Audio Effects SDK is being updated"}));
   CHECK(f.last.kind == Notice::Kind::kRestarted);
   f.Reimport();
   CHECK(f.events.size() == 2);

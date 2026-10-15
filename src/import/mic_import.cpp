@@ -319,16 +319,18 @@ FilterNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::
   // Not 0.3.0's kinds, "vst" and "unknown", which its own warnings left in
   // the warned list (Notifier::Options::warned) for these filters.
   if (id == kVstFilterId) {
-    return {{true, std::format("Filter \"{}\" is a VST plugin ({}), and {} couldn't load OBS's VST module: {} It "
-                               "passes audio through untouched.",
-                               name, plugin.empty() ? "none chosen" : plugin, kDisplayName,
-                               error.empty() ? "obs-vst registered no filter." : error)},
+    // The module's own error is in the log (ObsSession::LoadOptionalModule).
+    const std::string why = error.empty()
+                                ? std::string("OBS's VST support (obs-vst) loaded, but it has no VST filter")
+                                : std::format("{} couldn't load OBS's VST support (obs-vst). The log says why", kDisplayName);
+    return {{true, std::format("Filter \"{}\" is a VST plugin ({}), and it passes audio through untouched. {}.", name,
+                               plugin.empty() ? "none chosen" : plugin, why)},
             "vst-module"};
   }
   if (!error.empty()) {
-    return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal, and {} couldn't load OBS's nv-filters "
-                               "module: {} It passes audio through untouched.",
-                               name, kDisplayName, error)},
+    return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal. {} couldn't load OBS's NVIDIA filters "
+                               "(nv-filters), so the filter passes audio through untouched. The log says why.",
+                               name, kDisplayName)},
             "nvidia-module"};
   }
   if (nvidia_sdk_arrived) {
@@ -341,10 +343,12 @@ FilterNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::
             "nvidia-restart"};
   }
   if (FindNvidiaAudioEffects(runtime::ObsVersion::FromLibobs(api.obs_get_version())).empty()) {
+    // Installed while a chain needs it, knobs restarts by itself to run it
+    // (RestartNeed::kNvidiaInstalled).
     return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It "
                                "isn't installed, so the filter passes audio through untouched, as it does in OBS "
-                               "without it.",
-                               name)},
+                               "without it. Once it's installed, {} restarts by itself to run it.",
+                               name, kDisplayName)},
             "nvidia-sdk"};
   }
   return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK is installed but "
@@ -418,11 +422,11 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
 
   if (!known && !optional) {
     // libobs knows no such type, so it loads a placeholder that does nothing.
-    notes.push_back(enabled ? ImportNote{true, std::format("Filter \"{}\" ({}) isn't one {} has. It passes audio "
-                                                           "through untouched.",
+    notes.push_back(enabled ? ImportNote{true, std::format("Filter \"{}\" ({}) isn't one {} can run, so it passes "
+                                                           "audio through untouched.",
                                                            name, type, kDisplayName)}
-                            : ImportNote{false, std::format("Filter \"{}\" ({}) isn't one {} has, but it's off in "
-                                                            "OBS anyway.",
+                            : ImportNote{false, std::format("Filter \"{}\" ({}) isn't one {} can run, but it's off "
+                                                            "in OBS anyway.",
                                                             name, type, kDisplayName)});
     key("unknown");
     return true;
@@ -451,15 +455,16 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
     const std::string path = VstPluginPath(api, filter);
     const VstPlugin plugin = plugins.Check(path);
     if (path.empty()) {
-      notes.push_back({true, std::format("VST filter \"{}\" has no plugin chosen, so it passes audio through "
-                                         "untouched, in OBS too.",
+      notes.push_back({true, std::format("Filter \"{}\" is a VST filter with no plugin chosen, so it passes audio "
+                                         "through untouched, in OBS too. To use it, choose a plugin in its settings "
+                                         "in OBS.",
                                          name)});
       key("vst-none");
     } else if (plugin.unavailable) {
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that {} couldn't read at {}, so it "
                                            "passes audio through untouched. Check that its drive is connected, then "
-                                           "re-import from OBS.",
+                                           "choose Re-import from OBS in the tray menu.",
                                            name, FileName(path), kDisplayName, path),
                        .file = FileName(path)});
       key("vst-unavailable");
@@ -468,14 +473,16 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
     } else if (!plugin.found) {
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't at {} any more, so it "
-                                           "passes audio through untouched, in OBS too.",
+                                           "passes audio through untouched, in OBS too. To use it, install the "
+                                           "plugin again, or choose it again in OBS.",
                                            name, FileName(path), path),
                        .file = FileName(path)});
       key("vst-gone");
     } else if (!plugin.is64) {
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't a 64-bit plugin, so it "
-                                           "passes audio through untouched, in OBS too.",
+                                           "passes audio through untouched, in OBS too. If the plugin has a 64-bit "
+                                           "version, choose that in OBS.",
                                            name, FileName(path)),
                        .file = FileName(path)});
       key("vst-not-64-bit");
@@ -484,7 +491,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
       // they import, are in the copy by now (VstPluginFiles::Check).
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that needs {}, which {} can't find "
-                                           "in Windows or in its copy of OBS, so it passes audio through untouched.",
+                                           "in Windows or in OBS, so it passes audio through untouched.",
                                            name, FileName(path), JoinWithAnd(plugin.missing), kDisplayName),
                        .file = FileName(path)});
       key("vst-dlls");
@@ -516,9 +523,9 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   if (const auto ducking = AsDucking(api, filter)) {
     // As OBS while nothing plays on the sidechain (GainInsteadOf). At 0 dB
     // that's no change at all.
-    const std::string what = std::format("Compressor \"{}\" turns the mic down under \"{}\" in OBS.", name,
+    const std::string what = std::format("Compressor \"{}\" turns the mic down while \"{}\" plays, in OBS.", name,
                                          ducking->sidechain);
-    const std::string then = std::format("and the mic sounds as it does in OBS while nothing plays on \"{}\".",
+    const std::string then = std::format("and the mic sounds as it does in OBS while \"{}\" is silent.",
                                          ducking->sidechain);
     if (ducking->output_gain != 0) instead = GainInsteadOf(api, filter, ducking->output_gain);
     if (instead) {

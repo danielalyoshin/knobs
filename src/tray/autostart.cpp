@@ -59,7 +59,7 @@ Status SetStartWithWindows(const RunEntry& entry, bool on) {
     if (status == ERROR_SUCCESS) status = DeleteValue(entry.approved_key, entry.name);
   }
   if (status != ERROR_SUCCESS) {
-    return Error{std::format("Couldn't change the sign-in entry in the registry: {}", DescribeWinError(status))};
+    return Error{std::format("Couldn't change Start with Windows: {}", DescribeWinError(status))};
   }
   return Ok{};
 }

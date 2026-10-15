@@ -62,8 +62,8 @@ void MonitorToDefault(FakeWorld& world) {
 // A filter from a third-party OBS plugin, which knobs doesn't load.
 import::ImportNote UnknownFilterWarning() {
   return {.warning = true,
-          .text = std::format("Filter \"Pitch Shift\" (pitch_shift_filter) isn't one {} has. It passes audio "
-                              "through untouched.",
+          .text = std::format("Filter \"Pitch Shift\" (pitch_shift_filter) isn't one {} can run, so it passes "
+                              "audio through untouched.",
                               kDisplayName),
           .key = "unknown 6f0c1d2e-pitch-shift"};
 }
@@ -195,7 +195,7 @@ const std::vector<FakeScenario>& FakeScenarios() {
       {"obs-missing", "OBS isn't installed",
        [](FakeWorld& world, FakeScript&) {
          world.obs = {core::ObsFound::kMissing, {},
-                      std::format("OBS Studio isn't installed. {} needs {}.", kDisplayName,
+                      std::format("OBS Studio isn't where its installer puts it. {} needs {}.", kDisplayName,
                                   runtime::DescribeSupportedObsVersions())};
        }},
       {"obs-unsupported", "OBS 34.0.0 is installed",

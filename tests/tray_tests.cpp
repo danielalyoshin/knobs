@@ -109,9 +109,9 @@ TEST(StatusLineFollowsTheState) {
   snapshot.state = State::kPausedForObs;
   CHECK(StatusLine(snapshot) == "Paused while OBS is open: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.state = State::kPausedForUpdate;
-  CHECK(StatusLine(snapshot) == "Paused for a plugin update: Mic/Aux › 4 filters › CABLE In 16ch");
+  CHECK(StatusLine(snapshot) == "Paused while a plugin updates: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.nvidia_update = true;
-  CHECK(StatusLine(snapshot) == "Paused for NVIDIA's SDK update: Mic/Aux › 4 filters › CABLE In 16ch");
+  CHECK(StatusLine(snapshot) == "Paused while NVIDIA's SDK updates: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.nvidia_update = false;
   snapshot.state = State::kMicMissing;
   CHECK(StatusLine(snapshot) == "Mic missing: Mic/Aux › 4 filters › CABLE In 16ch");
@@ -135,7 +135,11 @@ TEST(StatusLineFollowsTheState) {
   snapshot.state = State::kObsMissing;
   CHECK(StatusLine(snapshot) == "Can't find OBS Studio");
   snapshot.state = State::kObsUnsupported;
-  CHECK(StatusLine(snapshot) == "This version of OBS isn't supported");
+  // Only a newer OBS is "not yet" supported.
+  snapshot.obs.version = {34, 0, 0};
+  CHECK(StatusLine(snapshot) == std::format("{} doesn't support OBS 34.0.0 yet", kDisplayName));
+  snapshot.obs.version = {31, 1, 4};
+  CHECK(StatusLine(snapshot) == std::format("OBS 31.1.4 is too old for {}", kDisplayName));
   snapshot.state = State::kRestartNeeded;
   CHECK(StatusLine(snapshot) == std::format("{} needs to restart", kDisplayName));
   snapshot.state = State::kFailed;
@@ -365,7 +369,7 @@ TEST(MenuCableListsCablesFirst) {
   // monitors to. There's no "Same as OBS": a pick stays whatever OBS does.
   Menu menu = BuildMenu(Running(), {}, false);
   const MenuItem* cable = FindItem(menu.items, kIdCableMenu);
-  CHECK(Texts(cable->items) == (std::vector<std::string>{kCableInput, kCable16, "-", "&Other devices"}));
+  CHECK(Texts(cable->items) == (std::vector<std::string>{kCableInput, kCable16, "-", "&Other playback devices"}));
   CHECK(!cable->items[0].checked && cable->items[1].checked && cable->items[1].radio);
   CHECK(Texts(cable->items[3].items) == (std::vector<std::string>{kSpeakers}));
   CHECK(menu.cables.size() == 3 && menu.cables[2].id == kSpeakersId);
@@ -408,7 +412,7 @@ TEST(MenuCableWhenOBSDoesntMonitorToACable) {
   snapshot.obs_cable = {"Default", "default"};
   Menu menu = BuildMenu(snapshot, {}, false);
   const MenuItem* cables = FindItem(menu.items, kIdCableMenu);
-  CHECK(Texts(cables->items) == (std::vector<std::string>{kCableInput, kCable16, "-", "&Other devices"}));
+  CHECK(Texts(cables->items) == (std::vector<std::string>{kCableInput, kCable16, "-", "&Other playback devices"}));
   CHECK(std::none_of(cables->items.begin(), cables->items.end(), [](const MenuItem& item) { return item.checked; }));
 
   // To headphones: checked under Other devices, until a cable is picked.

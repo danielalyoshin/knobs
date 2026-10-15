@@ -930,7 +930,7 @@ TEST(CoreReleasesSdkWatchesWhenTheTrayCantRestartPromptly) {
   f.Advance(1ms);
   CHECK(f.backend.sdk_releases == 1 && f.last().restart_delayed);
   CHECK(f.last().detail.find("let the installer continue") != std::string::npos);
-  CHECK(f.last().detail.find("retry it") != std::string::npos);
+  CHECK(f.last().detail.find("retry the installer") != std::string::npos);
   f.Advance(30s);
   f.controller.Reimport(f.now);
   CHECK(f.backend.sdk_releases == 1 && f.state() == State::kRestartNeeded);

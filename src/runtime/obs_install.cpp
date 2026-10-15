@@ -141,10 +141,13 @@ Result<ObsInstall> FindObsInstall(const std::vector<fs::path>& candidates) {
     failures += "\n  " + install.error();
   }
   if (unsupported) return *unsupported;
-  return Error{std::format(
-      "OBS Studio wasn't found. {} needs OBS Studio installed. If it's somewhere unusual "
-      "(Steam, portable), choose its folder manually.{}",
-      kDisplayName, failures.empty() ? "" : "\nChecked:" + failures)};
+  // What was found, and why it can't be used, says more than advice: the
+  // first run's page gives that.
+  if (failures.empty()) {
+    return Error{std::format("OBS Studio isn't where its installer puts it. {} needs {}.", kDisplayName,
+                             DescribeSupportedObsVersions())};
+  }
+  return Error{"The OBS Studio where its installer puts it can't be used:" + failures};
 }
 
 std::optional<fs::path> PickObsInstallFolder(void* owner) {

@@ -27,7 +27,8 @@ namespace fs = std::filesystem;
 Result<runtime::ObsInstall> FindInstalledObs() {
   const std::vector<fs::path> candidates = runtime::ObsInstallCandidates();
   if (candidates.empty()) {
-    return Error{std::format("OBS Studio isn't installed. {} needs {}.", kDisplayName,
+    // It may be installed elsewhere, as through Steam: the page says so.
+    return Error{std::format("OBS Studio isn't where its installer puts it. {} needs {}.", kDisplayName,
                              runtime::DescribeSupportedObsVersions())};
   }
   return runtime::FindObsInstall(candidates);

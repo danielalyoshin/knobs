@@ -72,7 +72,7 @@ Result<AudioDevice> FindDevice(const std::vector<AudioDevice>& devices, std::str
 
 Status SetMonitoringDevice(const runtime::ObsApi& api, const AudioDevice& device) {
   if (!api.obs_set_audio_monitoring_device(device.name.c_str(), device.id.c_str())) {
-    return Error{std::format("libobs couldn't monitor to \"{}\".", device.name)};
+    return Error{std::format("OBS's audio monitoring couldn't use \"{}\".", device.name)};
   }
   return Ok{};
 }

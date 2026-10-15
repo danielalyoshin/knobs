@@ -73,7 +73,8 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 
 # The text files, with the name and version filled in, and Windows line endings.
 function Write-Text([string]$from, [string]$to) {
-  $text = (Get-Content -Raw $from) -replace '@NAME@', $name -replace '@VERSION@', $version
+  # UTF-8, as they're saved: Windows PowerShell would read them as ANSI.
+  $text = (Get-Content -Raw -Encoding UTF8 $from) -replace '@NAME@', $name -replace '@VERSION@', $version
   [IO.File]::WriteAllText($to, ($text -replace "`r?`n", "`r`n"), [Text.UTF8Encoding]::new($false))
 }
 Copy-Item $Exe "$stage\$name.exe"

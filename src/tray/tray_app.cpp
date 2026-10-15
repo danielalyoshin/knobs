@@ -18,6 +18,7 @@
 #include "tray/message_dialog.h"
 #include "tray/open_obs.h"
 #include "tray/resource.h"
+#include "tray/rich_text.h"
 #include "tray/settings_file.h"
 #include "util/win_strings.h"
 #include "version.h"
@@ -68,7 +69,7 @@ HMENU CreateNativeMenu(const std::vector<MenuItem>& items) {
   UINT position = 0;
   for (const MenuItem& item : items) {
     MENUITEMINFOW info = {sizeof(info)};
-    std::wstring text = FromUtf8(item.text);
+    std::wstring text = CurlQuotes(FromUtf8(item.text));
     if (item.kind == MenuItem::Kind::kSeparator) {
       info.fMask = MIIM_FTYPE;
       info.fType = MFT_SEPARATOR;
@@ -92,7 +93,7 @@ HMENU CreateNativeMenu(const std::vector<MenuItem>& items) {
 // Copies `text` into a NOTIFYICONDATAW field, shortened with "…" to fit.
 template <size_t N>
 void CopyField(wchar_t (&field)[N], std::string_view text) {
-  std::wstring wide = FromUtf8(text);
+  std::wstring wide = CurlQuotes(FromUtf8(text));
   if (wide.size() >= N) {
     wide.resize(N - 2);
     wide += L'…';
@@ -209,7 +210,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   }
   app->KeepReopening();
   if (!settings_error.empty()) {
-    app->ShowError(std::format("Couldn't read the settings, so {} uses its defaults until they're changed.\n\n{}",
+    app->ShowError(std::format("Couldn't read {}'s settings, so it uses its defaults until you change them.\n\n{}",
                                kDisplayName, settings_error));
   }
   // Once Run pumps messages: the dialog's loop needs Run's to end with it.
@@ -569,7 +570,8 @@ void TrayApp::ModifyIcon(NOTIFYICONDATAW& data) {
   // icons' flyout, for screen readers, from the change it got last, and a
   // change without one leaves the icon nameless.
   data.uFlags |= NIF_TIP | NIF_SHOWTIP;
-  std::wstring tip = std::format(L"{}\n{}", kDisplayNameW, quitting_ ? L"Closing…" : FromUtf8(StatusLine(snapshot_)));
+  std::wstring tip =
+      std::format(L"{}\n{}", kDisplayNameW, quitting_ ? L"Closing…" : CurlQuotes(FromUtf8(StatusLine(snapshot_))));
   if (tip.size() >= std::size(data.szTip)) {
     tip.resize(std::size(data.szTip) - 2);
     tip += L'…';
@@ -985,11 +987,13 @@ void TrayApp::FinishRestart() {
   if (!started) {
     const bool updating = snapshot_.restart == core::RestartNeed::kNvidiaUpdating ||
                           snapshot_.restart == core::RestartNeed::kPluginUpdating;
+    // What happened and what to do first, then the error as it came.
     const std::string advice = updating
-        ? std::format("{0} let the installer continue. If it says a file is in use, quit {0} and retry it.",
+        ? std::format("{0} couldn't restart, so it let the installer continue. If the installer says a file is in "
+                      "use, quit {0}, then retry the installer.",
                       kDisplayName)
-        : std::format("Quit {}, then start it again.", kDisplayName);
-    ShowError(std::format("{}\n\n{}", started.error(), advice));
+        : std::format("{0} couldn't restart. Quit it, then start it again.", kDisplayName);
+    ShowError(std::format("{}\n\n{}", advice, started.error()));
     return;
   }
   Quit();
@@ -1001,8 +1005,9 @@ void TrayApp::ShowAbout() {
                     {.custom_icon = icon,
                      .instruction = std::format(L"{} {}", kDisplayNameW, L"" KNOBS_VERSION),
                      .content = std::format(L"Your OBS mic chain, in every app. {0} runs the filters from your own "
-                                            L"OBS Studio install and sends your mic to a virtual cable.\n\n{0} "
-                                            L"isn't affiliated with or endorsed by the OBS Project.",
+                                            L"OBS Studio install and sends your mic to a virtual cable.\n\n{0} is "
+                                            L"an independent project. It isn't affiliated with or endorsed by the "
+                                            L"OBS Project.",
                                             kDisplayNameW),
                      .footer = L"Free software under the GNU General Public License, version 2 or later."});
   if (icon) DestroyIcon(icon);
@@ -1297,7 +1302,7 @@ void TrayApp::FinishUpdateJob() {
           if (!offer || offer->version != version) {
             next = std::format("{} {} isn't the latest version any more.", kDisplayName, version.ToString());
           } else if (!offer->install) {
-            next = std::format("Get {} {}… in the menu opens its page, to download it yourself.", kDisplayName,
+            next = std::format("To download it yourself, choose Get {} {}… in the tray menu.", kDisplayName,
                                version.ToString());
           }
           error = std::format("Couldn't update to {} {}. {}\n\n{}", kDisplayName, version.ToString(), next,
@@ -1398,9 +1403,9 @@ void TrayApp::NotOffered(const update::Version& asked) {
     ShowError(std::format("{} {} isn't the latest version any more, so it isn't installed.", kDisplayName,
                           asked.ToString()));
   } else {
-    ShowError(std::format("{} {} isn't ready to install any more. Get {} {}… in the menu opens its page, to download "
-                          "it yourself.",
-                          kDisplayName, asked.ToString(), kDisplayName, asked.ToString()));
+    ShowError(std::format("{0} {1} isn't ready to install any more. To download it yourself, choose Get {0} {1}… in "
+                          "the tray menu.",
+                          kDisplayName, asked.ToString()));
   }
 }
 

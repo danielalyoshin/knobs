@@ -39,4 +39,11 @@ std::string PlainText(std::string_view markup);
 // `text` as markup that shows it as it is.
 std::string EscapeMarkup(std::string_view text);
 
+// Typographic quotes for the straight ones in `text`, one for one, so spans
+// stay where they are: apostrophes, and double quotes that open after a space
+// or a bracket and close otherwise. The brand asks for them in everything a
+// reader sees, whatever the copy's source uses.
+void CurlQuotes(std::wstring& text);
+std::wstring CurlQuotes(std::wstring_view text);
+
 }  // namespace knobs::tray

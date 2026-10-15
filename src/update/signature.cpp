@@ -144,9 +144,9 @@ SignatureCheck CheckReleaseSignature(const std::filesystem::path& file, Revocati
         reject(std::format("{} can't be installed, because it was signed by {}, not {}.", name,
                            ToUtf8(CommonName(leaf)), ToUtf8(kSignerName)));
       } else if (!HasUsage(leaf, kSignerUsage) || !IsRoot(root)) {
-        reject(std::format("{} can't be installed, because it wasn't signed with the certificate profile that "
-                           "signs {}'s releases.",
-                           name, kDisplayName));
+        // The certificate profile's usage and root (kSignerUsage, IsRoot).
+        reject(std::format("{} can't be installed, because it isn't signed the way {}'s releases are.", name,
+                           kDisplayName));
       }
     }
   }

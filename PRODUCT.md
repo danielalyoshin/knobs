@@ -19,7 +19,7 @@ The job for both: tune the mic once, get that sound in every app, and stop think
 
 knobs runs the mic filter chain from the user's OBS settings and sends the result to a virtual audio cable, with no OBS process. The audio goes through the user's own installed OBS filter code.
 
-Success (measured in docs/design.md, Evidence): with OBS closed and knobs in the tray, the mic matches OBS's output wherever that output is repeatable (Evidence on Hand). A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
+Success (measured in docs/design.md, Evidence): with OBS closed and knobs in the tray, the mic sounds as it does in OBS: its output is bit-identical to OBS's, apart from two cases that vary in OBS too (Evidence on Hand). A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
 
 ## Positioning
 
@@ -67,7 +67,7 @@ knobs gives OBS's mic sound without OBS. It loads the filter binaries from the u
 
 ## Product Principles
 
-1. **Fidelity is the product.** Audio passes through OBS's own code, including the VST plugins and NVIDIA runtime it hosts. Nothing in knobs changes the audio, and the app never offers to "enhance" it.
+1. **Fidelity is the product.** The audio goes only through OBS's own filters, and the VST plugins and NVIDIA effects OBS runs. Nothing in knobs changes the audio, and the app never offers to "enhance" it.
 2. **Invisible while it works.** Tray only, starts with Windows, nothing to look at once it's set up.
 3. **Loud when it breaks.** When the mic, the cable or OBS goes missing, say so in a notification that says what to do. Never fail silently.
 4. **OBS is the editor.** Tuning happens in OBS. knobs imports the chain, and for people new to OBS it explains how to set one up there rather than building one itself.

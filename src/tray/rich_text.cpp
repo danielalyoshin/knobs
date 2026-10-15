@@ -2,6 +2,7 @@
 #include "tray/rich_text.h"
 
 #include <algorithm>
+#include <cwctype>
 #include <optional>
 
 #include "util/win_strings.h"
@@ -103,6 +104,24 @@ std::string EscapeMarkup(std::string_view text) {
     }
   }
   return escaped;
+}
+
+void CurlQuotes(std::wstring& text) {
+  for (size_t i = 0; i < text.size(); ++i) {
+    wchar_t& c = text[i];
+    if (c == L'\'') {
+      c = L'\x2019';
+    } else if (c == L'"') {
+      const bool opening = i == 0 || iswspace(text[i - 1]) || text[i - 1] == L'(';
+      c = opening ? L'\x201C' : L'\x201D';
+    }
+  }
+}
+
+std::wstring CurlQuotes(std::wstring_view text) {
+  std::wstring curled(text);
+  CurlQuotes(curled);
+  return curled;
 }
 
 }  // namespace knobs::tray

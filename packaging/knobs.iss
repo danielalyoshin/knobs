@@ -83,9 +83,13 @@ SignedUninstaller=yes
 #endif
 
 [Messages]
-; The tasks page, which only VB-CABLE's task shows.
-SelectTasksDesc=There's no virtual cable on this PC yet.
-SelectTasksLabel2={#AppName} sends your mic to a virtual cable, which your other apps then use as their mic. Setup can install VB-CABLE, a virtual cable from VB-Audio (www.vb-cable.com), with VB-Audio's own setup. Windows asks to let it install its driver.%n%nVB-CABLE is donationware: all participations are welcome.
+; The tasks page, which only VB-CABLE's task shows. The last two sentences
+; are VB-Audio's own words, which its licence asks bundlers to show.
+SelectTasksDesc=There’s no virtual cable on this PC yet.
+SelectTasksLabel2={#AppName} sends your mic to a virtual cable, a sound device that exists only in software, which your other apps choose as their mic. Setup can install VB-CABLE, VB-Audio’s virtual cable, by running VB-Audio’s own installer. Windows asks you to let it install its driver.%n%nThe origin of VB-CABLE: www.vb-cable.com. VB-CABLE is a donationware, all participations are welcome.
+; Only VB-CABLE asks for a restart (NeedRestart), not knobs.
+FinishedRestartLabel=To finish installing VB-CABLE, Windows has to restart. [name] opens again after the restart, to carry on setting up. Would you like to restart now?
+FinishedRestartMessage=To finish installing VB-CABLE, Windows has to restart. [name] opens again after the restart, to carry on setting up.%n%nWould you like to restart now?
 
 [Tasks]
 Name: vbcable; Description: "Install VB-CABLE, from VB-Audio"; Check: OfferVbCable
@@ -282,7 +286,7 @@ begin
                              '"' + ExpandConstant('{app}\{#AppName}.exe') + '" --resume-setup') then
   begin
     Log('Couldn''t write the RunOnce entry that opens {#AppName} after the restart.');
-    SuppressibleMsgBox('{#AppName} can''t open by itself after the restart, so open it once Windows has ' +
+    SuppressibleMsgBox('{#AppName} can’t open by itself after the restart, so open it once Windows has ' +
                        'restarted, to finish setting up VB-CABLE.', mbInformation, MB_OK, IDOK);
   end;
 end;
@@ -292,7 +296,7 @@ end;
 procedure VbCableNotInstalled(const Why: String);
 begin
   Log('VB-CABLE wasn''t installed: ' + Why);
-  SuppressibleMsgBox('VB-CABLE wasn''t installed: ' + Why + #13#10#13#10 + 'When {#AppName} starts, it shows how ' +
+  SuppressibleMsgBox('VB-CABLE wasn’t installed: ' + Why + #13#10#13#10 + 'When {#AppName} starts, it shows how ' +
                      'to install it, step by step.', mbInformation, MB_OK, IDOK);
 end;
 
@@ -310,28 +314,28 @@ begin
   ForceDirectories(Folder);
   ExtractTemporaryFile('{#VbCablePackName}');
   Pack := ExpandConstant('{tmp}\{#VbCablePackName}');
-  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver, then close it.';
-  WizardForm.FilenameLabel.Caption := 'VB-Audio''s website may then open in your browser.';
+  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver, then close that window.';
+  WizardForm.FilenameLabel.Caption := 'VB-Audio’s website may then open in your browser.';
   VbCableRan := True;
   // tar, which ships with Windows, unzips it.
   if not Exec(ExpandConstant('{sys}\tar.exe'), '-xf "' + Pack + '" -C "' + Folder + '"', Folder, SW_HIDE,
               ewWaitUntilTerminated, Code) then
   begin
-    VbCableNotInstalled('Windows'' tar couldn''t unpack its driver pack (' + SysErrorMessage(Code) + ').');
+    VbCableNotInstalled('its driver pack couldn’t be unpacked (' + SysErrorMessage(Code) + ').');
     Exit;
   end;
   if (Code <> 0) or not FileExists(Folder + '\VBCABLE_Setup_x64.exe') then
   begin
-    VbCableNotInstalled(Format('its driver pack didn''t unpack (tar exited with code %d).', [Code]));
+    VbCableNotInstalled(Format('its driver pack couldn’t be unpacked (error %d).', [Code]));
     Exit;
   end;
   if not ShellExec('runas', Folder + '\VBCABLE_Setup_x64.exe', '', Folder, SW_SHOWNORMAL, ewWaitUntilTerminated,
                    Code) then
   begin
     if Code = ErrorCancelled then
-      VbCableNotInstalled('Windows'' prompt to let it install was declined.')
+      VbCableNotInstalled('Windows asked to let it install, and the answer was No.')
     else
-      VbCableNotInstalled('its setup couldn''t start (' + SysErrorMessage(Code) + ').');
+      VbCableNotInstalled('its installer couldn’t start (' + SysErrorMessage(Code) + ').');
     Exit;
   end;
   // Its devices take a moment to appear.
@@ -347,7 +351,7 @@ begin
   if VbCablePending() then
     VbCableNeedsRestart := True
   else
-    VbCableNotInstalled('its setup closed without installing its driver.');
+    VbCableNotInstalled('its installer closed without installing its driver.');
 end;
 
 function NeedRestart(): Boolean;
@@ -511,7 +515,7 @@ begin
     Settings := ExpandConstant('{userappdata}\{#AppName}');
     if DirExists(Settings) and not UninstallSilent() and
        (MsgBox('Also delete your {#AppName} settings?' + #13#10#13#10 +
-               'They''re your choice of mic and cable, whether {#AppName} pauses while OBS is open, and ' +
+               'They’re your choice of mic and cable, whether {#AppName} pauses while OBS is open, and ' +
                'whether it checks for new versions. ' +
                'Keep them if you might install {#AppName} again.',
                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES) then

@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "app_info.h"
+#include "runtime/obs_version.h"
 #include "util/win_strings.h"
 
 namespace knobs::tray {
@@ -132,7 +133,7 @@ MenuItem CableMenu(const core::Snapshot& snapshot, const core::Settings& setting
     menu.cables.push_back(device);
     return Choice(kIdCableFirst + static_cast<unsigned>(menu.cables.size() - 1), Escape(device.name), picked);
   };
-  MenuItem others = Submenu(kIdOtherDevicesMenu, "&Other devices");
+  MenuItem others = Submenu(kIdOtherDevicesMenu, "&Other playback devices");
   size_t cables = 0;
   for (const audio::AudioDevice& device : snapshot.outputs) {
     if (menu.cables.size() >= kMaxCables) break;
@@ -179,7 +180,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
     case State::kPausedForObs:
       return with_chain("Paused while OBS is open");
     case State::kPausedForUpdate:
-      return with_chain(snapshot.nvidia_update ? "Paused for NVIDIA's SDK update" : "Paused for a plugin update");
+      return with_chain(snapshot.nvidia_update ? "Paused while NVIDIA's SDK updates" : "Paused while a plugin updates");
     case State::kMicMissing:
       return with_chain("Mic missing");
     case State::kCableMissing:
@@ -201,13 +202,21 @@ std::string StatusLine(const core::Snapshot& snapshot) {
     case State::kObsMissing:
       return "Can't find OBS Studio";
     case State::kObsUnsupported:
-      return "This version of OBS isn't supported";
+      return ObsUnsupportedLine(snapshot.obs.version);
     case State::kRestartNeeded:
       return std::format("{} needs to restart", kDisplayName);
     case State::kFailed:
       return "Stopped after an error";
   }
   return "";
+}
+
+std::string ObsUnsupportedLine(const runtime::ObsVersion& version) {
+  // Only an OBS newer than knobs supports is "not yet" supported.
+  if (runtime::IsNewerThanSupportedObs(version)) {
+    return std::format("{} doesn't support OBS {} yet", kDisplayName, version.ToString());
+  }
+  return std::format("OBS {} is too old for {}", version.ToString(), kDisplayName);
 }
 
 std::string ShortDeviceName(std::string_view name) {

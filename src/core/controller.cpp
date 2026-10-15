@@ -368,8 +368,8 @@ void Controller::Refresh(Clock::time_point now) {
     if (libobs_spent_) {
       // Only a new process can try again, and the tray starts one by itself.
       return fail(State::kRestartNeeded,
-                  std::format("libobs failed to start, and can't start again while {0} runs. {0} has to restart to "
-                              "try again.",
+                  std::format("OBS's core (libobs) failed to start, and can't start again while {0} runs. {0} has "
+                              "to restart to try again.",
                               kDisplayName));
     }
     const Status started = backend_.StartLibobs(obs.install, audio);
@@ -445,8 +445,8 @@ void Controller::PlanChain() {
   const std::string cable = settings_.cable.empty() ? profile_cable_id_ : settings_.cable;
   if (SameId(cable, kDefaultDevice)) {
     problem_ = Problem{State::kNeedsSetup,
-                       "The OBS profile monitors to the default playback device, which is usually speakers. Choose "
-                       "the cable to send the mic to.",
+                       "OBS's Monitoring Device is Default, which is usually your speakers. Choose the cable to send "
+                       "the mic to.",
                        SetupNeed::kCable};
     return;
   }
@@ -538,7 +538,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.files_held = file_restart_ == FileRestart::kHolding;
     if (next.restart_delayed) {
       next.detail = std::format("{} couldn't restart yet, so it let the installer continue. "
-                                "If the installer says a file is in use, quit {} and retry it.",
+                                "If the installer says a file is in use, quit {}, then retry the installer.",
                                 kDisplayName, kDisplayName);
     } else if (file_restart_nvidia_) {
       next.detail = std::format("An installer is updating NVIDIA's Audio Effects SDK. {} has to restart to let it finish.",
@@ -562,7 +562,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.setup = problem_->setup;
     next.restart = problem_->restart;
   } else if (import_pending_ && !loaded_) {
-    set(paused_by_user_ ? State::kPausedByUser : State::kStarting, "Checking the mic's plugins…");
+    set(paused_by_user_ ? State::kPausedByUser : State::kStarting, "Checking your mic's VST plugins…");
   } else if (chain_error_) {
     set(State::kFailed, *chain_error_);
   } else if (!devices_.error.empty()) {

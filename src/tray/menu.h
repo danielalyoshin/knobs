@@ -82,6 +82,11 @@ struct Menu {
 // Studio". The menu's first line and the tooltip.
 std::string StatusLine(const core::Snapshot& snapshot);
 
+// Why `version` doesn't run: "knobs doesn't support OBS 34.0.0 yet", or "OBS
+// 31.1.4 is too old for knobs". The status line, the notification and the
+// setup page say it alike.
+std::string ObsUnsupportedLine(const runtime::ObsVersion& version);
+
 // "CABLE In 16ch (VB-Audio Virtual Cable)" -> "CABLE In 16ch": a playback
 // device's name without the trailing name of its driver, as Windows' Sound
 // settings shows it on its first line.

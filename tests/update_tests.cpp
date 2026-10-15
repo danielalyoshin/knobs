@@ -161,7 +161,7 @@ TEST(UpdatesSayANewVersionOnce) {
   Updater updater = Make({.check = true});
   std::optional<Notice> notice = updater.Checked(kStart + 1min, Version{0, 3, 0});
   CHECK(notice && notice->kind == Notice::Kind::kUpdateAvailable);
-  CHECK(notice->title == std::format("{} 0.3.0 is out", kDisplayName) && notice->text == "Click to download it.");
+  CHECK(notice->title == std::format("{} 0.3.0 is out", kDisplayName) && notice->text == "Click to see what's new and download it.");
   CHECK(notice->url == "https://github.com/danielalyoshin/knobs/releases/tag/v0.3.0" && !notice->problem);
   CHECK(updater.offer() == (Updater::Offer{{0, 3, 0}, false}));
   // Updating by itself is off: nothing to download.

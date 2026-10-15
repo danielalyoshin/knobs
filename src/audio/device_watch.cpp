@@ -225,7 +225,7 @@ Status CheckPlaybackDevice(std::string_view id, std::string_view name) {
   const auto failed = [name](HRESULT hr) {
     return Error{hr == AUDCLNT_E_DEVICE_IN_USE
                      ? std::format("\"{}\" is in use by another app on its own (exclusive mode), so nothing else can "
-                                   "play into it.",
+                                   "play into it. Close that app, then try again.",
                                    name)
                      : std::format("\"{}\" can't be opened (0x{:08X}).", name, static_cast<uint32_t>(hr))};
   };
