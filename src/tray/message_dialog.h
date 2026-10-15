@@ -5,7 +5,7 @@
 
 #include <string>
 
-// What the tray's windows share: the app icon, and the task dialog that
+// What the tray's windows share: the Windows icon, and the task dialog that
 // tells the user something, with a Close button (an error, About).
 namespace knobs::tray {
 

@@ -67,7 +67,7 @@ Don't open the mic without the user's go-ahead.
 - **No network until the user asks.** The update check is off until it's turned on, and is knobs's only connection of its own; a VST plugin in the chain runs inside knobs and can go online, as it would in OBS. Updating by itself runs only an installer `update::CheckReleaseSignature` accepts, checked again just before it runs.
 - **Never ship libobs.** A from-source build is only for local debugging.
 - Import uses `obs_load_source()`, in its private form `obs_load_private_source()`, never a hand-written replay of the settings (`obs_source_create`, `obs_source_filter_add`).
-- Check OBS behavior (config keys, scene JSON, libobs semantics) against the obs-studio source at the tag matching the installed version. Don't rely on memory.
+- Check OBS behaviour (config keys, scene JSON, libobs semantics) against the obs-studio source at the tag matching the installed version. Don't rely on memory.
 - When the tested OBS versions change, re-vendor the headers at the newest one's tag, revisit the supported range in `src/runtime/obs_version.h`, and update the versions in `build.yml`. An export older supported versions lack goes in `KNOBS_OBS_API_OPTIONAL`, with a fallback.
 
 ## Conventions

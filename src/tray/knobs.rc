@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// knobs.exe's resources: the app icon, the tray's marks, and the version,
+// knobs.exe's resources: the Windows icon, the tray's marks, and the version,
 // which Windows shows in Task Manager and in its list of startup apps.
 
 #include <winver.h>

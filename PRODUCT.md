@@ -47,10 +47,10 @@ knobs gives OBS's mic sound without OBS. It loads the filter binaries from a pri
 The brand's rules (logo, colours, state marks, type, geometry, motion and voice) are in knobs-brand's `brand/BRAND.md`, a git submodule shared with getknobs.app, and the setup window's look in DESIGN.md, drawn from the brand's tokens. These are the commitments for the app:
 
 - **Name:** "knobs", all lowercase, even at the start of a sentence, as in the audio kind. Code keeps it in one constant (`KNOBS_DISPLAY_NAME`), and user-facing strings use that constant.
-- **Tagline:** "Your OBS mic chain, in every app.", the headline of getknobs.app. The README, the About box and the GitHub repository's description use it.
+- **Tagline:** as BRAND.md's Voice gives it, word for word, in the README, the About box and the GitHub repository's description.
 - **Voice:** plain and exact, like the README. Say what happened and what to do, in everyday words. Short sentences, no hype, no exclamation marks, no jokes. Give numbers when they help ("88 ms"). The rest is in BRAND.md's Voice.
 - **Look:** the app's UI is drawn from the brand's tokens, and its icons and installer images are rendered from the brand's logo files (`assets/`), so a change in knobs-brand reaches the app in its next release. The app keeps Windows' own type rather than the brand's. Cap red marks what can be pressed and what is knobs, never an error.
-- **Logo:** the knob mark, the wordmark with its red "obs", and their lockups, used only as BRAND.md says. The app icon is the mark alone, with no tile, and the tray icon is the one-colour mark following the taskbar.
+- **Logo:** the knob mark, the wordmark with its red "obs", and their lockups, used only as BRAND.md says. The Windows icon is the mark alone, with no tile, and the tray icon is the one-colour mark following the taskbar.
 - **Logo licence:** the logo files in knobs-brand's `logo/` and `web/`, and the icons and images rendered from them in `assets/`, are all rights reserved, outside the GPL that covers the code. `TRADEMARKS.md` says how the name and logo may be used; forks need their own.
 - **Independence:** wherever knobs is presented, say: "knobs is an independent project. It isn't affiliated with or endorsed by the OBS Project."
 

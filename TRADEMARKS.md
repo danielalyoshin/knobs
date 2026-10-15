@@ -15,7 +15,7 @@ knobs's code is licensed under GPL-2.0-or-later ([LICENSE](LICENSE)). The logo i
 ## What needs permission
 
 - **Releasing a modified knobs under its name or logo.** A fork that you distribute needs its own name and its own icon. Replace the files in `assets/`, `knobs.ico` included, since the build puts it in the exe, and change the name in `src/app_info.h`.
-- **Changing the logo**, such as recoloring, rotating or stretching the knob, or using it as part of another logo.
+- **Changing the logo**, such as recolouring, rotating or stretching the knob, or using it as part of another logo.
 - **Suggesting that knobs endorses you**, your product or your fork.
 
 To ask, [open an issue](https://github.com/danielalyoshin/knobs/issues).

@@ -2,7 +2,7 @@
 #pragma once
 
 // Resource IDs, shared by the .rc files and the code.
-// The app icon: the colour mark with no tile, the graphite dial and the red
+// The Windows icon: the colour mark with no tile, the graphite dial and the red
 // sweep. It's the exe's icon, as Explorer and Start show it, the installer's,
 // and the windows' and notifications' on a light ground.
 #define IDI_KNOBS 1

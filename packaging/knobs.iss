@@ -428,7 +428,7 @@ begin
   WizardForm.PageDescriptionLabel.Width := WizardForm.PageDescriptionLabel.Width - Grow;
 end;
 
-// The uninstaller shows the app icon in its header, as tall as the lockup is
+// The uninstaller shows the Windows icon in its header, as tall as the lockup is
 // in the installer's. This moves it left to the lockup's margin, 24/58 of the
 // header's height (tools\render-installer-images.ps1), so their right edges
 // line up.

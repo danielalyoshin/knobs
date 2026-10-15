@@ -138,7 +138,7 @@ jobs:
           if [ "$SIGNED" = "true" ]; then
             signing="$name is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows SmartScreen may still warn about a new release until enough people have run it. Choose **More info**, then **Run anyway**."
           else
-            signing="$name isn't code-signed yet, so Windows SmartScreen may warn the first time you run it. Choose **More info**, then **Run anyway**."
+            signing="$name isn’t code-signed yet, so Windows SmartScreen may warn the first time you run it. Choose **More info**, then **Run anyway**."
           fi
           sed -e "s|@NAME@|$name|g" -e "s|@VERSION@|$version|g" -e "s|@SIGNING@|$signing|" .github/release-notes.md > notes.md
           { echo; echo '```'; cat packages/SHA256SUMS.txt; echo '```'; } >> notes.md

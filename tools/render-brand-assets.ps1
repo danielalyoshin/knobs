@@ -6,7 +6,7 @@ Renders knobs's logo files in assets\ from the brand's masters in brand\.
 .DESCRIPTION
 brand\ is the knobs-brand repository, a git submodule. From its logo files,
 with tools\render-icon.ps1 and tools\render-installer-images.ps1, this writes:
-  assets\knobs.ico              the app icon: the colour mark with no tile,
+  assets\knobs.ico              the Windows icon: the colour mark with no tile,
                                 the graphite dial and the red sweep
                                 (brand\logo\svg\knobs-mark-dark.svg)
   assets\knobs-on-dark.ico      the colour mark for dark grounds, the white

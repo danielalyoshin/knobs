@@ -2,13 +2,13 @@
 
 ## Download
 
-- **@NAME@-@VERSION@-setup.exe**: the installer. It installs for your Windows account only and needs no admin rights. With no virtual cable on your PC, it offers to install VB-CABLE, VB-Audio's donationware cable from [www.vb-cable.com](https://vb-cable.com).
+- **@NAME@-@VERSION@-setup.exe**: the installer. It installs for your Windows account only and needs no admin rights. With no virtual cable on your PC, it offers to install VB-CABLE, VB-Audio’s donationware cable from [www.vb-cable.com](https://vb-cable.com).
 - **@NAME@-@VERSION@-portable.zip**: the portable zip. Unzip it anywhere: it keeps its settings and its data in its own folder.
 
 You need 64-bit Windows 10 (version 1803 or later) or 11, OBS Studio 32.2 to 33.x with your mic set up in it, and a virtual cable such as [VB-CABLE](https://vb-audio.com/Cable/). The [setup guide](https://github.com/danielalyoshin/knobs#setup) has the steps.
 
 @SIGNING@
 
-@NAME@ is an independent project. It isn't affiliated with or endorsed by the OBS Project.
+@NAME@ is an independent project. It isn’t affiliated with or endorsed by the OBS Project.
 
 ## Checksums (SHA-256)
