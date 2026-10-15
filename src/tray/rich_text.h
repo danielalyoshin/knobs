@@ -42,7 +42,8 @@ std::string EscapeMarkup(std::string_view text);
 // Typographic quotes for the straight ones in `text`, one for one, so spans
 // stay where they are: apostrophes, and double quotes that open after a space
 // or a bracket and close otherwise. The brand asks for them in everything a
-// reader sees, whatever the copy's source uses.
+// reader sees, whatever the copy's source uses. Quotes in a path or an
+// address, such as C:\Users\O'Brien, are data and stay straight.
 void CurlQuotes(std::wstring& text);
 std::wstring CurlQuotes(std::wstring_view text);
 

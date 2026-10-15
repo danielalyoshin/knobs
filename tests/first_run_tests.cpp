@@ -1013,6 +1013,14 @@ TEST(CurlsQuotesOneForOne) {
   CHECK(curled == L"\x201CMic\x201D isn\x2019t in OBS\x2019s list (\x201C" L"Duck\x201D).\n\x201CTwo\x201D");
   CHECK(curled.size() == straight.size());
 }
+TEST(LeavesQuotesInPathsStraight) {
+  // A path's quotes are data: curled, it would name a folder that isn't there.
+  CHECK(CurlQuotes(L"Couldn't open C:\\Users\\O'Brien\\AppData.") == L"Couldn\x2019t open C:\\Users\\O'Brien\\AppData.");
+  CHECK(CurlQuotes(L"isn't at C:/VST/Bob's.dll any more") == L"isn\x2019t at C:/VST/Bob's.dll any more");
+  CHECK(CurlQuotes(L"See \"D:\\Bob's\" or https://x.org/a'b") == L"See \x201C" L"D:\\Bob's\x201D or https://x.org/a'b");
+  // A word with one slash is prose, such as OBS's Mic/Aux.
+  CHECK(CurlQuotes(L"\"Mic/Aux\" and Mic/Aux's filters") == L"\x201CMic/Aux\x201D and Mic/Aux\x2019s filters");
+}
 
 // --- Resuming, Back and pages asked for -----------------------------------------
 

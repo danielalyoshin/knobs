@@ -70,7 +70,12 @@ TextStyle Style(float size, float line, DWRITE_FONT_WEIGHT weight = DWRITE_FONT_
 Text MakeText(std::string_view text, const TextStyle& style, float width, bool wrap = true, bool markup = true) {
   Text made;
   RichText rich = markup ? ParseRichText(text) : RichText{FromUtf8(text), {}};
-  CurlQuotes(rich.text);
+  // Code keeps its own quotes: a path or a file name is shown as it is.
+  std::wstring curled = CurlQuotes(std::wstring_view(rich.text));
+  for (const TextSpan& span : rich.spans) {
+    if (span.kind == TextSpan::Kind::kCode) curled.replace(span.start, span.length, rich.text, span.start, span.length);
+  }
+  rich.text = std::move(curled);
   // The glyph after each link, if Windows has its icon font: the text after
   // it moves on by one.
   std::vector<uint32_t> inserts;

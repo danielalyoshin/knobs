@@ -2,6 +2,7 @@
 #include "tray/rich_text.h"
 
 #include <algorithm>
+#include <cwchar>
 #include <cwctype>
 #include <optional>
 
@@ -106,8 +107,21 @@ std::string EscapeMarkup(std::string_view text) {
   return escaped;
 }
 
+namespace {
+
+// Whether a word is a path or an address, such as C:\Users\O'Brien or
+// C:/VST/Bob's.dll: a backslash, a drive, "://" or two slashes. Its quotes are
+// data, not prose.
+bool IsPath(std::wstring_view word) {
+  if (word.find(L'\\') != std::wstring_view::npos || word.find(L"://") != std::wstring_view::npos) return true;
+  if (word.size() >= 3 && iswalpha(word[0]) && word[1] == L':' && (word[2] == L'/' || word[2] == L'\\')) return true;
+  return std::count(word.begin(), word.end(), L'/') >= 2;
+}
+
+}  // namespace
+
 void CurlQuotes(std::wstring& text) {
-  for (size_t i = 0; i < text.size(); ++i) {
+  const auto curl = [&text](size_t i) {
     wchar_t& c = text[i];
     if (c == L'\'') {
       c = L'\x2019';
@@ -115,6 +129,26 @@ void CurlQuotes(std::wstring& text) {
       const bool opening = i == 0 || iswspace(text[i - 1]) || text[i - 1] == L'(';
       c = opening ? L'\x201C' : L'\x201D';
     }
+  };
+  // Word by word: a path's own quotes stay straight, though quotes and
+  // punctuation round it are still prose.
+  const auto opens = [](wchar_t c) { return c == L'"' || c == L'\'' || c == L'('; };
+  const auto closes = [](wchar_t c) { return c == L'"' || c == L'\'' || std::wcschr(L").,:;!?", c); };
+  for (size_t at = 0; at < text.size();) {
+    if (iswspace(text[at])) {
+      ++at;
+      continue;
+    }
+    size_t end = at;
+    while (end < text.size() && !iswspace(text[end])) ++end;
+    size_t inner = at, inner_end = end;
+    while (inner < end && opens(text[inner])) ++inner;
+    while (inner_end > inner && closes(text[inner_end - 1])) --inner_end;
+    const bool path = IsPath(std::wstring_view(text).substr(inner, inner_end - inner));
+    for (size_t i = at; i < end; ++i) {
+      if (!path || i < inner || i >= inner_end) curl(i);
+    }
+    at = end;
   }
 }
 

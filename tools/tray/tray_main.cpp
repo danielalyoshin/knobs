@@ -136,9 +136,10 @@ Options:
   --screenshot <png>     Open the menu, or the first run, save a picture of it,
                          and quit. After --press, a dialog the keys opened.
   --open <name>          With --screenshot, open mic, cable or other (Cable's
-                         "Other devices") for the picture. about takes that
-                         dialog instead of the menu, and notification the
-                         notification the keys bring up, from the screen.
+                         "Other playback devices") for the picture. about
+                         takes that dialog instead of the menu, and
+                         notification the notification the keys bring up,
+                         from the screen.
   --icons <png>          Save a sheet of the tray icon with each badge, at
                          16, 20, 24 and 32 px on a light and a dark taskbar,
                          and quit.
@@ -310,7 +311,7 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     } else if (arg == L"--screenshot") {
       options.screenshot = fs::absolute(value);
     } else if (arg == L"--open") {
-      // The mnemonics: &Mic, &Cable, then &Other devices.
+      // The mnemonics: &Mic, &Cable, then &Other playback devices.
       if (value == L"mic") {
         options.keys = L"m";
       } else if (value == L"cable") {
