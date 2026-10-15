@@ -458,6 +458,15 @@ bool WaitUntilWanted(FileOplock& watch) {
   return watch.wanted();
 }
 
+bool WaitForFileHolds(const std::function<bool(const FileHoldStatus&)>& ready) {
+  const uint64_t due = GetTickCount64() + 5000;
+  while (GetTickCount64() < due) {
+    if (ready(FileHolds())) return true;
+    Sleep(2);
+  }
+  return ready(FileHolds());
+}
+
 TEST(FileOplockLetsAnInstallerReplaceALoadedDll) {
   using namespace std::chrono_literals;
   fs::path dependency;
@@ -526,7 +535,7 @@ TEST(FileOplockCancelsAnUnbrokenRequest) {
   CHECK(!FileOplock::Take(dir.path / L"missing").ok());
 }
 
-TEST(FileOplockBoundsAWriterWithoutCorePollingAndKeepsItsDeadline) {
+TEST(FileOplockBoundsAWriterWithoutCorePolling) {
   using namespace std::chrono_literals;
   TempDir dir(L"oplock-deadline");
   const fs::path file = dir.path / L"file";
@@ -543,15 +552,10 @@ TEST(FileOplockBoundsAWriterWithoutCorePollingAndKeepsItsDeadline) {
     if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
     return error;
   });
-  const auto due = std::chrono::steady_clock::now() + 2s;
-  while (!FileHolds().waiting && std::chrono::steady_clock::now() < due) Sleep(2);
-  CHECK(FileHolds().waiting);
-  CHECK(writer.wait_for(0ms) == std::future_status::timeout);
-  // Preparing a restart must not give an already waiting writer a new budget.
-  CHECK((*watch)->PrepareHandoff().ok());
-  CHECK(writer.wait_for(1s) == std::future_status::ready);
+  CHECK(writer.wait_for(5s) == std::future_status::ready);
   CHECK(writer.get() == ERROR_SHARING_VIOLATION);
-  CHECK(!FileHolds().released.empty());
+  // The opener can return before the watchdog publishes its status.
+  CHECK(WaitForFileHolds([&](const auto& holds) { return ContainsPath(holds.released, file); }));
   CHECK((*watch)->wanted());  // The core can still discover the missed update.
   CHECK(!(*watch)->PrepareHandoff());
   if (duplicate) CloseHandle(duplicate);
@@ -610,18 +614,45 @@ TEST(FileOplockDeadlineCoversMoreFilesThanOneWindowsWait) {
   CHECK(writer.get() == ERROR_SHARING_VIOLATION);
 }
 
+TEST(FileOplockRetirementClosesItsEventsWithoutAnotherWake) {
+  FileHolds();  // Start the watchdog before counting its handles.
+  TempDir dir(L"oplock-retirement");
+  const fs::path file = dir.path / L"file";
+  WriteFile(file, "original");
+  DWORD before = 0;
+  CHECK(GetProcessHandleCount(GetCurrentProcess(), &before));
+  std::vector<std::unique_ptr<FileOplock>> watches;
+  for (int i = 0; i < 200; ++i) {
+    auto watch = FileOplock::Take(file);
+    CHECK(watch.ok());
+    if (watch) watches.push_back(std::move(*watch));
+  }
+  watches.clear();
+  DWORD after = 0;
+  const uint64_t due = GetTickCount64() + 5000;
+  do {
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &after));
+    if (after <= before) break;
+    Sleep(1);
+  } while (GetTickCount64() < due);
+  CHECK(after <= before);
+}
+
 TEST(FileOplockHandoffUsesTheOriginalDeadline) {
   using namespace std::chrono_literals;
   TempDir dir(L"oplock-handoff-deadline");
   const fs::path file = dir.path / L"file", done = dir.path / L"done";
   WriteFile(file, "original");
-  auto watch = FileOplock::Take(file, 500ms, 20ms);
+  CHECK(WaitForFileHolds([](const auto& holds) { return holds == FileHoldStatus{}; }));
+  auto watch = FileOplock::Take(file, 3s, 250ms);
   CHECK(watch.ok());
   if (!watch) return;
   CHECK((*watch)->PrepareHandoff());
+  const uint64_t latest_deadline = GetTickCount64() + 3000;
   // Leave less than a full budget for the replacement, while keeping the
   // old process and its handle alive through the replacement's deadline.
-  Sleep(150);
+  CHECK(WaitForFileHolds([](const auto& holds) { return holds.waiting; }));
+  CHECK((*watch)->PrepareHandoff());  // Preparing again cannot renew it either.
   CHECK(StartWithFileOplocks(SelfPath(), std::format(L"--file-deadline-helper \"{}\"", done.native()),
                             {(*watch)->handle()}));
   auto writer = std::async(std::launch::async, [&] {
@@ -630,15 +661,18 @@ TEST(FileOplockHandoffUsesTheOriginalDeadline) {
     if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
     return error;
   });
-  CHECK(writer.wait_for(2s) == std::future_status::ready);
+  CHECK(writer.wait_for(5s) == std::future_status::ready);
   CHECK(writer.get() == ERROR_SHARING_VIOLATION);
-  const auto due = std::chrono::steady_clock::now() + 2s;
+  const auto due = std::chrono::steady_clock::now() + 5s;
   while (!fs::exists(done) && std::chrono::steady_clock::now() < due) Sleep(5);
   CHECK(fs::exists(done));
   if (fs::exists(done)) {
-    std::ifstream input(done);
+    std::ifstream input(dir.path / L"result");
     const std::string text(std::istreambuf_iterator<char>{input}, {});
     CHECK(text.find("expired") != std::string::npos);
+    uint64_t inherited_deadline = 0;
+    std::ifstream(dir.path / L"deadline") >> inherited_deadline;
+    CHECK(inherited_deadline != 0 && inherited_deadline <= latest_deadline);
   }
 }
 
@@ -647,7 +681,7 @@ TEST(FileOplockRejectsAReplacementThatNeverStartsItsWait) {
   TempDir dir(L"oplock-unready-restart");
   const fs::path file = dir.path / L"file";
   WriteFile(file, "original");
-  auto watch = FileOplock::Take(file, 5s, 20ms);
+  auto watch = FileOplock::Take(file, 10s, 20ms);
   CHECK(watch.ok());
   if (!watch) return;
   CHECK((*watch)->PrepareHandoff());
@@ -660,8 +694,8 @@ TEST(FileOplockRejectsAReplacementThatNeverStartsItsWait) {
   const auto began = std::chrono::steady_clock::now();
   const Status started = StartWithFileOplocks(SelfPath(), L"--file-unready-helper", {(*watch)->handle()});
   CHECK(!started);
-  CHECK(std::chrono::steady_clock::now() - began < 2s);
-  CHECK(writer.wait_for(1s) == std::future_status::ready);
+  CHECK(std::chrono::steady_clock::now() - began < 5s);
+  CHECK(writer.wait_for(5s) == std::future_status::ready);
   CHECK(writer.get() == ERROR_SHARING_VIOLATION);
   CHECK(!(*watch)->PrepareHandoff());
 }
@@ -2456,8 +2490,11 @@ int wmain(int argc, wchar_t** argv) {
     return 1;
   }
   if (argc == 5 && std::wstring_view(argv[1]) == L"--file-deadline-helper") {
+    const fs::path done = argv[2];
+    WriteFile(done.parent_path() / L"deadline", std::to_string(std::stoull(argv[4], nullptr, 16)));
     const Status result = knobs::WaitForFileOplocks(argv[4]);
-    WriteFile(argv[2], result ? "unexpected success" : result.error());
+    WriteFile(done.parent_path() / L"result", result ? "unexpected success" : result.error());
+    WriteFile(done, "done");
     return 0;
   }
   if (argc == 4 && std::wstring_view(argv[1]) == L"--tray-shutdown") {

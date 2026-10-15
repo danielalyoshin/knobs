@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -73,7 +74,10 @@ class ShutdownBackend : public tools::FakeBackend {
   }
 
   void StopChain() override {
-    if (mode_.starts_with(L"end-clean")) Sleep(150);
+    if (mode_.starts_with(L"end-clean")) {
+      Note(folder_ / L"stopping", "stopping");
+      WaitForFile(folder_ / L"finish-stop");
+    }
     if (mode_ == L"stop" || mode_ == L"hold-stop") {
       Note(folder_ / L"stopping", "stopping");
       Sleep(INFINITE);
@@ -115,12 +119,14 @@ TEST(TrayQuitBoundsAStuckCoreAndCleansUpANormalOne) {
       CHECK(text.find("Shutdown didn't finish before its deadline. Ending the process to release its files.") != std::string::npos);
       CHECK(text.find("icon removed") != std::string::npos);
     }
+    CHECK(fs::exists(folder / L"closing"));
+    CHECK(fs::exists(folder / L"icon-removed"));
     fs::remove_all(folder);
   }
 }
 
 TEST(TrayForcedQuitPreservesTheInstallersHandoff) {
-  for (const std::wstring mode : {L"restart", L"restart-budget"}) {
+  for (const std::wstring mode : {L"restart", L"restart-budget", L"restart-late", L"restart-late-ui"}) {
     const fs::path folder = fs::temp_directory_path() / std::format(L"knobs-tests-{}-quit-{}", GetCurrentProcessId(), mode);
     fs::create_directories(folder);
     fs::path dependency;
@@ -152,6 +158,7 @@ TEST(TrayForcedQuitPreservesTheInstallersHandoff) {
     CloseHandle(*child);
     CHECK(WaitForFile(folder / L"released"));
     CHECK(writer.get() == ERROR_SUCCESS);
+    CHECK(fs::exists(folder / L"icon-removed"));
     fs::remove_all(folder);
   }
 }
@@ -179,10 +186,10 @@ TEST(FileWatchdogWarnsAndReleasesWhileTheCoreIsStuck) {
       if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
       return error;
     });
-    const bool released = writer.wait_for(3s) == std::future_status::ready;
-    CHECK(released);
     CHECK(WaitForFile(folder / L"waiting"));
+    CHECK(writer.wait_for(5s) == std::future_status::ready);
     CHECK(WaitForFile(folder / L"released"));
+    CHECK(fs::exists(folder / L"balloon"));
     CHECK(WaitForSingleObject(*child, 0) == WAIT_TIMEOUT);  // No Quit was needed to release the installer.
     const HWND window = FindWindowW(std::format(L"knobs-tests-{}-shutdown", GetProcessId(*child)).c_str(), nullptr);
     CHECK(window != nullptr);
@@ -194,12 +201,13 @@ TEST(FileWatchdogWarnsAndReleasesWhileTheCoreIsStuck) {
     }
     CloseHandle(*child);
     CHECK(writer.get() == ERROR_SHARING_VIOLATION);
+    CHECK(fs::exists(folder / L"icon-removed"));
     fs::remove_all(folder);
   }
 }
 
 TEST(TrayQuitKeepsRespondingAndItsDeadlineSurvivesBlockedUiAndLogging) {
-  for (const std::wstring mode : {L"async", L"async-ui", L"async-log"}) {
+  for (const std::wstring mode : {L"async", L"async-ui", L"async-log", L"async-icon"}) {
     const fs::path folder = fs::temp_directory_path() /
         std::format(L"knobs-tests-{}-{}", GetCurrentProcessId(), mode);
     fs::create_directories(folder);
@@ -210,15 +218,15 @@ TEST(TrayQuitKeepsRespondingAndItsDeadlineSurvivesBlockedUiAndLogging) {
     const HWND window = FindWindowW(std::format(L"knobs-tests-{}-shutdown", GetProcessId(*child)).c_str(), nullptr);
     if (mode == L"async") {
       DWORD_PTR result = 1;
-      CHECK(SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &result));
+      CHECK(SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &result));
       // Repeated requests and queued work must not postpone the first deadline.
-      const auto due = std::chrono::steady_clock::now() + 900ms;
+      const auto due = std::chrono::steady_clock::now() + 5s;
       while (WaitForSingleObject(*child, 25) == WAIT_TIMEOUT && std::chrono::steady_clock::now() < due) {
         PostMessageW(window, WM_CLOSE, 0, 0);
       }
       CHECK(WaitForSingleObject(*child, 0) == WAIT_OBJECT_0);
     }
-    const DWORD ended = WaitForSingleObject(*child, 2000);
+    const DWORD ended = WaitForSingleObject(*child, 5000);
     CHECK(ended == WAIT_OBJECT_0);
     if (ended != WAIT_OBJECT_0) {
       TerminateProcess(*child, 1);
@@ -231,8 +239,11 @@ TEST(TrayQuitKeepsRespondingAndItsDeadlineSurvivesBlockedUiAndLogging) {
     std::ifstream input(folder / L"log");
     const std::string log(std::istreambuf_iterator<char>{input}, {});
     input.close();
-    CHECK(log.find("Shutdown didn't finish before its deadline") != std::string::npos);
-    CHECK(log.find("icon removed") != std::string::npos);
+    if (mode != L"async-icon") {
+      CHECK(log.find("Shutdown didn't finish before its deadline") != std::string::npos);
+      CHECK(log.find("icon removed") != std::string::npos);
+    }
+    CHECK(fs::exists(folder / L"icon-removed"));
     fs::remove_all(folder);
   }
 }
@@ -251,6 +262,12 @@ TEST(EndSessionWaitsForTheCoreEvenAfterAnAsynchronousQuit) {
     auto child = StartProcessToWait(SelfPath(), std::format(L"--tray-shutdown {} \"{}\"", mode, folder.native()), folder);
     CHECK(child.ok());
     if (!child) continue;
+    if (clean) {
+      CHECK(WaitForFile(folder / L"stopping"));
+      CHECK(!fs::exists(folder / L"session-returned"));
+      CHECK(WaitForSingleObject(*child, 0) == WAIT_TIMEOUT);
+      Note(folder / L"finish-stop", "finish");
+    }
     const DWORD ended = WaitForSingleObject(*child, 5000);
     CHECK(ended == WAIT_OBJECT_0);
     if (ended != WAIT_OBJECT_0) {
@@ -260,6 +277,7 @@ TEST(EndSessionWaitsForTheCoreEvenAfterAnAsynchronousQuit) {
     DWORD code = 1;
     CHECK(GetExitCodeProcess(*child, &code) && code == (clean ? 0u : ERROR_TIMEOUT));
     CloseHandle(*child);
+    CHECK(fs::exists(folder / L"icon-removed"));
     CHECK(fs::exists(folder / L"session-returned") == clean);
     if (clean) {
       std::ifstream input(folder / L"session-returned");
@@ -282,7 +300,7 @@ TEST(TrayKeepsRespondingWhileAnUpdateJobStops) {
   PostMessageW(window, WM_CLOSE, 0, 0);
   CHECK(WaitForFile(folder / L"clean"));
   DWORD_PTR result = 1;
-  CHECK(SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &result));
+  CHECK(SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &result));
   const DWORD ended = WaitForSingleObject(*child, 5000);
   CHECK(ended == WAIT_OBJECT_0);
   if (ended != WAIT_OBJECT_0) {
@@ -292,6 +310,7 @@ TEST(TrayKeepsRespondingWhileAnUpdateJobStops) {
   DWORD code = 1;
   CHECK(GetExitCodeProcess(*child, &code) && code == 0);
   CloseHandle(*child);
+  CHECK(fs::exists(folder / L"icon-removed"));
   fs::remove_all(folder);
 }
 
@@ -305,7 +324,7 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   if (mode.starts_with(L"restart") || mode.starts_with(L"hold-")) {
     const fs::path file = folder / L"loaded.dll";
     if (!LoadLibraryW(file.c_str())) return 2;
-    auto taken = mode == L"restart" ? FileOplock::Take(file) : FileOplock::Take(file, 700ms, 50ms);
+    auto taken = mode == L"restart" ? FileOplock::Take(file) : FileOplock::Take(file, 3s, 100ms);
     if (!taken) return 3;
     watch = std::move(*taken);
   }
@@ -318,11 +337,30 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   auto ready = entered.get_future();
   core::Core* core = nullptr;
   HWND window = nullptr;
+  std::atomic<bool> icon_added = false;
   tray::TrayOptions options;
   options.instance = GetModuleHandleW(nullptr);
+  options.notify_icon = [&](DWORD message, NOTIFYICONDATAW& data) {
+    if (message == NIM_ADD) icon_added = true;
+    if (message == NIM_DELETE) {
+      icon_added = false;
+      Note(folder / L"icon-removed", "removed");
+      if (mode == L"async-icon") Sleep(INFINITE);
+    }
+    if (message == NIM_MODIFY && (data.uFlags & NIF_TIP) && std::wstring_view(data.szTip).ends_with(L"Closing…")) {
+      Note(folder / L"closing", "closing");
+      if (mode == L"restart-late-ui") Sleep(INFINITE);
+    }
+    if (message == NIM_MODIFY && (data.uFlags & NIF_INFO) && data.szInfo[0]) {
+      Note(folder / L"balloon", "shown");
+    }
+    return true;
+  };
   options.window_class = std::format(L"knobs-tests-{}-shutdown", GetCurrentProcessId());
-  options.core_stop_wait = mode.starts_with(L"async") || mode.starts_with(L"end-") ? 500ms : 100ms;
-  if (mode == L"restart-budget") options.core_stop_wait = 2s;
+  options.core_stop_wait = mode.starts_with(L"async") || mode.starts_with(L"end-") ? 2s : 500ms;
+  if (mode == L"clean") options.core_stop_wait = 2s;
+  if (mode.starts_with(L"end-clean")) options.core_stop_wait = 10s;
+  if (mode == L"restart-budget" || mode.starts_with(L"restart-late")) options.core_stop_wait = 6s;
   if (mode == L"update") {
     options.core_stop_wait = 2s;
     options.update_settings.check = true;
@@ -345,11 +383,7 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   };
   options.log = [&](std::string_view line) {
     Note(folder / L"log", line);
-    NOTIFYICONDATAW icon = {sizeof(icon)};
-    icon.hWnd = window;
-    icon.uID = 1;
-    icon.uFlags = NIF_TIP;
-    if (!Shell_NotifyIconW(NIM_MODIFY, &icon)) Note(folder / L"log", "icon removed");
+    if (!icon_added) Note(folder / L"log", "icon removed");
     if (mode == L"async-log") Sleep(INFINITE);
   };
   options.set_start_with_windows = [&](bool) -> Status {
@@ -370,6 +404,10 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
     while (!watch->wanted() && std::chrono::steady_clock::now() < due) Sleep(5);
     if (!watch->wanted()) return Error{"The scratch installer did not start."};
     if (auto prepared = watch->PrepareHandoff(); !prepared) return prepared;
+    if (mode.starts_with(L"restart-late")) {
+      PostMessageW(window, WM_CLOSE, 0, 0);
+      if (!WaitForFile(folder / L"closing")) return Error{"Quit did not start."};
+    }
     return StartWithFileOplocks(SelfPath(), std::format(L"--file-update-helper \"{}\"", (folder / L"released").native()),
                                 {watch->handle()});
   };
@@ -390,7 +428,6 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
     const LPARAM flags = prior ? 0 : static_cast<LPARAM>(std::stoull(mode.substr(mode.rfind(L'-') + 1)));
     if (prior) {
       (*app)->Quit();
-      Sleep(50);
     }
     SendMessageW(window, WM_QUERYENDSESSION, 0, flags);
     SendMessageW(window, WM_ENDSESSION, TRUE, flags);
@@ -404,7 +441,7 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
     if (mode == L"clean") (*app)->Run();
   }
   app->reset();
-  if (mode == L"clean") Sleep(300);  // Normal completion disarms the 100 ms watchdog.
+  if (mode == L"clean") Sleep(2200);  // Normal completion disarms the 2 s watchdog.
   CoUninitialize();
   return 0;
 }

@@ -16,7 +16,8 @@ class ShutdownWatchdog {
  public:
   static Result<std::unique_ptr<ShutdownWatchdog>> Start(std::function<void()> before_exit);
   ~ShutdownWatchdog();
-  // The first call sets the deadline. Further calls cannot extend it.
+  // The first call sets the deadline. Further calls cannot extend it. A file
+  // handoff can shorten it, including one completed after this call.
   void Arm(std::chrono::milliseconds wait);
   // False once expiry has won the race with normal completion.
   bool Disarm();

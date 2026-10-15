@@ -12,6 +12,7 @@
 #include <thread>
 #include <utility>
 
+#include "util/files_in_use.h"
 #include "util/win_strings.h"
 
 namespace knobs::tray {
@@ -36,6 +37,16 @@ struct ShutdownWatchdog::State {
     for (;;) {
       uint64_t deadline = due.load();
       if (deadline == kDisarmed) return;
+      // A restart already running on the core can finish its handoff after
+      // Quit. Follow that deadline even while the tray cannot pump messages.
+      // Leave the cleanup allowance and process termination inside the hold.
+      if (const uint64_t handoff = FileHandoffDeadline(); deadline && handoff) {
+        const uint64_t shorter = handoff > 200 ? handoff - 200 : 1;
+        if (shorter < deadline) {
+          due.compare_exchange_strong(deadline, shorter);
+          continue;
+        }
+      }
       const uint64_t now = GetTickCount64();
       if (deadline && now >= deadline) {
         if (!due.compare_exchange_strong(deadline, kExpired)) continue;
@@ -45,7 +56,7 @@ struct ShutdownWatchdog::State {
         TerminateProcess(GetCurrentProcess(), ERROR_TIMEOUT);
         return;
       }
-      const DWORD delay = deadline ? static_cast<DWORD>(std::min<uint64_t>(deadline - now, INFINITE - 1)) : INFINITE;
+      const DWORD delay = deadline ? static_cast<DWORD>(std::min<uint64_t>(deadline - now, 20)) : INFINITE;
       if (WaitForMultipleObjects(2, events, FALSE, delay) == WAIT_OBJECT_0) return;
     }
   }

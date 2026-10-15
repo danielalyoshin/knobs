@@ -30,6 +30,8 @@ namespace fs = std::filesystem;
 // shared with many others.
 constexpr int kFingerprintDepth = 2;
 constexpr size_t kFingerprintFiles = 5000;
+// Read by the shutdown watchdog without taking the file watchdog's mutex.
+std::atomic<uint64_t> handoff_deadline = 0;
 
 struct Handles {
   std::vector<HANDLE> values;
@@ -165,7 +167,6 @@ struct FileOplockWatchdog {
   std::mutex mutex;
   std::vector<std::weak_ptr<Request>> requests;
   FileHoldStatus status;
-  uint64_t handoff_deadline = 0;
   HWND window = nullptr;
   UINT message = 0;
   std::atomic<bool> stop = false;
@@ -295,9 +296,7 @@ FileHoldStatus FileHolds() {
 }
 
 uint64_t FileHandoffDeadline() {
-  auto& watchdog = FileOplockWatchdog::Get();
-  std::lock_guard lock(watchdog.mutex);
-  return watchdog.handoff_deadline;
+  return handoff_deadline.load();
 }
 
 void WatchFileHolds(uintptr_t window, unsigned message) {
@@ -330,6 +329,9 @@ Result<std::unique_ptr<FileOplock>> FileOplock::Take(const fs::path& file, std::
 
 FileOplock::~FileOplock() {
   if (request_) request_->Retire();
+  // Drop the owner before waking the watchdog. Its next wait must not keep
+  // a retired request's events alive until another watch changes.
+  request_.reset();
   SetEvent(FileOplockWatchdog::Get().wake);
 }
 
@@ -390,6 +392,12 @@ Status FileOplock::PrepareHandoff() {
       !(request_->output.Flags & REQUEST_OPLOCK_OUTPUT_FLAG_ACK_REQUIRED)) {
     return Error{std::format("Windows didn't preserve the oplock on {} for handoff.", ToUtf8(file_))};
   }
+  {
+    std::lock_guard lock(request_->mutex);
+    if (request_->expired) return Error{"The file hold expired before it could be handed over."};
+    if (!request_->since) request_->since = GetTickCount64();
+  }
+  SetEvent(FileOplockWatchdog::Get().wake);
   return Ok{};
 }
 
@@ -453,11 +461,8 @@ Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, co
     TerminateProcess(child.hProcess, ERROR_TIMEOUT);
     return Error{"The replacement didn't start waiting for the files in time."};
   }
-  {
-    auto& watchdog = FileOplockWatchdog::Get();
-    std::lock_guard lock(watchdog.mutex);
-    if (!watchdog.handoff_deadline || deadline < watchdog.handoff_deadline) watchdog.handoff_deadline = deadline;
-  }
+  uint64_t previous = handoff_deadline.load();
+  while ((!previous || deadline < previous) && !handoff_deadline.compare_exchange_weak(previous, deadline)) {}
   return Ok{};
 }
 

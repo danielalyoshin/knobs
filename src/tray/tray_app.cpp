@@ -186,11 +186,11 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   ApplyMenuTheme(opts.theme);
   app->AddIcon();
   WatchFileHolds(reinterpret_cast<uintptr_t>(app->window_), kFileHoldMessage);
-  auto watchdog = ShutdownWatchdog::Start([window = app->window_, log = opts.log] {
+  auto watchdog = ShutdownWatchdog::Start([window = app->window_, log = opts.log, notify_icon = opts.notify_icon] {
     NOTIFYICONDATAW data = {sizeof(data)};
     data.hWnd = window;
     data.uID = kIconId;
-    Shell_NotifyIconW(NIM_DELETE, &data);
+    notify_icon(NIM_DELETE, data);
     constexpr char reason[] = "Shutdown didn't finish before its deadline. Ending the process to release its files.";
     if (log) log(reason);
     else OutputDebugStringA(reason);
@@ -251,15 +251,7 @@ Status TrayApp::Run() {
 void TrayApp::Quit() {
   if (quitting_) return;
   quitting_ = true;
-  auto wait = options_.core_stop_wait;
-  if (const uint64_t deadline = FileHandoffDeadline()) {
-    // Keep the cleanup allowance inside the file hold's existing budget,
-    // with a little time for Windows to finish terminating this process.
-    const uint64_t now = GetTickCount64();
-    const auto left = std::chrono::milliseconds(deadline > now + 200 ? deadline - now - 200 : 1);
-    wait = std::min(wait, left);
-  }
-  if (shutdown_watchdog_) shutdown_watchdog_->Arm(wait);
+  if (shutdown_watchdog_) shutdown_watchdog_->Arm(options_.core_stop_wait);
   update_stop_due_ = Clock::now() + kUpdateStopWait;
   if (window_) SetTimer(window_, kQuitTimer, 20, nullptr);
   if (in_menu_) EndMenu();
@@ -308,7 +300,7 @@ void TrayApp::RemoveIcon() {
     NOTIFYICONDATAW data = {sizeof(data)};
     data.hWnd = window_;
     data.uID = kIconId;
-    Shell_NotifyIconW(NIM_DELETE, &data);
+    options_.notify_icon(NIM_DELETE, data);
     icon_added_ = false;
   }
 }
@@ -345,7 +337,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     NOTIFYICONDATAW data = {sizeof(data)};
     data.hWnd = window_;
     data.uID = kIconId;
-    Shell_NotifyIconW(NIM_DELETE, &data);
+    options_.notify_icon(NIM_DELETE, data);
     icon_added_ = false;
     LoadIcons();
     AddIcon();
@@ -546,9 +538,9 @@ void TrayApp::AddIcon() {
   data.hIcon = icons_[static_cast<size_t>(badge_)];
   // Fails while Explorer is starting, at sign-in; TaskbarCreated comes once
   // it's up.
-  if (!Shell_NotifyIconW(NIM_ADD, &data)) return;
+  if (!options_.notify_icon(NIM_ADD, data)) return;
   data.uVersion = NOTIFYICON_VERSION_4;
-  Shell_NotifyIconW(NIM_SETVERSION, &data);
+  options_.notify_icon(NIM_SETVERSION, data);
   icon_added_ = true;
   UpdateTip();
 }
@@ -568,7 +560,7 @@ void TrayApp::ModifyIcon(NOTIFYICONDATAW& data) {
   }
   tip.copy(data.szTip, tip.size());
   data.szTip[tip.size()] = L'\0';
-  Shell_NotifyIconW(NIM_MODIFY, &data);
+  options_.notify_icon(NIM_MODIFY, data);
 }
 
 void TrayApp::UpdateTip() {

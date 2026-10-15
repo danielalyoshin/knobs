@@ -72,6 +72,11 @@ struct UpdateHooks {
 
 struct TrayOptions {
   HINSTANCE instance = nullptr;  // Holds the icon (IDI_KNOBS).
+  // The icon and its balloons, including removal by the shutdown watchdog.
+  // Tests record these calls without showing anything on the desktop. The
+  // hook must also be safe to call from the watchdog's worker.
+  std::function<bool(DWORD message, NOTIFYICONDATAW& data)> notify_icon =
+      [](DWORD message, NOTIFYICONDATAW& data) { return Shell_NotifyIconW(message, &data) != FALSE; };
   // Names the hidden window's class, so another copy can find it
   // (ActivateTray).
   std::wstring window_class;
@@ -84,8 +89,8 @@ struct TrayOptions {
   // The copy before this one was paused, and restarted: the core starts
   // paused.
   bool start_paused = false;
-  // A stuck core must not outlast the replacement's 30 s wait. Tests can
-  // shorten this to exercise process termination without a long delay.
+  // The shutdown deadline, shortened to fit a restart's file handoff.
+  // Tests can shorten this to exercise termination without a long delay.
   std::chrono::milliseconds core_stop_wait{10000};
   // Where the settings are kept. Empty: `settings` and `first_run` are used
   // and nothing is saved.
