@@ -14,6 +14,11 @@ enum class MenuTheme {
 // Whether Windows' mode (Settings > Personalization > Colors) is dark.
 bool WindowsModeIsDark();
 
+// Whether the taskbar, and the notifications and menus that open from it,
+// are dark: under high contrast by the user's window colour, else by `theme`,
+// where kSystem follows Windows' mode.
+bool TaskbarIsDark(MenuTheme theme);
+
 // Makes this process's popup menus light or dark, through uxtheme's
 // SetPreferredAppMode, which is exported by ordinal only (Windows 10 1903
 // and later). Without it, menus stay light. Call again when the mode

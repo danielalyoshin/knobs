@@ -1,18 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 <#
 .SYNOPSIS
-Renders the installer's wizard images from the logo's SVG masters.
+Renders the installer's wizard images from the brand's logo masters.
 
 .DESCRIPTION
 Writes assets\installer\:
   wizard-<width>.png  the large image, on the "Completing setup" page: the
-                      stacked lockup, centered on the knob's light graphite
-                      (#e8eaee)
+                      stacked lockup with dark ink, centered on the brand's
+                      light ground (scheme.light.ground in
+                      brand\dist\tokens.flat.json)
   header-<size>.png   the header image, top right on the other pages: the
-                      horizontal lockup, centered on a transparent ground as
-                      tall as the header, with a margin on its right
+                      horizontal lockup with dark ink, centered on a
+                      transparent ground as tall as the header, with a margin
+                      on its right
 at each size Inno Setup 6 asks for, from 100% to 250% display scaling. Setup
 picks the wizard image that fits, and the installer's code the header image.
+The lockups are brand\logo\svg's. The installer fills the rest of the wizard
+image's area with the same ground, which packaging\package.ps1 passes it.
 
 As tools\render-icon.ps1 does: headless Edge draws each SVG once on black and
 once on white, with 8x8 device pixels to each of the image's, and each block
@@ -20,13 +24,25 @@ is averaged into one pixel, with its alpha from the two pictures. Edge runs
 with a profile of its own in a temporary folder, so a running Edge isn't
 touched.
 
+.PARAMETER Ground
+The wizard image's ground, as #rrggbb. By default, the brand's light ground.
+
 .EXAMPLE
 tools\render-installer-images.ps1
 #>
-param([string]$Out = (Join-Path $PSScriptRoot '..\assets\installer'))
+param(
+    [string]$Out = (Join-Path (Split-Path -Parent $PSScriptRoot) 'assets\installer'),
+    [string]$Ground
+)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$brand = Join-Path $root 'brand'
+if (-not (Test-Path "$brand\logo\svg")) { throw "brand\ is empty. Run: git submodule update --init" }
+if (-not $Ground) {
+    $Ground = (Get-Content -Raw "$brand\dist\tokens.flat.json" | ConvertFrom-Json).'scheme.light.ground'
+}
+if ($Ground -notmatch '^#[0-9a-fA-F]{6}$') { throw "The wizard image's ground isn't a #rrggbb color: '$Ground'." }
 Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -120,13 +136,17 @@ $supersample = 8
 # Inno Setup 6's image areas at 100%, 125%, 150%, 175%, 200%, 225% and 250%.
 $wizardSizes = @(@(202, 386), @(269, 515), @(336, 643), @(403, 772), @(430, 824), @(498, 953), @(534, 1022))
 $headerSizes = @(58, 77, 97, 116, 124, 143, 159)
-$panel = [System.Drawing.ColorTranslator]::FromHtml('#e8eaee')
+$panel = [System.Drawing.ColorTranslator]::FromHtml($Ground)
+# An SVG's width over its height, from its viewBox.
 function Get-Aspect([string]$svg) {
-    $viewBox = [regex]::Match((Get-Content -Raw $svg), 'viewBox="0 0 ([\d.]+) ([\d.]+)"')
+    $viewBox = [regex]::Match((Get-Content -Raw $svg), 'viewBox="[-\d.]+[ ,]+[-\d.]+[ ,]+([\d.]+)[ ,]+([\d.]+)"')
+    if (-not $viewBox.Success) { throw "$svg has no viewBox." }
     return [double]$viewBox.Groups[1].Value / [double]$viewBox.Groups[2].Value
 }
-# The lockup's width on the large image, and its center's height, as fractions of the image.
-$lockup = "$root\assets\knobs-lockup-stacked-dark.svg"
+# The lockup's width on the large image, and its center's height, as fractions
+# of the image. Either way, more than the brand's clear space (a quarter of the
+# mark's height) is left round it.
+$lockup = "$brand\logo\svg\knobs-lockup-stacked-dark.svg"
 $lockupWidth = 0.72
 $lockupCenter = 0.44
 $lockupAspect = Get-Aspect $lockup
@@ -134,7 +154,7 @@ $lockupAspect = Get-Aspect $lockup
 # of the header's height: 32 and 24 pixels at 100%, so the lockup is as tall
 # as on getknobs.app's phone header and its margin as wide as the page title's
 # on the left.
-$headerLockup = "$root\assets\knobs-lockup-horizontal-dark.svg"
+$headerLockup = "$brand\logo\svg\knobs-lockup-horizontal-dark.svg"
 $headerLockupHeight = 32 / 58
 $headerMargin = 24 / 58
 $headerAspect = Get-Aspect $headerLockup
@@ -170,7 +190,8 @@ function Render([string]$svg, $boxes, [string]$background) {
         "img{position:absolute;top:0}</style></head><body>$($images -join '')</body></html>")
     $png = [IO.Path]::ChangeExtension($page, '.png')
     $arguments = @('--headless', '--disable-gpu', '--hide-scrollbars', "--force-device-scale-factor=$supersample",
-                   "--user-data-dir=""$work\profile""", "--window-size=$x,$height",
+                   "--user-data-dir=""$work\profile-$([IO.Path]::GetFileNameWithoutExtension($page))""",
+                   "--window-size=$x,$height",
                    "--screenshot=""$png""", ([System.Uri]$page).AbsoluteUri)
     $process = Start-Process -FilePath $edge -ArgumentList $arguments -PassThru -WindowStyle Hidden
     # Edge sometimes stays running after it has saved the picture.

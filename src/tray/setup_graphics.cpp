@@ -3,9 +3,13 @@
 
 #include <wincodec.h>
 
+#include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <vector>
+
+#include "knobs_tokens.h"
 
 namespace knobs::tray {
 namespace {
@@ -154,6 +158,39 @@ ComPtr<ID2D1Geometry> RoundRect(float x, float y, float w, float h, float r) {
   return rect;
 }
 
+constexpr size_t kMarkShapes = static_cast<size_t>(MarkShape::kTriangleExclamation) + 1;
+
+// A path of axis-aligned rectangles, each "Mx yH..V..H..Z", as its
+// rectangles, or none if it's anything else.
+std::vector<D2D1_RECT_F> Rectangles(std::string_view svg) {
+  std::vector<D2D1_RECT_F> rects;
+  size_t at = 0;
+  const auto number = [&](float& value) {
+    while (at < svg.size() && (svg[at] == ' ' || svg[at] == ',')) ++at;
+    const auto [end, error] = std::from_chars(svg.data() + at, svg.data() + svg.size(), value);
+    if (error != std::errc{}) return false;
+    at = static_cast<size_t>(end - svg.data());
+    return true;
+  };
+  const auto command = [&](char c) {
+    while (at < svg.size() && svg[at] == ' ') ++at;
+    if (at >= svg.size() || svg[at] != c) return false;
+    ++at;
+    return true;
+  };
+  while (true) {
+    while (at < svg.size() && svg[at] == ' ') ++at;
+    if (at >= svg.size()) break;
+    float x0 = 0, y0 = 0, x1 = 0, y1 = 0, x2 = 0;
+    if (!command('M') || !number(x0) || !number(y0) || !command('H') || !number(x1) || !command('V') ||
+        !number(y1) || !command('H') || !number(x2) || !command('Z') || x2 != x0) {
+      return {};
+    }
+    rects.push_back({std::min(x0, x1), std::min(y0, y1), std::max(x0, x1), std::max(y0, y1)});
+  }
+  return rects;
+}
+
 ComPtr<ID2D1StrokeStyle> MakeStroke(bool round) {
   ComPtr<ID2D1StrokeStyle> style;
   const D2D1_CAP_STYLE cap = round ? D2D1_CAP_STYLE_ROUND : D2D1_CAP_STYLE_FLAT;
@@ -264,8 +301,8 @@ ComPtr<ID2D1Geometry> IconGeometry(Icon icon) {
     case Icon::kCable:
       return Group({PathGeometry("M7.75 2.25v3.5m4.5-3.5v3.5M5 5.75h10v2.5a5 5 0 0 1-10 0zm5 7.5v4.5")}, 0.5f);
     case Icon::kApps:
-      return Group({RoundRect(3, 3, 5.25f, 5.25f, 1.25f), RoundRect(11.75f, 3, 5.25f, 5.25f, 1.25f),
-                    RoundRect(3, 11.75f, 5.25f, 5.25f, 1.25f), RoundRect(11.75f, 11.75f, 5.25f, 5.25f, 1.25f)},
+      // Square tiles: nothing is rounded but what's round.
+      return Group({PathGeometry("M3 3h5.25v5.25H3zM11.75 3H17v5.25h-5.25zM3 11.75h5.25V17H3zm8.75 0H17V17h-5.25z")},
                    0.5f);
     case Icon::kChevron:
       return PathGeometry("m5.875 3.75 4.25 4.25-4.25 4.25");
@@ -274,7 +311,8 @@ ComPtr<ID2D1Geometry> IconGeometry(Icon icon) {
     case Icon::kChevronUp:
       return PathGeometry("m3.75 10.125 4.25-4.25 4.25 4.25");
     case Icon::kBoxCheck:
-      return PathGeometry("m3.5 8.25 3 3 6-6.5");
+      // The state marks' check, its arms at 45 degrees.
+      return PathGeometry("M4.4 7.6 7 10.2 11.6 5.6");
   }
   return nullptr;
 }
@@ -292,9 +330,7 @@ ComPtr<ID2D1Geometry> CrispIconGeometry(Icon icon) {
     case Icon::kCable:
       return Group({PathGeometry("M8.5 2.5v4m4-4v4M5.5 6.5h10v2.5a5 5 0 0 1-10 0zM10.5 14v4.5")}, 0);
     case Icon::kApps:
-      return Group({RoundRect(3.5f, 3.5f, 5, 5, 1.25f), RoundRect(12.5f, 3.5f, 5, 5, 1.25f),
-                    RoundRect(3.5f, 12.5f, 5, 5, 1.25f), RoundRect(12.5f, 12.5f, 5, 5, 1.25f)},
-                   0);
+      return Group({PathGeometry("M3.5 3.5h5v5h-5zM12.5 3.5h5v5h-5zM3.5 12.5h5v5h-5zM12.5 12.5h5v5h-5z")}, 0);
     default:
       return nullptr;
   }
@@ -310,6 +346,48 @@ float IconSize(Icon icon) {
     default:
       return 16;
   }
+}
+
+namespace {
+
+// The path data for `shape`, as the tokens give it.
+std::string_view MarkPath(MarkShape shape) {
+  namespace shapes = tokens::status_shape;
+  switch (shape) {
+    case MarkShape::kDisc:
+      return shapes::kDisc;
+    case MarkShape::kTriangle:
+      return shapes::kTriangle;
+    case MarkShape::kCheck:
+      return shapes::kCheck;
+    case MarkShape::kExclamation:
+      return shapes::kExclamation;
+    case MarkShape::kInformation:
+      return shapes::kInformation;
+    case MarkShape::kPause:
+      return shapes::kPause;
+    case MarkShape::kTriangleExclamation:
+      return shapes::kTriangleExclamation;
+  }
+  return {};
+}
+
+}  // namespace
+
+ID2D1Geometry* MarkGeometry(MarkShape shape) {
+  static std::array<ComPtr<ID2D1PathGeometry>, kMarkShapes> cache;
+  ComPtr<ID2D1PathGeometry>& slot = cache[static_cast<size_t>(shape)];
+  if (!slot) slot = PathGeometry(MarkPath(shape), true);
+  return slot.Get();
+}
+
+const std::vector<D2D1_RECT_F>& MarkRects(MarkShape shape) {
+  static const std::array<std::vector<D2D1_RECT_F>, kMarkShapes> rects = [] {
+    std::array<std::vector<D2D1_RECT_F>, kMarkShapes> made;
+    for (size_t i = 0; i < kMarkShapes; ++i) made[i] = Rectangles(MarkPath(static_cast<MarkShape>(i)));
+    return made;
+  }();
+  return rects[static_cast<size_t>(shape)];
 }
 
 ID2D1StrokeStyle* RoundStroke() {

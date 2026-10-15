@@ -718,7 +718,8 @@ void TakeNotificationScreenshot() {
 }
 
 // Each size of the tray icon with each badge, magnified and as it is, on a
-// light and a dark taskbar's color. The icons are the same on both.
+// light and a dark taskbar's color: the black mark on the light one, the
+// white mark on the dark.
 int SaveIconSheet(const fs::path& file) {
   const int cell = kIconSizes[std::size(kIconSizes) - 1] * (kIconZoom + 1) + 3 * kMarginPx;
   const int columns = static_cast<int>(std::size(kIconSizes));
@@ -737,11 +738,12 @@ int SaveIconSheet(const fs::path& file) {
       for (int column = 0; column < columns; ++column) {
         const int size = kIconSizes[column];
         HICON icon = nullptr;
-        if (FAILED(LoadIconWithScaleDown(instance, MAKEINTRESOURCEW(IDI_KNOBS), size, size, &icon))) continue;
+        const int id = dark ? IDI_TRAY_WHITE : IDI_TRAY_BLACK;
+        if (FAILED(LoadIconWithScaleDown(instance, MAKEINTRESOURCEW(id), size, size, &icon))) continue;
         auto pixels = tray::ReadIcon(icon);
         DestroyIcon(icon);
         if (!pixels) continue;
-        const tray::IconPixels badged = tray::AddBadge(std::move(*pixels), kBadges[row]);
+        const tray::IconPixels badged = tray::AddBadge(std::move(*pixels), kBadges[row], dark != 0);
         // Over the background, magnified, then as it is beside it.
         const auto put = [&](int x, int y, uint32_t pixel) {
           const float alpha = (pixel >> 24) / 255.0f;

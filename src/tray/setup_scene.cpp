@@ -30,8 +30,8 @@ constexpr D2D1_RECT_F kPanel = {24, 118, 736, 452};
 constexpr D2D1_RECT_F kContent = {48, 138, 712, 435};
 constexpr float kFootTop = 468;
 constexpr float kButtonHeight = 32;
-constexpr float kControlRadius = 4;
-constexpr float kPanelRadius = 8;
+// Every rectangle's corners (knobs-brand's geometry): square.
+constexpr float kRadius = tokens::geometry::kRadius;
 // After each link: the icon fonts' "open in new window" glyph, the one
 // Windows' own links to the web use.
 constexpr wchar_t kOpenGlyph = L'\xE8A7';
@@ -246,17 +246,17 @@ class Builder {
 
   // A paragraph at (x, y), with an element for it and, after it, one for
   // each of its links. Returns the paragraph's element.
-  int Paragraph(const Text& text, float x, float y, float width, Ink ink, bool panel, Role role = Role::kText,
+  int Paragraph(const Text& text, float x, float y, float width, Tone tone, bool panel, Role role = Role::kText,
                 int parent = -1) {
     Item item;
     item.kind = Item::Kind::kText;
     item.rect = Rect(x, y, width, text.height);
-    item.ink = ink;
+    item.tone = tone;
     item.text = text.layout;
     item.in_panel = panel;
-    if (ink != Ink::kInk) item.ink_ranges = Ranges(text, TextSpan::Kind::kBold);
+    if (tone != Tone::kText) item.name_ranges = Ranges(text, TextSpan::Kind::kBold);
     item.link_ranges = Ranges(text, TextSpan::Kind::kLink);
-    AddItem(std::move(item));
+    const int item_index = static_cast<int>(AddItem(std::move(item)));
     Element element;
     element.role = role;
     element.parent = parent;
@@ -265,12 +265,12 @@ class Builder {
     element.name = Plain(text.text);
     const int index = Add(std::move(element));
     // A step's or a note's links are inside it, for screen readers.
-    Links(text, x, y, panel, role == Role::kStep || role == Role::kNote ? index : parent);
+    Links(text, item_index, x, y, panel, role == Role::kStep || role == Role::kNote ? index : parent);
     return index;
   }
 
  private:
-  void Links(const Text& text, float x, float y, bool panel, int parent) {
+  void Links(const Text& text, int item, float x, float y, bool panel, int parent) {
     for (const TextSpan& span : text.spans) {
       if (span.kind != TextSpan::Kind::kLink) continue;
       Element link;
@@ -280,6 +280,8 @@ class Builder {
       link.focusable = true;
       link.url = span.url;
       link.name = Plain(text.text.substr(span.start, span.length));
+      link.item = item;
+      link.range = {span.start, span.length};
       const auto boxes = [&](uint32_t length) {
         UINT32 count = 0;
         text.layout->HitTestTextRange(span.start, length, x, y, nullptr, 0, &count);
@@ -364,7 +366,7 @@ void LayoutBand(const PageView& view, Scene& scene, Builder& build) {
     const Text value = MakeText(view.stages[i].value, Style(12, 17), kValueWidth, false);
     box.name = title.layout;
     box.value = value.layout;
-    box.value_ink = Ranges(value, TextSpan::Kind::kBold);
+    box.value_names = Ranges(value, TextSpan::Kind::kBold);
     Element stage;
     stage.role = Role::kStage;
     stage.parent = list_index;
@@ -502,7 +504,7 @@ float LayoutChoices(const PageView& view, int choice, bool more_open, Builder& b
 }
 
 // The steps, with the page's walkthrough of them beside them. The step it
-// shows has its number on an ink disc, and so has the walkthrough's corner.
+// shows has its number on a disc, and so has the walkthrough's corner.
 float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
   const float x = kContent.left;
   const float width = Width(kContent);
@@ -522,10 +524,10 @@ float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
     scene.digits[i + 1] = MakeText(std::to_string(number), Style(12, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), 20).layout;
     Text digits = MakeText(std::to_string(number), Style(14, 21, DWRITE_FONT_WEIGHT_SEMI_BOLD), 20);
     if (digits.layout) digits.layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    build.AddItem({.kind = Item::Kind::kNumeral, .rect = Rect(x, y, 20, 21), .ink = Ink::kText3, .text = digits.layout,
+    build.AddItem({.kind = Item::Kind::kNumeral, .rect = Rect(x, y, 20, 21), .tone = Tone::kText3, .text = digits.layout,
                    .step = number, .in_panel = true});
     const Text text = MakeText(view.steps[i], Style(14, 21), steps_width - 30);
-    const int step = build.Paragraph(text, x + 30, y, steps_width - 30, Ink::kInk, true, Role::kStep, list_index);
+    const int step = build.Paragraph(text, x + 30, y, steps_width - 30, Tone::kText, true, Role::kStep, list_index);
     build.At(step).name = std::format(L"{}. {}", number, build.At(step).name);
     y += text.height + 5;
   }
@@ -574,7 +576,7 @@ float LayoutNotes(const PageView& view, Builder& build, float y) {
     mark.in_panel = true;
     build.AddItem(std::move(mark));
     const Text text = MakeText(note.text, Style(14, 21), Width(kContent) - 28);
-    const int element = build.Paragraph(text, x + 28, y, Width(kContent) - 28, Ink::kInk, true, Role::kNote,
+    const int element = build.Paragraph(text, x + 28, y, Width(kContent) - 28, Tone::kText, true, Role::kNote,
                                         list_index);
     build.At(element).warning = note.warning;
     y += text.height + 12;
@@ -615,18 +617,18 @@ float LayoutChain(const core::ChainSummary& chain, Builder& build, float y) {
       px = left;
       py += 22;
     } else if (i > 0) {
-      build.AddItem({.kind = Item::Kind::kIcon, .rect = Rect(px + 6, py + 4, 12, 12), .ink = Ink::kText3,
+      build.AddItem({.kind = Item::Kind::kIcon, .rect = Rect(px + 6, py + 4, 12, 12), .tone = Tone::kText3,
                      .icon = Icon::kChevron, .in_panel = true});
       px += separator;
     }
     if (piece.icon) {
-      build.AddItem({.kind = Item::Kind::kIcon, .rect = Rect(px, py + 2, 16, 16), .ink = Ink::kInk,
+      build.AddItem({.kind = Item::Kind::kIcon, .rect = Rect(px, py + 2, 16, 16), .tone = Tone::kText,
                      .icon = *piece.icon, .in_panel = true});
       px += 22;
     }
     piece.text.layout->SetMaxWidth(piece.text.width + 1);
     build.AddItem({.kind = Item::Kind::kText, .rect = Rect(px, py, piece.text.width + 1, 20),
-                   .ink = piece.end ? Ink::kInk : Ink::kText2, .text = piece.text.layout, .in_panel = true});
+                   .tone = piece.end ? Tone::kText : Tone::kText2, .text = piece.text.layout, .in_panel = true});
     px += piece.text.width;
     said += (said.empty() ? L"" : L", then ") + Plain(piece.text.text);
   }
@@ -673,8 +675,9 @@ void LayoutFoot(const PageView& view, Builder& build, Scene& scene) {
   std::vector<Element> buttons;
   for (auto it = view.buttons.rbegin(); it != view.buttons.rend(); ++it) {
     const bool primary = it->id == view.default_button && it->enabled;
-    const DWRITE_FONT_WEIGHT weight = primary ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL;
-    const Label marked = MakeLabel(it->text, Style(14, 20, weight), 400, false);
+    // One weight for every button, as the brand's buttons have, heavy enough
+    // for white words on cap red.
+    const Label marked = MakeLabel(it->text, Style(14, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), 400, false);
     const Text& label = marked.text;
     const float width = std::max(84.0f, std::ceil(label.width) + 32);
     Element button;
@@ -707,11 +710,11 @@ void LayoutFoot(const PageView& view, Builder& build, Scene& scene) {
     scene.waiting = true;
     scene.dot = Rect(note_left, y + 5.5f, 7, 7);
     if (status) {
-      scene.status = build.Paragraph(waiting, note_left + 15, y, note_width - 15, Ink::kText2, false, Role::kStatus);
+      scene.status = build.Paragraph(waiting, note_left + 15, y, note_width - 15, Tone::kText2, false, Role::kStatus);
     }
     y += status_height + 2;
   }
-  if (!view.footer.empty()) build.Paragraph(footer, note_left, y, note_width, Ink::kText3, false);
+  if (!view.footer.empty()) build.Paragraph(footer, note_left, y, note_width, Tone::kText3, false);
   for (auto it = buttons.rbegin(); it != buttons.rend(); ++it) {
     const bool primary = it->is_default;
     const int index = build.Add(std::move(*it));
@@ -721,18 +724,16 @@ void LayoutFoot(const PageView& view, Builder& build, Scene& scene) {
 
 // --- Painting -------------------------------------------------------------------------
 
-D2D1_COLOR_F Color(const SetupPalette& palette, Ink ink) {
-  switch (ink) {
-    case Ink::kInk:
-      return palette.ink;
-    case Ink::kText2:
+D2D1_COLOR_F Color(const SetupPalette& palette, Tone tone) {
+  switch (tone) {
+    case Tone::kText:
+      return palette.text;
+    case Tone::kText2:
       return palette.text2;
-    case Ink::kText3:
+    case Tone::kText3:
       return palette.text3;
-    case Ink::kOnInk:
-      return palette.on_ink;
   }
-  return palette.ink;
+  return palette.text;
 }
 
 ID2D1Geometry* CachedIcon(Icon icon, bool crisp) {
@@ -740,11 +741,6 @@ ID2D1Geometry* CachedIcon(Icon icon, bool crisp) {
   ComPtr<ID2D1Geometry>& slot = cache[static_cast<size_t>(icon) * 2 + (crisp ? 1 : 0)];
   if (!slot) slot = crisp ? CrispIconGeometry(icon) : IconGeometry(icon);
   return slot.Get();
-}
-
-ID2D1Geometry* WarningTriangle() {
-  static const ComPtr<ID2D1PathGeometry> triangle = PathGeometry("M0 -5.6 5.8 4.6H-5.8z", true);
-  return triangle.Get();
 }
 
 // Windows' arrow pointer, 19 units tall, its tip at the origin.
@@ -764,7 +760,7 @@ class Painter {
   Painter(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush, const SetupPalette& palette, float pixel)
       : target_(target), brush_(brush), palette_(palette), pixel_(pixel) {
     // Hairlines: a whole number of device pixels, about a DIP.
-    hair_ = pixel * std::max(1.0f, std::floor(1 / pixel + 0.01f));
+    hair_ = Whole(tokens::geometry::kHairline);
   }
 
   ID2D1SolidColorBrush* Brush(const D2D1_COLOR_F& color, float opacity = 1) {
@@ -775,6 +771,8 @@ class Painter {
 
   // An edge, on the device pixel grid.
   float Snap(float v) const { return std::round(v / pixel_) * pixel_; }
+  // A width of `dips`, in whole device pixels, at least one.
+  float Whole(float dips) const { return pixel_ * std::max(1.0f, std::floor(dips / pixel_ + 0.01f)); }
 
   // A hairline along y, from x0 to x1.
   void HLine(float x0, float x1, float y, const D2D1_COLOR_F& color) {
@@ -782,19 +780,36 @@ class Painter {
     target_->FillRectangle({Snap(x0), top, Snap(x1), top + hair_}, Brush(color));
   }
 
-  void Fill(const D2D1_RECT_F& r, const D2D1_COLOR_F& color, float radius = 0, float opacity = 1) {
+  void Fill(const D2D1_RECT_F& r, const D2D1_COLOR_F& color, float radius = 0) {
     if (radius > 0) {
-      target_->FillRoundedRectangle(D2D1::RoundedRect(r, radius, radius), Brush(color, opacity));
+      target_->FillRoundedRectangle(D2D1::RoundedRect(r, radius, radius), Brush(color));
     } else {
-      target_->FillRectangle(r, Brush(color, opacity));
+      target_->FillRectangle(r, Brush(color));
     }
   }
 
-  // A hairline border inside `r`'s outer edge, which sits on the pixel grid.
-  void Border(const D2D1_RECT_F& r, const D2D1_COLOR_F& color, float radius) {
-    const float half = hair_ / 2;
+  // A border inside `r`'s outer edge, which sits on the pixel grid: a
+  // hairline, or `width` DIPs in whole pixels.
+  void Border(const D2D1_RECT_F& r, const D2D1_COLOR_F& color, float radius, float width = 0) {
+    const float w = width > 0 ? Whole(width) : hair_;
+    const float half = w / 2;
     const D2D1_RECT_F edge = {Snap(r.left) + half, Snap(r.top) + half, Snap(r.right) - half, Snap(r.bottom) - half};
-    target_->DrawRoundedRectangle(D2D1::RoundedRect(edge, radius - half, radius - half), Brush(color), hair_);
+    if (radius > half) {
+      target_->DrawRoundedRectangle(D2D1::RoundedRect(edge, radius - half, radius - half), Brush(color), w);
+    } else {
+      target_->DrawRectangle(edge, Brush(color), w, SharpStroke());
+    }
+  }
+
+  // `r` on whole device pixels: its size rounded to whole pixels, at least
+  // one each way, and centred where it was, so bars of one width stay one
+  // width wherever they fall.
+  D2D1_RECT_F PixelRect(const D2D1_RECT_F& r) const {
+    const float width = std::max(pixel_, std::round((r.right - r.left) / pixel_) * pixel_);
+    const float height = std::max(pixel_, std::round((r.bottom - r.top) / pixel_) * pixel_);
+    const float left = Snap((r.left + r.right - width) / 2);
+    const float top = Snap((r.top + r.bottom - height) / 2);
+    return {left, top, left + width, top + height};
   }
 
   void DrawIcon(Icon icon, const D2D1_RECT_F& box, const D2D1_COLOR_F& color) {
@@ -807,7 +822,7 @@ class Painter {
         D2D1_MATRIX_3X2_F before;
         target_->GetTransform(&before);
         target_->SetTransform(D2D1::Matrix3x2F::Translation(box.left, box.top) * before);
-        target_->DrawGeometry(crisp, Brush(color), 1, RoundStroke());
+        target_->DrawGeometry(crisp, Brush(color), 1, SharpStroke());
         target_->SetTransform(before);
         return;
       }
@@ -818,70 +833,77 @@ class Painter {
     target_->GetTransform(&before);
     target_->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) * D2D1::Matrix3x2F::Translation(box.left, box.top) *
                           before);
-    target_->DrawGeometry(geometry, Brush(color), 1.5f / scale, RoundStroke());
+    target_->DrawGeometry(geometry, Brush(color), 1.5f / scale, SharpStroke());
     target_->SetTransform(before);
   }
 
-  // The tray icon's badges: `diameter` across at `centre`, with a ring of
-  // `ground` round them if given.
-  void DrawBadge(StageState kind, D2D1_POINT_2F c, float diameter, const D2D1_COLOR_F* ground) {
-    const float s = diameter / 11;
-    const auto at = [&](float x, float y) { return D2D1::Point2F(c.x + x * s, c.y + y * s); };
-    const auto dot = [&](float x, float y, float r, const D2D1_COLOR_F& color) {
-      target_->FillEllipse(D2D1::Ellipse(at(x, y), r * s, r * s), Brush(color));
-    };
-    const auto line = [&](float x0, float y0, float x1, float y1, const D2D1_COLOR_F& color) {
-      target_->DrawLine(at(x0, y0), at(x1, y1), Brush(color), 1.4f * s, RoundStroke());
-    };
-    if (kind == StageState::kWarning) {
-      D2D1_MATRIX_3X2_F before;
-      target_->GetTransform(&before);
-      target_->SetTransform(D2D1::Matrix3x2F::Scale(s, s) * D2D1::Matrix3x2F::Translation(c.x, c.y) * before);
-      // A clear ring of a DIP beyond its stroke, as round the discs.
-      if (ground) target_->DrawGeometry(WarningTriangle(), Brush(*ground), 1.5f + 2 / s, RoundStroke());
-      target_->FillGeometry(WarningTriangle(), Brush(palette_.badge_warning));
-      target_->DrawGeometry(WarningTriangle(), Brush(palette_.badge_warning), 1.5f, RoundStroke());
-      target_->SetTransform(before);
-      line(0, -1.5f, 0, 1.1f, palette_.badge_glyph_dark);
-      dot(0, 3.1f, 0.8f, palette_.badge_glyph_dark);
-      return;
-    }
-    // The tray badge's clear ring: a DIP round the disc.
-    if (ground) target_->FillEllipse(D2D1::Ellipse(c, 5.5f * s + 1, 5.5f * s + 1), Brush(*ground));
+  // A state mark, from the brand's shapes: its 16-unit box `size` DIPs
+  // across, centred on `c`, with a clear ring of a DIP of `ground` round it
+  // if given, as the tray's badges have. Its bars and dots are drawn on
+  // whole device pixels, as the tray draws them, so they stay sharp.
+  void DrawMark(StageState kind, D2D1_POINT_2F c, float size, const D2D1_COLOR_F* ground) {
+    MarkShape shape = MarkShape::kDisc;
+    MarkShape glyph = MarkShape::kInformation;
+    D2D1_COLOR_F fill = palette_.mark_info;
+    D2D1_COLOR_F mark = palette_.on_info;
     switch (kind) {
       case StageState::kSet:
-        dot(0, 0, 5.5f, palette_.badge_ok);
-        line(-2.5f, 0.2f, -0.8f, 1.9f, palette_.badge_glyph);
-        line(-0.8f, 1.9f, 2.3f, -1.5f, palette_.badge_glyph);
+        glyph = MarkShape::kCheck;
+        fill = palette_.mark_ok;
+        mark = palette_.on_mark;
         break;
       case StageState::kBlocked:
-        dot(0, 0, 5.5f, palette_.badge_stop);
-        line(0, -2.8f, 0, 0.3f, palette_.badge_glyph);
-        dot(0, 2.6f, 0.85f, palette_.badge_glyph);
+        glyph = MarkShape::kExclamation;
+        fill = palette_.mark_stop;
+        mark = palette_.on_mark;
+        break;
+      case StageState::kWarning:
+        shape = MarkShape::kTriangle;
+        glyph = MarkShape::kTriangleExclamation;
+        fill = palette_.mark_warn;
+        mark = palette_.on_warn;
         break;
       default:  // Information.
-        dot(0, 0, 5.5f, palette_.badge_info);
-        dot(0, -2.35f, 0.75f, palette_.badge_glyph);
-        line(0, -0.45f, 0, 2.75f, palette_.badge_glyph);
         break;
+    }
+    const float s = size / 16;
+    const D2D1_POINT_2F origin = {c.x - size / 2, c.y - size / 2};
+    D2D1_MATRIX_3X2_F before;
+    target_->GetTransform(&before);
+    target_->SetTransform(D2D1::Matrix3x2F::Scale(s, s) * D2D1::Matrix3x2F::Translation(origin.x, origin.y) * before);
+    if (ID2D1Geometry* ground_shape = MarkGeometry(shape)) {
+      // The ring: the shape's outline grown by a DIP all round.
+      if (ground) target_->DrawGeometry(ground_shape, Brush(*ground), 2 / s, RoundStroke());
+      target_->FillGeometry(ground_shape, Brush(fill));
+    }
+    const std::vector<D2D1_RECT_F>& rects = MarkRects(glyph);
+    if (rects.empty()) {
+      if (ID2D1Geometry* glyph_shape = MarkGeometry(glyph)) target_->FillGeometry(glyph_shape, Brush(mark));
+    }
+    target_->SetTransform(before);
+    for (const D2D1_RECT_F& r : rects) {
+      target_->FillRectangle(
+          PixelRect({origin.x + r.left * s, origin.y + r.top * s, origin.x + r.right * s, origin.y + r.bottom * s}),
+          Brush(mark));
     }
   }
 
-  // An ink disc with a number on it, the number's glyphs centred on it.
+  // A disc in the text colour with a number on it, the number's glyphs
+  // centred on it.
   void Disc(const D2D1_RECT_F& box, IDWriteTextLayout* numeral, bool ring) {
     const D2D1_POINT_2F c = {(box.left + box.right) / 2, (box.top + box.bottom) / 2};
     const float r = Width(box) / 2;
-    if (ring) target_->FillEllipse(D2D1::Ellipse(c, r + 2, r + 2), Brush(palette_.surface));
-    target_->FillEllipse(D2D1::Ellipse(c, r, r), Brush(palette_.ink));
+    if (ring) target_->FillEllipse(D2D1::Ellipse(c, r + 2, r + 2), Brush(palette_.raised));
+    target_->FillEllipse(D2D1::Ellipse(c, r, r), Brush(palette_.text));
     if (!numeral) return;
     DWRITE_OVERHANG_METRICS over = {};
     numeral->GetOverhangMetrics(&over);
-    const float ink_left = -over.left;
-    const float ink_right = numeral->GetMaxWidth() + over.right;
-    const float ink_top = -over.top;
-    const float ink_bottom = numeral->GetMaxHeight() + over.bottom;
-    target_->DrawTextLayout({c.x - (ink_left + ink_right) / 2, c.y - (ink_top + ink_bottom) / 2}, numeral,
-                            Brush(palette_.on_ink));
+    const float glyph_left = -over.left;
+    const float glyph_right = numeral->GetMaxWidth() + over.right;
+    const float glyph_top = -over.top;
+    const float glyph_bottom = numeral->GetMaxHeight() + over.bottom;
+    target_->DrawTextLayout({c.x - (glyph_left + glyph_right) / 2, c.y - (glyph_top + glyph_bottom) / 2}, numeral,
+                            Brush(palette_.raised));
   }
 
   // A walkthrough at a moment, in `box`, clipped to `clip` in `layer`: its
@@ -933,30 +955,50 @@ class Painter {
     const float u = std::max(38 * frame.scale, 15.0f) / 19 * frame.press;
     if (ID2D1Geometry* arrow = PointerArrow()) {
       target_->SetTransform(D2D1::Matrix3x2F::Scale(u, u) * D2D1::Matrix3x2F::Translation(tip.x, tip.y) * before);
-      target_->FillGeometry(arrow, Brush(contrast ? palette_.surface : D2D1::ColorF(D2D1::ColorF::White)));
-      target_->DrawGeometry(arrow, Brush(contrast ? palette_.ink : D2D1::ColorF(D2D1::ColorF::Black)), 1, RoundStroke());
+      target_->FillGeometry(arrow, Brush(contrast ? palette_.raised : D2D1::ColorF(D2D1::ColorF::White)));
+      target_->DrawGeometry(arrow, Brush(contrast ? palette_.text : D2D1::ColorF(D2D1::ColorF::Black)), 1, RoundStroke());
       target_->SetTransform(before);
     }
     target_->PopLayer();
   }
 
-  // The walkthrough's play or pause, on a dark disc in its frame's corner.
-  // In high contrast, the disc is the user's window colour, ringed and marked
-  // with their text colour, and their highlight under the pointer.
+  // The walkthrough's play or pause, on a disc in its frame's corner: the
+  // dark scheme's graphite in both, as it sits on screenshots of either, a
+  // step lighter under the pointer, with the state marks' pause bars. In high
+  // contrast, the disc is the user's window colour, ringed and marked with
+  // their text colour, and their highlight under the pointer.
   void WalkToggle(const D2D1_RECT_F& frame, bool playing, bool hover) {
     const D2D1_POINT_2F c = {frame.right - 19, frame.bottom - 19};
-    D2D1_COLOR_F glyph = D2D1::ColorF(D2D1::ColorF::White);
+    D2D1_COLOR_F glyph = TokenColor(tokens::kDark.text);
     if (palette_.mode == SetupMode::kHighContrast) {
-      target_->FillEllipse(D2D1::Ellipse(c, 13, 13), Brush(hover ? palette_.here : palette_.surface));
-      target_->DrawEllipse(D2D1::Ellipse(c, 12.5f, 12.5f), Brush(palette_.ink), 1);
-      glyph = hover ? palette_.on_ink : palette_.ink;
+      target_->FillEllipse(D2D1::Ellipse(c, 13, 13), Brush(hover ? palette_.here : palette_.raised));
+      target_->DrawEllipse(D2D1::Ellipse(c, 12.5f, 12.5f), Brush(palette_.text), 1);
+      glyph = hover ? palette_.on_action_hover : palette_.text;
     } else {
-      target_->FillEllipse(D2D1::Ellipse(c, 13, 13), Brush(D2D1::ColorF(0x111317), hover ? 0.92f : 0.72f));
+      target_->FillEllipse(D2D1::Ellipse(c, 13, 13),
+                           Brush(TokenColor(hover ? tokens::kDark.raised_2 : tokens::kDark.ground)));
+      target_->DrawEllipse(D2D1::Ellipse(c, 12.5f, 12.5f), Brush(TokenColor(tokens::kDark.line_strong)), 1);
     }
     if (playing) {
-      ID2D1SolidColorBrush* bars = Brush(glyph);
-      target_->FillRectangle(Rect(c.x - 4.5f, c.y - 5, 3, 10), bars);
-      target_->FillRectangle(Rect(c.x + 1.5f, c.y - 5, 3, 10), bars);
+      constexpr float kBox = 26;
+      const float s = kBox / 16;
+      const std::vector<D2D1_RECT_F>& bars = MarkRects(MarkShape::kPause);
+      for (const D2D1_RECT_F& bar : bars) {
+        target_->FillRectangle(PixelRect({c.x - kBox / 2 + bar.left * s, c.y - kBox / 2 + bar.top * s,
+                                          c.x - kBox / 2 + bar.right * s, c.y - kBox / 2 + bar.bottom * s}),
+                               Brush(glyph));
+      }
+      // A pause that isn't bars is drawn as it is.
+      if (bars.empty()) {
+        if (ID2D1Geometry* pause = MarkGeometry(MarkShape::kPause)) {
+          D2D1_MATRIX_3X2_F before;
+          target_->GetTransform(&before);
+          target_->SetTransform(D2D1::Matrix3x2F::Scale(s, s) *
+                                D2D1::Matrix3x2F::Translation(c.x - kBox / 2, c.y - kBox / 2) * before);
+          target_->FillGeometry(pause, Brush(glyph));
+          target_->SetTransform(before);
+        }
+      }
     } else if (ID2D1Geometry* play = PlayTriangle()) {
       D2D1_MATRIX_3X2_F before;
       target_->GetTransform(&before);
@@ -966,8 +1008,16 @@ class Painter {
     }
   }
 
+  // The brand's focus ring: 2 DIPs wide, 2 outside the control.
   void FocusRing(const D2D1_RECT_F& r, float radius) {
-    target_->DrawRoundedRectangle(D2D1::RoundedRect(Grown(r, 3), radius + 3, radius + 3), Brush(palette_.ink), 2);
+    const float width = tokens::geometry::kFocusWidth;
+    const float out = tokens::geometry::kFocusOffset + width / 2;
+    const D2D1_RECT_F ring = Grown(r, out);
+    if (radius > 0) {
+      target_->DrawRoundedRectangle(D2D1::RoundedRect(ring, radius + out, radius + out), Brush(palette_.focus), width);
+    } else {
+      target_->DrawRectangle(ring, Brush(palette_.focus), width, SharpStroke());
+    }
   }
 
   ID2D1RenderTarget* target() const { return target_; }
@@ -1028,7 +1078,7 @@ Scene LayoutScene(const PageView& view, int choice, bool more_open) {
   float y = kContent.top;
   const Text heading =
       MakeText(view.instruction, {&Fonts().display, 22, 28, DWRITE_FONT_WEIGHT_SEMI_BOLD}, width, true, false);
-  scene.heading = build.Paragraph(heading, x, y, width, Ink::kInk, true, Role::kHeading);
+  scene.heading = build.Paragraph(heading, x, y, width, Tone::kText, true, Role::kHeading);
   y += heading.height;
   if (view.chain) y = LayoutChain(*view.chain, build, y + 12);
   // The first paragraph is the page's lead, in secondary text, and the rest
@@ -1039,7 +1089,7 @@ Scene LayoutScene(const PageView& view, int choice, bool more_open) {
     const bool lead = view.chain ? i > 0 : i == 0;
     y += i == 0 ? (view.chain ? 12 : 6) : (lead ? 6 : 12);
     const Text text = MakeText(paragraphs[i], Style(14, 21), width);
-    build.Paragraph(text, x, y, width, lead ? Ink::kText2 : Ink::kInk, true);
+    build.Paragraph(text, x, y, width, lead ? Tone::kText2 : Tone::kText, true);
     y += text.height;
   }
   if (view.command_links) y = LayoutDoors(view, build, scene, y + 20);
@@ -1052,7 +1102,7 @@ Scene LayoutScene(const PageView& view, int choice, bool more_open) {
   if (!view.command_links) LayoutFoot(view, build, scene);
   else if (!view.footer.empty()) {
     const Text footer = MakeText(view.footer, Style(12, 17), Width(kPanel));
-    build.Paragraph(footer, kPanel.left, kFootTop + (kButtonHeight - footer.height) / 2, Width(kPanel), Ink::kText3,
+    build.Paragraph(footer, kPanel.left, kFootTop + (kButtonHeight - footer.height) / 2, Width(kPanel), Tone::kText3,
                     false);
   }
   return scene;
@@ -1070,7 +1120,7 @@ bool WireLive(const Scene& scene, size_t i) {
 void ScenePainter::Reset() {
   target_.Reset();
   brush_.Reset();
-  ink_.Reset();
+  text_.Reset();
   link_.Reset();
   walk_layer_.Reset();
 }
@@ -1082,14 +1132,14 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
     Reset();
     target_ = target;
   }
-  if (!brush_) target->CreateSolidColorBrush(palette.ink, &brush_);
-  if (!ink_) target->CreateSolidColorBrush(palette.ink, &ink_);
-  if (!link_) target->CreateSolidColorBrush(palette.link, &link_);
-  if (!brush_ || !ink_ || !link_) return;
-  ink_->SetColor(palette.ink);
-  link_->SetColor(palette.link);
+  if (!brush_) target->CreateSolidColorBrush(palette.text, &brush_);
+  if (!text_) target->CreateSolidColorBrush(palette.text, &text_);
+  if (!link_) target->CreateSolidColorBrush(palette.link_hover, &link_);
+  if (!brush_ || !text_ || !link_) return;
+  text_->SetColor(palette.text);
+  link_->SetColor(palette.link_hover);
   Painter p(target, brush_.Get(), palette, pixel);
-  target->Clear(palette.paper);
+  target->Clear(palette.ground);
   const std::optional<WalkFrame> walk = scene.walkthrough ? state.walk : std::nullopt;
   const int shown_step = walk ? walk->step : 0;
   if (walk) {
@@ -1097,8 +1147,7 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
     if (!walk_clip_ || std::memcmp(&walk_clip_box_, &scene.walk, sizeof(D2D1_RECT_F)) != 0) {
       walk_clip_.Reset();
       if (D2DFactory()) {
-        D2DFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(scene.walk, kControlRadius, kControlRadius),
-                                                     &walk_clip_);
+        D2DFactory()->CreateRoundedRectangleGeometry(D2D1::RoundedRect(scene.walk, kRadius, kRadius), &walk_clip_);
       }
       walk_clip_box_ = scene.walk;
     }
@@ -1107,9 +1156,15 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
     return step > 0 && static_cast<size_t>(step) < scene.digits.size() ? scene.digits[static_cast<size_t>(step)].Get()
                                                                        : nullptr;
   };
+  // The link under the pointer, whose words take the link colour.
+  const Element* hover_link = nullptr;
+  if (state.hover >= 0 && static_cast<size_t>(state.hover) < scene.elements.size() &&
+      scene.elements[static_cast<size_t>(state.hover)].role == Role::kLink) {
+    hover_link = &scene.elements[static_cast<size_t>(state.hover)];
+  }
 
   // The band.
-  p.Fill({0, 0, kSetupWidth, kBandHeight}, palette.paper_subtle);
+  p.Fill({0, 0, kSetupWidth, kBandHeight}, palette.ground_deep);
   p.HLine(0, kSetupWidth, kBandHeight, palette.line);
   for (size_t i = 0; i + 1 < kStageCount; ++i) {
     const float from = kStageX[i] + kIcon + 6;
@@ -1117,9 +1172,9 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
     const float tip = kStageX[i + 1] - 6.76f;
     const float lit = from + (to - from) * std::clamp(state.wire[i], 0.0f, 1.0f);
     const float y = kWireY - p.hair() / 2;
-    if (lit > from) p.HLine(from, lit, y, palette.ink);
+    if (lit > from) p.HLine(from, lit, y, palette.text);
     if (lit < to) p.HLine(lit, to, y, palette.text3);
-    ID2D1SolidColorBrush* head = p.Brush(state.wire[i] >= 1 ? palette.ink : palette.text3);
+    ID2D1SolidColorBrush* head = p.Brush(state.wire[i] >= 1 ? palette.text : palette.text3);
     target->DrawLine({tip - 4.6f, kWireY - 4.6f}, {tip, kWireY}, head, 1, SharpStroke());
     target->DrawLine({tip, kWireY}, {tip - 4.6f, kWireY + 4.6f}, head, 1, SharpStroke());
   }
@@ -1130,22 +1185,21 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
     p.DrawIcon(static_cast<Icon>(i), Rect(box.x, kIconTop, kIcon, kIcon), icon);
     if (box.state == StageState::kSet || box.state == StageState::kWarning || box.state == StageState::kBlocked) {
       // As on the tray icon: 7/16 of the icon, flush with its corner.
-      p.DrawBadge(box.state, {box.x + kIcon - 4.5f, kIconTop + kIcon - 4.5f}, 9, &palette.paper_subtle);
+      p.DrawMark(box.state, {box.x + kIcon - 4.5f, kIconTop + kIcon - 4.5f}, 9, &palette.ground_deep);
     }
     if (box.name) {
       target->DrawTextLayout({box.x, kNameTop}, box.name.Get(), p.Brush(here ? palette.here : palette.text2));
     }
     if (box.value) {
-      for (const DWRITE_TEXT_RANGE& range : box.value_ink) box.value->SetDrawingEffect(ink_.Get(), range);
+      for (const DWRITE_TEXT_RANGE& range : box.value_names) box.value->SetDrawingEffect(text_.Get(), range);
       target->DrawTextLayout({box.x, kValueTop}, box.value.Get(),
                              p.Brush(box.state == StageState::kUnknown ? palette.text3 : palette.text2));
     }
   }
 
-  // The panel, with its one-pixel lift.
-  if (palette.lift_opacity > 0) p.Fill(Moved(kPanel, 0, 1), {0, 0, 0, 1}, kPanelRadius, palette.lift_opacity);
-  p.Fill(kPanel, palette.surface, kPanelRadius);
-  p.Border(kPanel, palette.line_strong, kPanelRadius);
+  // The panel: flat, raised by its tone and a hairline.
+  p.Fill(kPanel, palette.raised, kRadius);
+  p.Border(kPanel, palette.line, kRadius);
   // The caret: the panel's edge rising to a point under the stage.
   if (state.caret_x) {
     const float cx = *state.caret_x;
@@ -1158,43 +1212,50 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
       sink->AddLine({cx + 6.5f, edge + p.hair()});
       sink->EndFigure(D2D1_FIGURE_END_CLOSED);
       sink->Close();
-      target->FillGeometry(caret.Get(), p.Brush(palette.surface));
+      target->FillGeometry(caret.Get(), p.Brush(palette.raised));
     }
-    target->DrawLine({cx - 6, edge}, {cx, edge - 6}, p.Brush(palette.ink), 1, SharpStroke());
-    target->DrawLine({cx, edge - 6}, {cx + 6, edge}, p.Brush(palette.ink), 1, SharpStroke());
+    target->DrawLine({cx - 6, edge}, {cx, edge - 6}, p.Brush(palette.text), 1, SharpStroke());
+    target->DrawLine({cx, edge - 6}, {cx + 6, edge}, p.Brush(palette.text), 1, SharpStroke());
   }
 
-  const auto paint_item = [&](const Item& item) {
+  // Links keep the colour of the words round them, with a cap red underline;
+  // under the pointer their words turn red too. In high contrast they take
+  // the user's link colour.
+  const bool links_coloured = palette.mode == SetupMode::kHighContrast;
+  const auto paint_item = [&](const Item& item, int index) {
     switch (item.kind) {
       case Item::Kind::kText:
         if (!item.text) break;
-        for (const DWRITE_TEXT_RANGE& range : item.ink_ranges) item.text->SetDrawingEffect(ink_.Get(), range);
-        for (const DWRITE_TEXT_RANGE& range : item.link_ranges) item.text->SetDrawingEffect(link_.Get(), range);
-        target->DrawTextLayout({item.rect.left, item.rect.top}, item.text.Get(), p.Brush(Color(palette, item.ink)));
+        for (const DWRITE_TEXT_RANGE& range : item.link_ranges) {
+          item.text->SetDrawingEffect(links_coloured ? link_.Get() : nullptr, range);
+        }
+        for (const DWRITE_TEXT_RANGE& range : item.name_ranges) item.text->SetDrawingEffect(text_.Get(), range);
+        if (hover_link && hover_link->item == index) item.text->SetDrawingEffect(link_.Get(), hover_link->range);
+        target->DrawTextLayout({item.rect.left, item.rect.top}, item.text.Get(), p.Brush(Color(palette, item.tone)));
         break;
       case Item::Kind::kGroup:
-        p.Fill(item.rect, palette.surface, kControlRadius);
-        p.Border(item.rect, palette.line_strong, kControlRadius);
+        p.Fill(item.rect, palette.raised, kRadius);
+        p.Border(item.rect, palette.line_strong, kRadius);
         break;
       case Item::Kind::kWell:
-        p.Fill(item.rect, palette.sunken, kControlRadius);
-        p.Border(item.rect, palette.line, kControlRadius);
+        p.Fill(item.rect, palette.sunken, kRadius);
+        p.Border(item.rect, palette.line, kRadius);
         break;
       case Item::Kind::kRule:
         p.HLine(item.rect.left, item.rect.right, item.rect.top, palette.line);
         break;
       case Item::Kind::kIcon:
-        p.DrawIcon(item.icon, item.rect, Color(palette, item.ink));
+        p.DrawIcon(item.icon, item.rect, Color(palette, item.tone));
         break;
       case Item::Kind::kMark:
-        p.DrawBadge(item.mark, {(item.rect.left + item.rect.right) / 2, (item.rect.top + item.rect.bottom) / 2},
-                Width(item.rect) * 14.5f / 16, nullptr);
+        p.DrawMark(item.mark, {(item.rect.left + item.rect.right) / 2, (item.rect.top + item.rect.bottom) / 2},
+                   Width(item.rect) * 14.5f / 16, nullptr);
         break;
       case Item::Kind::kNumeral:
         if (item.step == shown_step) {
           p.Disc(Rect(item.rect.left, item.rect.top + 0.5f, 20, 20), digits(item.step), false);
         } else if (item.text) {
-          target->DrawTextLayout({item.rect.left, item.rect.top}, item.text.Get(), p.Brush(Color(palette, item.ink)));
+          target->DrawTextLayout({item.rect.left, item.rect.top}, item.text.Get(), p.Brush(Color(palette, item.tone)));
         }
         break;
       case Item::Kind::kShownDisc:
@@ -1202,7 +1263,7 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         break;
       case Item::Kind::kWalkthrough:
         if (walk) p.Walkthrough(*scene.walkthrough, *walk, item.rect, picture, walk_layer_.Get(), walk_clip_.Get());
-        p.Border(item.rect, palette.line_strong, kControlRadius);
+        p.Border(item.rect, palette.line_strong, kRadius);
         break;
       case Item::Kind::kDot:
         target->FillEllipse(D2D1::Ellipse({(item.rect.left + item.rect.right) / 2, (item.rect.top + item.rect.bottom) / 2},
@@ -1227,89 +1288,99 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
     const D2D1_RECT_F r = e.bounds;
     switch (e.role) {
       case Role::kButton: {
-        D2D1_COLOR_F fill = palette.surface, edge = palette.line_strong, text = palette.ink;
+        // The default is solid cap red; the rest are red outlines with red
+        // words, that fill red under the pointer.
+        D2D1_COLOR_F fill = palette.ground, edge = palette.action, text = palette.action_text;
         if (!e.enabled) {
-          fill = palette.paper;
-          edge = palette.line;
+          edge = palette.line_strong;
           text = palette.disabled;
-        } else if (e.is_default) {
-          fill = pressed ? palette.text2 : hover ? palette.ink_hover : palette.ink;
-          edge = fill;
-          text = palette.on_ink;
         } else if (pressed) {
-          fill = palette.sunken;
+          fill = edge = palette.action_pressed;
+          text = palette.on_action_hover;
+        } else if (e.is_default && hover) {
+          fill = edge = palette.action_hover;
+          text = palette.on_action_hover;
         } else if (hover) {
-          fill = palette.paper_subtle;
-          edge = palette.text3;
+          fill = edge = palette.hover;
+          text = palette.on_action_hover;
+        } else if (e.is_default) {
+          fill = edge = palette.action;
+          text = palette.on_action;
         }
-        p.Fill(r, fill, kControlRadius);
-        p.Border(r, edge, kControlRadius);
+        p.Fill(r, fill, kRadius);
+        p.Border(r, edge, kRadius);
         if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(text));
         access_line(e, text);
-        if (focused) p.FocusRing(r, kControlRadius);
+        if (focused) p.FocusRing(r, kRadius);
         break;
       }
       case Role::kDoor: {
-        p.Fill(r, pressed ? palette.sunken : hover ? palette.paper_subtle : palette.surface, kControlRadius);
-        p.Border(r, e.is_default || hover ? palette.ink : palette.line_strong, kControlRadius);
-        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(palette.ink));
-        access_line(e, palette.ink);
+        // The suggested way in is marked as the main item in a list is, with
+        // a 2 DIP cap red edge and a red chevron; the other has a control's
+        // edge, which turns red under the pointer.
+        p.Fill(r, pressed ? palette.sunken : hover ? palette.raised_2 : palette.raised, kRadius);
+        if (e.is_default) {
+          p.Border(r, hover ? palette.hover : palette.action, kRadius, 2);
+        } else {
+          p.Border(r, hover ? palette.hover : palette.line_strong, kRadius);
+        }
+        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(palette.text));
+        access_line(e, palette.text);
         if (e.note) target->DrawTextLayout(e.note_at, e.note.Get(), p.Brush(palette.text2));
         p.DrawIcon(Icon::kChevron, Rect(r.right - 30, (r.top + r.bottom) / 2 - 8, 16, 16),
-               e.is_default ? palette.ink : palette.text3);
-        if (focused) p.FocusRing(r, kControlRadius);
+                   hover ? palette.hover : e.is_default ? palette.action_text : palette.text3);
+        if (focused) p.FocusRing(r, kRadius);
         break;
       }
       case Role::kRadio: {
         const D2D1_POINT_2F c = {r.left + 13 + 9, e.label_at.y + 1 + 9};
         if (e.selected) {
-          target->FillEllipse(D2D1::Ellipse(c, 9, 9), p.Brush(e.enabled ? palette.ink : palette.disabled));
-          target->FillEllipse(D2D1::Ellipse(c, 3, 3), p.Brush(palette.on_ink));
+          target->FillEllipse(D2D1::Ellipse(c, 9, 9), p.Brush(e.enabled ? palette.action : palette.disabled));
+          target->FillEllipse(D2D1::Ellipse(c, 3, 3), p.Brush(palette.on_action));
         } else {
-          target->FillEllipse(D2D1::Ellipse(c, 9, 9), p.Brush(palette.surface));
+          target->FillEllipse(D2D1::Ellipse(c, 9, 9), p.Brush(palette.raised));
           target->DrawEllipse(D2D1::Ellipse(c, 8.5f, 8.5f),
-                              p.Brush(!e.enabled ? palette.line_strong : hover ? palette.ink : palette.control_edge), 1);
+                              p.Brush(!e.enabled ? palette.line_strong : hover ? palette.hover : palette.control_edge), 1);
         }
-        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(e.enabled ? palette.ink : palette.disabled));
+        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(e.enabled ? palette.text : palette.disabled));
         if (e.note) target->DrawTextLayout(e.note_at, e.note.Get(), p.Brush(palette.text2));
-        if (focused) p.FocusRing(Grown(r, -3), kControlRadius);
+        // Rows sit edge to edge in their group, so their ring is drawn
+        // inside them, clear of the rules between them.
+        if (focused) p.FocusRing(Grown(r, -5), kRadius);
         break;
       }
       case Role::kDropdown: {
-        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(e.enabled ? palette.ink : palette.disabled));
+        if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(e.enabled ? palette.text : palette.disabled));
         if (e.note) target->DrawTextLayout(e.note_at, e.note.Get(), p.Brush(palette.text2));
         p.DrawIcon(e.selected ? Icon::kChevronUp : Icon::kChevronDown,
                    Rect(r.right - 30, (r.top + r.bottom) / 2 - 8, 16, 16),
-                   !e.enabled ? palette.disabled : hover ? palette.ink : palette.text3);
-        if (focused) p.FocusRing(Grown(r, -3), kControlRadius);
+                   !e.enabled ? palette.disabled : hover ? palette.hover : palette.text3);
+        if (focused) p.FocusRing(Grown(r, -5), kRadius);
         break;
       }
       case Role::kCheckBox: {
         const D2D1_RECT_F box = Rect(r.left, r.top + 1, 18, 18);
-        const D2D1_COLOR_F text = e.enabled ? palette.ink : palette.disabled;
+        const D2D1_COLOR_F text = e.enabled ? palette.text : palette.disabled;
         if (e.selected) {
-          p.Fill(box, text, kControlRadius);
-          p.DrawIcon(Icon::kBoxCheck, Rect(box.left + 2, box.top + 2, 14, 14), palette.on_ink);
+          p.Fill(box, e.enabled ? palette.action : palette.disabled, kRadius);
+          p.DrawIcon(Icon::kBoxCheck, Rect(box.left + 1, box.top + 1, 16, 16), palette.on_action);
         } else {
-          p.Fill(box, palette.surface, kControlRadius);
-          p.Border(box, !e.enabled ? palette.line_strong : hover ? palette.ink : palette.control_edge,
-                   kControlRadius);
+          p.Fill(box, palette.raised, kRadius);
+          p.Border(box, !e.enabled ? palette.line_strong : hover ? palette.hover : palette.control_edge, kRadius);
         }
         if (e.label) target->DrawTextLayout(e.label_at, e.label.Get(), p.Brush(text));
         access_line(e, text);
-        if (focused) p.FocusRing(Grown(r, 1), kControlRadius);
+        if (focused) p.FocusRing(r, kRadius);
         break;
       }
       case Role::kToggle:
         p.WalkToggle(r, state.walk_playing, state.hover == index);
-        if (focused) p.FocusRing(r, kControlRadius);
+        if (focused) p.FocusRing(r, kRadius);
         break;
       case Role::kLink: {
-        const D2D1_COLOR_F underline =
-            palette.mode == SetupMode::kHighContrast ? palette.link : hover ? palette.ink : palette.text3;
-        for (const D2D1_RECT_F& line : e.underlines) p.HLine(line.left, line.right, line.top, underline);
+        for (const D2D1_RECT_F& line : e.underlines) p.HLine(line.left, line.right, line.top, palette.link_underline);
         if (focused) {
-          for (const D2D1_RECT_F& box : e.rects) p.FocusRing(Grown(box, -1), 2);
+          for (const D2D1_RECT_F& box : e.rects) p.FocusRing(Grown(box, -1), kRadius);
         }
         break;
       }
@@ -1332,8 +1403,8 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
   D2D1_MATRIX_3X2_F identity;
   target->GetTransform(&identity);
   target->SetTransform(D2D1::Matrix3x2F::Translation(0, -state.scroll + (1 - state.arrive) * 4) * identity);
-  for (const Item& item : scene.items) {
-    if (item.in_panel) paint_item(item);
+  for (size_t i = 0; i < scene.items.size(); ++i) {
+    if (scene.items[i].in_panel) paint_item(scene.items[i], static_cast<int>(i));
   }
   for (size_t i = 0; i < scene.elements.size(); ++i) {
     if (scene.elements[i].in_panel) paint_element(static_cast<int>(i));
@@ -1346,8 +1417,8 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
   if (state.scroll < scene.MaxScroll()) p.HLine(inside.left, inside.right, kPanel.bottom - 2, palette.line);
 
   // The foot.
-  for (const Item& item : scene.items) {
-    if (!item.in_panel) paint_item(item);
+  for (size_t i = 0; i < scene.items.size(); ++i) {
+    if (!scene.items[i].in_panel) paint_item(scene.items[i], static_cast<int>(i));
   }
   for (size_t i = 0; i < scene.elements.size(); ++i) {
     if (!scene.elements[i].in_panel) paint_element(static_cast<int>(i));

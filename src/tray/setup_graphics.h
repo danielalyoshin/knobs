@@ -8,6 +8,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 // What the setup window draws with: Direct2D and DirectWrite, which ship
 // with Windows, its fonts, and the icons and badges, drawn from the same
@@ -44,8 +45,8 @@ struct TextStyle {
 ComPtr<IDWriteTextFormat> MakeTextFormat(const TextStyle& style);
 
 // The icons, from the site's sprite and signal path, as outlines to stroke
-// at 1.5 DIPs with round ends: the stage icons in a 21-DIP box, the rest
-// in a 16-DIP one, both at the origin.
+// at 1.5 DIPs with SharpStroke, cut straight as the brand's icons are: the
+// stage icons in a 21-DIP box, the rest in a 16-DIP one, both at the origin.
 enum class Icon { kMic, kFilters, kCable, kApps, kChevron, kBoxCheck, kChevronDown, kChevronUp };
 // How many there are: one past the last.
 inline constexpr size_t kIconCount = static_cast<size_t>(Icon::kChevronUp) + 1;
@@ -60,8 +61,16 @@ float IconSize(Icon icon);
 // outlines to stroke, or with `filled`, shapes to fill.
 ComPtr<ID2D1PathGeometry> PathGeometry(std::string_view svg, bool filled = false);
 
+// The state marks' shapes (knobs-brand's status-shape tokens), to fill, in a
+// 16-unit box at the origin. A mark is a ground with a glyph over it.
+enum class MarkShape { kDisc, kTriangle, kCheck, kExclamation, kInformation, kPause, kTriangleExclamation };
+ID2D1Geometry* MarkGeometry(MarkShape shape);
+// The shape as rectangles, in its 16-unit box, if it's only those, as the
+// marks' bars and dots are, so they can be drawn on whole pixels; else empty.
+const std::vector<D2D1_RECT_F>& MarkRects(MarkShape shape);
+
 // A stroke style with round ends and joins, or with mitred joins and flat
-// ends (`sharp`), as the wire's arrowheads have.
+// ends (`sharp`), as the brand's icons, the wire and its arrowheads have.
 ID2D1StrokeStyle* RoundStroke();
 ID2D1StrokeStyle* SharpStroke();
 

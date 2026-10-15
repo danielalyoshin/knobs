@@ -24,6 +24,9 @@
 #ifndef VbCablePack
   #error Run packaging\package.ps1, which passes VbCablePack, VB-Audio's driver pack.
 #endif
+#ifndef WizardGround
+  #error Run packaging\package.ps1, which passes WizardGround, the color the wizard image was rendered on.
+#endif
 #define VbCablePackName ExtractFileName(VbCablePack)
 
 ; Windows knows an install by its AppId. package.ps1 passes KnobsAppId for
@@ -62,12 +65,12 @@ UninstallDisplayIcon={app}\{#AppName}.exe
 UninstallDisplayName={#AppName}
 WizardStyle=modern
 ; The stacked lockup, from tools\render-installer-images.ps1, at each display
-; scale's size. Setup picks the one that fits, and centers it on its own color
-; rather than stretching it. The header's lockup is InitializeWizard's, so
-; there's no small image.
+; scale's size. Setup picks the one that fits, and centers it on its own color,
+; the brand's light ground it was rendered on, rather than stretching it. The
+; header's lockup is InitializeWizard's, so there's no small image.
 WizardImageFile=..\assets\installer\wizard-202.png,..\assets\installer\wizard-269.png,..\assets\installer\wizard-336.png,..\assets\installer\wizard-403.png,..\assets\installer\wizard-430.png,..\assets\installer\wizard-498.png,..\assets\installer\wizard-534.png
 WizardImageStretch=no
-WizardImageBackColor=#e8eaee
+WizardImageBackColor={#WizardGround}
 WizardSmallImageFile=
 Compression=lzma2/max
 SolidCompression=yes

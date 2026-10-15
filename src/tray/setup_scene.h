@@ -57,8 +57,8 @@ enum class Role {
   kButton,
 };
 
-// A colour from the palette.
-enum class Ink { kInk, kText2, kText3, kOnInk };
+// A text colour from the palette.
+enum class Tone { kText, kText2, kText3 };
 
 struct Element {
   Role role = Role::kText;
@@ -76,9 +76,12 @@ struct Element {
   bool is_default = false;
   bool warning = false;   // A note's.
   // A link: the boxes of its words and its glyph, one per line, and its
-  // underlines, as lines from left to right at top.
+  // underlines, as lines from left to right at top, and the paragraph it's
+  // in (an index into the scene's items) with its words' range there.
   std::vector<D2D1_RECT_F> rects;
   std::vector<D2D1_RECT_F> underlines;
+  int item = -1;
+  DWRITE_TEXT_RANGE range{};
   // What's written on a control.
   ComPtr<IDWriteTextLayout> label, note;
   D2D1_POINT_2F label_at{}, note_at{};
@@ -91,23 +94,24 @@ struct Element {
 // Something drawn that isn't a control, in paint order.
 struct Item {
   enum class Kind {
-    kText,     // `text` at the rect's top left, in `ink`.
+    kText,     // `text` at the rect's top left, in `tone`.
     kGroup,    // A box of choices: a surface with a strong border.
     kWell,     // A sunken box with a hairline border.
     kRule,     // A hairline along the rect's top.
-    kIcon,     // `icon`, scaled to the rect, in `ink`.
+    kIcon,     // `icon`, scaled to the rect, in `tone`.
     kMark,     // A badge, the rect's width across.
-    kNumeral,  // Step `step`'s number: on an ink disc while the walkthrough shows it.
-    kShownDisc,  // The number of the step the walkthrough shows, on an ink disc.
+    kNumeral,  // Step `step`'s number: on a disc while the walkthrough shows it.
+    kShownDisc,  // The number of the step the walkthrough shows, on a disc.
     kWalkthrough,  // The scene's walkthrough, framed.
     kDot,      // The waiting dot.
   };
   Kind kind = Kind::kText;
   D2D1_RECT_F rect{};
-  Ink ink = Ink::kInk;
+  Tone tone = Tone::kText;
   ComPtr<IDWriteTextLayout> text;
-  // Ranges of `text` in ink although the rest isn't: names in a UI.
-  std::vector<DWRITE_TEXT_RANGE> ink_ranges;
+  // Ranges of `text` in the text colour although the rest isn't: names in a
+  // UI.
+  std::vector<DWRITE_TEXT_RANGE> name_ranges;
   std::vector<DWRITE_TEXT_RANGE> link_ranges;
   Icon icon = Icon::kChevron;
   // kSet, kWarning or kBlocked, or kKnown for information.
@@ -121,7 +125,7 @@ struct StageBox {
   float x = 0;  // The icon's left.
   StageState state = StageState::kUnknown;
   ComPtr<IDWriteTextLayout> name, value;
-  std::vector<DWRITE_TEXT_RANGE> value_ink;
+  std::vector<DWRITE_TEXT_RANGE> value_names;  // Names, in the text colour.
 };
 
 struct Scene {
@@ -188,7 +192,7 @@ class ScenePainter {
 
  private:
   ComPtr<ID2D1RenderTarget> target_;
-  ComPtr<ID2D1SolidColorBrush> brush_, ink_, link_;
+  ComPtr<ID2D1SolidColorBrush> brush_, text_, link_;
   // The walkthrough's clip, kept from frame to frame: its layer belongs to
   // the target, and its shape to the frame's box.
   ComPtr<ID2D1Layer> walk_layer_;

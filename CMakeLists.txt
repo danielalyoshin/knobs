@@ -22,6 +22,15 @@ target_compile_definitions(knobs_options INTERFACE UNICODE _UNICODE WIN32_LEAN_A
 add_library(libobs_headers INTERFACE)
 target_include_directories(libobs_headers SYSTEM INTERFACE third_party/libobs)
 
+# The brand's design tokens, generated in the knobs-brand submodule
+# (brand/dist/knobs_tokens.h): the setup window's and the badges' colours,
+# shapes, geometry and motion.
+if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/brand/dist/knobs_tokens.h)
+  message(FATAL_ERROR "brand/ is empty. Run: git submodule update --init")
+endif()
+add_library(knobs_brand INTERFACE)
+target_include_directories(knobs_brand INTERFACE brand/dist)
+
 add_library(knobs_runtime STATIC
   src/audio/audio_devices.cpp
   src/audio/device_watch.cpp
@@ -98,7 +107,7 @@ target_include_directories(knobs_tray PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generat
 # The setup window draws itself with Direct2D and DirectWrite, decodes its
 # screenshots with WIC and speaks UI Automation, all of which ship with
 # Windows.
-target_link_libraries(knobs_tray PUBLIC knobs_runtime knobs_update
+target_link_libraries(knobs_tray PUBLIC knobs_runtime knobs_update knobs_brand
                       PRIVATE comctl32 shell32 d2d1 dwrite windowscodecs uiautomationcore dwmapi shcore oleaut32)
 
 # The tray app. The manifest asks for per-monitor DPI awareness (v2) and
@@ -213,6 +222,10 @@ add_dependencies(knobs-harness knobs-test-vst)
 
 enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
+# The logo files in assets/ were rendered from the knobs-brand submodule as it
+# is now (tools/render-brand-assets.ps1 records its sources).
+add_test(NAME brand_assets
+         COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR} -P ${CMAKE_SOURCE_DIR}/tools/check-brand-assets.cmake)
 # The tests below need OBS installed and skip when it isn't. None of them
 # opens the mic or any other audio device, and the import and core tests
 # read a made-up OBS settings folder, not the user's. KNOBS_TEST_OBS_DIR

@@ -26,6 +26,10 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7
+        with:
+          # brand/, knobs-brand: the design tokens the build draws from, and
+          # the logo files the brand_assets test checks assets/ against.
+          submodules: true
 
       - name: Find the app's name
         # KNOBS_DISPLAY_NAME (src/app_info.h): the tray app's file name, and

@@ -16,16 +16,26 @@ The default sizes are small icons (16 px at 100%, as in the tray) and large
 ones (32 px, as in dialogs) at display scales from 100% to 300%, and 256 for
 Explorer. 96 is also the notifications' icon at 100%.
 
+With -ViewBox, the SVG is drawn with that viewBox in place of its own, which
+frames the same artwork differently, as the brand's favicon frames the mark.
+
 Edge runs with a profile of its own in a temporary folder, so a running Edge
-isn't touched.
+isn't touched. tools\render-brand-assets.ps1 runs this for each of knobs's
+icons.
 
 .EXAMPLE
-tools\render-icon.ps1 -Svg assets\knobs-app-icon.svg -Out assets\knobs.ico
+tools\render-icon.ps1 -Svg brand\logo\svg\knobs-app-icon.svg -Out assets\knobs.ico
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Svg,
     [Parameter(Mandatory = $true)][string]$Out,
-    [int[]]$Sizes = @(16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 256)
+    [int[]]$Sizes = @(16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 256),
+    [string]$ViewBox,
+    # Another SVG for the sizes in -SmallSizes, such as a simpler mark that
+    # stays sharp where the full one would blur, framed by -SmallViewBox.
+    [string]$SmallSvg,
+    [string]$SmallViewBox,
+    [int[]]$SmallSizes = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -96,10 +106,24 @@ $edge = @(
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $edge) { throw "Microsoft Edge isn't installed." }
 
-$svgUri = ([System.Uri](Resolve-Path $Svg).Path).AbsoluteUri
+$Out = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
 $tag = "render-icon-" + [guid]::NewGuid()
 $work = Join-Path ([System.IO.Path]::GetTempPath()) $tag
 New-Item -ItemType Directory $work | Out-Null
+# An SVG's address, from a copy with its first viewBox replaced if one is given.
+function Framed([string]$path, [string]$frame, [string]$name) {
+    $source = (Resolve-Path $path).Path
+    if ($frame) {
+        $text = [System.IO.File]::ReadAllText($source)
+        $framed = ([regex]'viewBox="[^"]*"').Replace($text, "viewBox=""$frame""", 1)
+        if ($framed -eq $text) { throw "$path has no viewBox to replace." }
+        $source = Join-Path $work $name
+        [System.IO.File]::WriteAllText($source, $framed, (New-Object System.Text.UTF8Encoding $false))
+    }
+    return ([System.Uri]$source).AbsoluteUri
+}
+$svgUri = Framed $Svg $ViewBox 'source.svg'
+$smallUri = if ($SmallSvg) { Framed $SmallSvg $SmallViewBox 'small.svg' } else { $svgUri }
 
 # Every size side by side, a gap apart, on one page.
 $gap = 8
@@ -121,7 +145,8 @@ function Stop-Edge {
 
 function Render([string]$background) {
     $images = for ($i = 0; $i -lt $Sizes.Count; $i++) {
-        "<img src=""$svgUri"" style=""left:$($lefts[$i])px;width:$($Sizes[$i])px;height:$($Sizes[$i])px"">"
+        $uri = if ($SmallSizes -contains $Sizes[$i]) { $smallUri } else { $svgUri }
+        "<img src=""$uri"" style=""left:$($lefts[$i])px;width:$($Sizes[$i])px;height:$($Sizes[$i])px"">"
     }
     $page = Join-Path $work "$background.html"
     $html = "<!doctype html><html><head><style>html,body{margin:0;background:$background}" +
@@ -129,7 +154,7 @@ function Render([string]$background) {
     Set-Content -Path $page -Value $html -Encoding UTF8
     $png = Join-Path $work "$background.png"
     $arguments = @('--headless', '--disable-gpu', '--hide-scrollbars', "--force-device-scale-factor=$supersample",
-                   "--user-data-dir=""$work\profile""", "--window-size=$width,$height",
+                   "--user-data-dir=""$work\profile-$background""", "--window-size=$width,$height",
                    "--screenshot=""$png""", ([System.Uri]$page).AbsoluteUri)
     $process = Start-Process -FilePath $edge -ArgumentList $arguments -PassThru -WindowStyle Hidden
     # Edge sometimes stays running after it has saved the picture, so it's
@@ -210,7 +235,7 @@ try {
     }
     foreach ($entry in $entries) { $writer.Write($entry) }
     $writer.Flush()
-    [System.IO.File]::WriteAllBytes((Join-Path (Get-Location) $Out), $file.ToArray())
+    [System.IO.File]::WriteAllBytes($Out, $file.ToArray())
     Write-Output "Wrote $Out ($($Sizes -join ', ') px)."
 } finally {
     Stop-Edge

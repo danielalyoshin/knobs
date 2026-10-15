@@ -36,10 +36,11 @@ constexpr UINT_PTR kWalkTimer = 3;  // A walkthrough's frames.
 constexpr UINT kWalkUnseenMs = 250;  // How often an unseen walkthrough looks again.
 constexpr UINT kRenderMs = 200;
 constexpr UINT kFrameMs = 16;
-// The motion (docs/design.md, The setup window): 320 ms for structure,
-// 200 ms for a page coming in, and the waiting dot's breath.
-constexpr float kStructureMs = 320;
-constexpr float kArriveMs = 200;
+// The motion (docs/design.md, The setup window), the brand's two durations:
+// structure for the wire and the caret, feedback for a page coming in. The
+// waiting dot breathes at its own pace.
+constexpr float kStructureMs = tokens::motion::kSlowMs;
+constexpr float kArriveMs = tokens::motion::kFastMs;
 constexpr float kBreathMs = 1600;
 constexpr UINT kBreathFrameMs = 50;  // The dot needs no more.
 // DWM's attributes, by number: older SDKs lack the names.
@@ -47,8 +48,9 @@ constexpr DWORD kDarkMode = 20;      // DWMWA_USE_IMMERSIVE_DARK_MODE
 constexpr DWORD kCaptionColor = 35;  // DWMWA_CAPTION_COLOR, Windows 11
 constexpr DWORD kCloaked = 14;       // DWMWA_CLOAKED: on another desktop
 
-// cubic-bezier(0.2, 0, 0, 1), the site's one curve, solved for x.
+// The brand's one curve (a cubic Bezier from the tokens), solved for x.
 float Ease(float t) {
+  namespace motion = tokens::motion;
   t = std::clamp(t, 0.0f, 1.0f);
   const auto bezier = [](float u, float p1, float p2) {
     const float v = 1 - u;
@@ -57,9 +59,9 @@ float Ease(float t) {
   float lo = 0, hi = 1, u = t;
   for (int i = 0; i < 24; ++i) {
     u = (lo + hi) / 2;
-    if (bezier(u, 0.2f, 0.0f) < t) lo = u; else hi = u;
+    if (bezier(u, motion::kEaseX1, motion::kEaseX2) < t) lo = u; else hi = u;
   }
-  return bezier(u, 0.0f, 1.0f);
+  return bezier(u, motion::kEaseY1, motion::kEaseY2);
 }
 
 // Windows' text size (Settings > Accessibility > Text size), from 1 to 2.25.
@@ -106,8 +108,6 @@ SetupWindow::SetupWindow(FirstRunHost& host, HINSTANCE instance, FirstRun first_
       theme_(theme),
       zoom_asked_(zoom),
       walk_at_(walk_at) {
-  icon_large_ = LoadAppIcon(instance_, LIM_LARGE);
-  icon_small_ = LoadAppIcon(instance_, LIM_SMALL);
   uia_ = std::make_unique<SetupUia>(static_cast<SetupUiaHost&>(*this));
 }
 
@@ -211,8 +211,6 @@ bool SetupWindow::Create() {
   if (!window_) return false;
   // Created where it'll show, it has that monitor's scale already.
   dpi_ = GetDpiForWindow(window_);
-  SendMessageW(window_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon_large_));
-  SendMessageW(window_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon_small_));
   ApplyTheme();
   if (!MakeTarget()) {
     DestroyWindow(window_);
@@ -237,6 +235,22 @@ void SetupWindow::ApplyTheme() {
   // versions keep theirs.
   const COLORREF caption = palette_.caption;
   DwmSetWindowAttribute(window_, kCaptionColor, &caption, sizeof(caption));
+  // The colour mark for each ground: the title bar's small icon on the
+  // window's, the taskbar's big one on the taskbar's.
+  // Loaded again only when that ground changes, as settings broadcasts come
+  // often.
+  const int dark_caption = palette_.mode == SetupMode::kHighContrast ? TaskbarIsDark(MenuTheme::kSystem) : dark;
+  const int dark_taskbar = TaskbarIsDark(theme_);
+  const auto set_icon = [this](WPARAM which, int size, int on_dark, HICON& icon, int& loaded_for) {
+    if (on_dark == loaded_for) return;
+    const HICON loaded = LoadAppIcon(instance_, size, on_dark != 0);
+    SendMessageW(window_, WM_SETICON, which, reinterpret_cast<LPARAM>(loaded));
+    if (icon) DestroyIcon(icon);
+    icon = loaded;
+    loaded_for = on_dark;
+  };
+  set_icon(ICON_BIG, LIM_LARGE, dark_taskbar, icon_large_, icon_large_dark_);
+  set_icon(ICON_SMALL, LIM_SMALL, dark_caption, icon_small_, icon_small_dark_);
   Redraw();
 }
 

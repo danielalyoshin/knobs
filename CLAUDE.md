@@ -15,8 +15,10 @@ Run these from a Developer PowerShell for VS, which puts `cmake` and `ctest` on 
 ```powershell
 cmake --preset x64            # configure
 cmake --build --preset debug  # or: release
-ctest --preset debug          # unit tests, then smoke, harness, import, core and vst tests (these skip if OBS isn't installed)
+ctest --preset debug          # unit and brand assets tests, then smoke, harness, import, core and vst tests (these skip if OBS isn't installed)
 ```
+
+`brand/` is a git submodule (knobs-brand): clone with `--recurse-submodules`, or run `git submodule update --init`. Configuring stops without it.
 
 To run the smoke, harness, import, core and vst tests against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`. CMake keeps it for later configures, so go back to the installed OBS with `-DKNOBS_TEST_OBS_DIR=` (empty). CI tests the newest tested OBS installed and the oldest supported one unzipped (`build.yml`).
 
@@ -47,13 +49,14 @@ Don't open the mic without the user's go-ahead.
 - `src/tray/`: the tray app. `TrayApp` is the icon and the menu; `BuildMenu` turns a snapshot into the menu as data, which the unit tests check for every state. `FirstRun` is the first run as data in the same way (pages, the band's stages, buttons, what each click does), and `SetupWindow` shows it in a window of its own, drawn with Direct2D and DirectWrite: `setup_scene` lays out and paints a page, `setup_uia` is its UI Automation, `walkthrough` is a guide's walkthrough as data, and `pictures/` has its screenshots, with how they're taken. `Notifier` (`notices.h`) is the notifications as data too, with the icon's badge, which `badge.h` draws. `Updater` (`updates.h`) is the update check's plan: when to check, download and install, with no threads or clock of its own. Also dark menus, the settings file, the Run entry, the single-instance lock, starting OBS, and `ShutdownWatchdog`, which ends a quit that runs past its deadline. `src/main.cpp` is `knobs.exe`'s entry point.
 - `src/util/`: `Result`, UTF-8, JSON, text file and Win32 helpers, knobs's app folders, file checks on a worker with a time limit (`AsyncProbe`), and files-in-use helpers: DLL oplocks, the watchdog that bounds their holds, and their restart handoff, loaded modules and folder fingerprints.
 - `tools/common/`: code shared by the dev tools (console output, WAV files, the push source and offline runs, the test signal, the tools' start-up and import steps, aligning and diffing audio, energy envelopes and peaks, a seeded RNG). It isn't part of the app.
-- `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/compare/`, `tools/live/`, `tools/core/`, `tools/tray/`, `tools/update/`: the dev tools above. `tools/tray/` also has the fake backend and the screenshots. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`, `tools/render-icon.ps1` renders `assets/knobs.ico`, and `tools/render-installer-images.ps1` the installer's images in `assets/installer/`.
+- `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/compare/`, `tools/live/`, `tools/core/`, `tools/tray/`, `tools/update/`: the dev tools above. `tools/tray/` also has the fake backend and the screenshots. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`, and `tools/render-brand-assets.ps1` renders `assets/`'s icons and installer images from `brand/`'s logo files (with `render-icon.ps1` and `render-installer-images.ps1`) and records what it used, which the `brand_assets` test checks.
 - `tests/`: unit tests, which don't need OBS (`core_tests.cpp` runs the core on a fake backend, `tray_tests.cpp` checks the menu, the settings file, the Run and RunOnce entries on a scratch key, the lock, and starting OBS with a stand-in, `first_run_tests.cpp` the first run's pages and moves, `notices_tests.cpp` the notifications and badges on knobs-tray's fake core, `shutdown_tests.cpp` quitting with the core stuck, and a restart's handoff through it, in child processes, and `update_tests.cpp` the update check's plan, its releases' addresses and the signature check, offline), the import and core tests, which run `knobs-import` and `knobs-core` on the made-up OBS settings in `tests/fixtures/obs-config`, and the vst test, which runs `tests/fixtures/vst`, a VST 2 plugin of knobs's own, through `obs-vst` with `knobs-harness`. `tests/fixtures/dep` builds DLLs that import one in a folder of its own, directly or through a side-by-side assembly, for the unit tests of `UnresolvedDllImports`, and one that hangs in thread cleanup, for the shutdown tests.
 - `packaging/`: the installer's Inno Setup script (with VB-Cable's task and the silent update knobs runs), the text files that ship in each package, `package.ps1`, which builds both packages, and `sign.ps1`, which signs with Azure Artifact Signing (set up in the `release` environment that `release.yml` uses).
 - `.github/workflows/`: CI (`ci.yml`, which calls `build.yml`: build, every test against an installed OBS, packages) and `release.yml`, which drafts a release from a `v<version>` tag.
 - `docs/design.md`: how knobs is designed and why, with the evidence behind it.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.
-- `assets/`: the logo. The SVGs are the masters, and `knobs.ico` is the app icon, built into `knobs.exe`: the knob alone, with no tile. `assets/README.md` has the colors and usage rules.
+- `brand/`: knobs-brand, a git submodule: the brand's rules (`BRAND.md`), the logo's masters, and the design tokens, whose generated `dist/knobs_tokens.h` the setup window and the tray's badges are drawn from. Don't edit it here: change knobs-brand, run its `node tokens/build.mjs`, push, then move the submodule and render `assets/` again.
+- `assets/`: the logo files rendered from `brand/`: `knobs.ico` (the app icon, built into `knobs.exe`: the graphite dial with the red sweep, with no tile), `knobs-on-dark.ico` (the white dial, for dark grounds), the tray's white and black marks, and the installer's images. `assets/README.md` says what each is.
 - `PRODUCT.md`: who knobs is for, its voice and brand commitments. Read it before UI or copy work.
 
 ## Invariants
@@ -70,7 +73,8 @@ Don't open the mic without the user's go-ahead.
 
 ## Conventions
 - Every source file starts with `// SPDX-License-Identifier: GPL-2.0-or-later` (`;` or `#` comments in scripts).
-- The logo files in `assets/` aren't GPL: they're all rights reserved, apart from what `TRADEMARKS.md` allows. Don't add SPDX lines to them or move them out of `assets/`.
+- The logo files in `assets/` and in `brand/logo/` and `brand/web/` aren't GPL: they're all rights reserved, apart from what `TRADEMARKS.md` allows. Don't add SPDX lines to them or move them.
+- The UI's colours, shapes, radius, focus ring and motion come from the brand's tokens (`knobs::tokens` in `knobs_tokens.h`), never literals. The app keeps Windows' own type (Segoe UI Variable, Consolas), not the brand's.
 - The name is "knobs", all lowercase, even at the start of a sentence. It was "knOBS" until 2026-10-05. Keep it in one constant (`KNOBS_DISPLAY_NAME` in `src/app_info.h`), and don't write it out in user-facing strings; tests shouldn't depend on it either.
 
 ## Git

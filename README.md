@@ -1,7 +1,7 @@
 <h1 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/knobs-lockup-horizontal-light.svg">
-    <img src="assets/knobs-lockup-horizontal-dark.svg" alt="knobs" width="453">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/danielalyoshin/knobs-brand/main/logo/svg/knobs-lockup-horizontal-light.svg">
+    <img src="https://raw.githubusercontent.com/danielalyoshin/knobs-brand/main/logo/svg/knobs-lockup-horizontal-dark.svg" alt="knobs" width="320">
   </picture>
 </h1>
 
@@ -12,11 +12,11 @@
 A Windows tray app that runs the mic filter chain you tuned in OBS Studio and sends it to a virtual audio cable.<br>
 Your other apps get the same processed mic while OBS stays closed.
 
-[![Release](https://img.shields.io/github/v/release/danielalyoshin/knobs?include_prereleases&sort=semver&label=release&color=5c5f66&labelColor=33353a)](https://github.com/danielalyoshin/knobs/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/danielalyoshin/knobs/ci.yml?branch=main&label=CI&labelColor=33353a)](https://github.com/danielalyoshin/knobs/actions/workflows/ci.yml)
-[![Windows x64](https://img.shields.io/badge/Windows-x64-5c5f66?labelColor=33353a)](#requirements)
-[![OBS Studio 32.2 to 33](https://img.shields.io/badge/OBS%20Studio-32.2%20to%2033-5c5f66?labelColor=33353a)](#requirements)
-[![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-5c5f66?labelColor=33353a)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/danielalyoshin/knobs?include_prereleases&sort=semver&label=release&color=c55149&labelColor=191b1d)](https://github.com/danielalyoshin/knobs/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/danielalyoshin/knobs/ci.yml?branch=main&label=CI&color=5c6169&labelColor=191b1d)](https://github.com/danielalyoshin/knobs/actions/workflows/ci.yml)
+[![Windows x64](https://img.shields.io/badge/Windows-x64-5c6169?labelColor=191b1d)](#requirements)
+[![OBS Studio 32.2 to 33](https://img.shields.io/badge/OBS%20Studio-32.2%20to%2033-5c6169?labelColor=191b1d)](#requirements)
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-5c6169?labelColor=191b1d)](LICENSE)
 
 [Download](https://github.com/danielalyoshin/knobs/releases/latest) · [Setup](#setup) · [How it works](#how-it-works) · [Known limits](#known-limits) · [Design](docs/design.md) · [Issues](https://github.com/danielalyoshin/knobs/issues)
 
@@ -203,14 +203,14 @@ knobs keeps its settings and logs on your PC, in the folders under [Using knobs]
 You need Visual Studio 2022 or newer with the **Desktop development with C++** workload, and CMake 3.25 or newer. From a Developer PowerShell for VS:
 
 ```powershell
-git clone https://github.com/danielalyoshin/knobs.git
+git clone --recurse-submodules https://github.com/danielalyoshin/knobs.git
 cd knobs
 cmake --preset x64
 cmake --build --preset release   # or: debug
 ctest --preset release           # tests that need OBS skip if it isn't installed
 ```
 
-The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\`). No test opens an audio device or shows real tray icons or notifications. To run the tests that need OBS against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`, and with `-DKNOBS_TEST_OBS_DIR=` to go back to the installed one.
+`brand\` is [knobs-brand](https://github.com/danielalyoshin/knobs-brand), a git submodule with the brand's logo and design tokens; in a clone made without `--recurse-submodules`, run `git submodule update --init` first. The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\`). No test opens an audio device or shows real tray icons or notifications. To run the tests that need OBS against another OBS, such as an unzipped release, configure with `-DKNOBS_TEST_OBS_DIR=<folder>`, and with `-DKNOBS_TEST_OBS_DIR=` to go back to the installed one.
 
 ### Packaging
 
@@ -275,6 +275,6 @@ knobs's code is licensed under **GPL-2.0-or-later**, the same as libobs. See [LI
 
 The installer can install VB-Cable, VB-Audio's virtual cable, from [www.vb-cable.com](https://vb-cable.com). It carries VB-Audio's driver pack unchanged and runs VB-Audio's own setup, as [VB-Audio's licensing](https://vb-audio.com/Services/licensing.htm) allows. VB-Cable isn't covered by the GPL. VB-Cable is donationware: all participations are welcome.
 
-The knobs name and logo are trademarks of Daniel Alyoshin. The logo files in [`assets/`](assets/) aren't under the GPL: you can share them unmodified and use them to refer to knobs, and a fork that you distribute needs its own name and icon. [TRADEMARKS.md](TRADEMARKS.md) has the details.
+The knobs name and logo are trademarks of Daniel Alyoshin. The logo files, the masters in [knobs-brand](https://github.com/danielalyoshin/knobs-brand) and the icons rendered from them in [`assets/`](assets/), aren't under the GPL: you can share them unmodified and use them to refer to knobs, and a fork that you distribute needs its own name and icon. [TRADEMARKS.md](TRADEMARKS.md) has the details.
 
 knobs is an independent project. It isn't affiliated with or endorsed by the OBS Project.

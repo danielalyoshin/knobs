@@ -1,0 +1,13 @@
+# What assets\ was made from, by tools\render-brand-assets.ps1. Each file's SHA-256,
+# with CRLF read as LF, then each token with its value. Checked by
+# tools\check-brand-assets.cmake. Don't edit: run render-brand-assets.ps1 again.
+0d17d4b4ff189c8a74c859a7f05301badf68883e6ca67ec4a9f328f9c746e6fb  brand/logo/svg/knobs-mark-dark.svg
+e0574ccb0c68963235d4b86232e7fec0dd45905379e1ccfc84bc0355450a9556  brand/logo/svg/knobs-mark-light.svg
+d5253e9f7836ec0dbfd829a0ec626bf2d235818c2e4a52b5feb24d3b455e00dc  brand/logo/svg/knobs-mark-white.svg
+a8c8fd7249f32a5d160e0e943cf5b44438951675528d6afd5f36978ba8557060  brand/logo/svg/knobs-mark-black.svg
+9edca40b347c7a23581003ad75c97d48a328dd74b611288e1036a80a2f88b1ed  brand/logo/svg/knobs-knob-white.svg
+f604e5e27e32ea2f966bae6a64f807e97e2733c8716860201e384fb7f9a932c7  brand/logo/svg/knobs-knob-black.svg
+654c696106eca40a145b1e40e199402b891204b043d975d08b42dfea9612f40b  brand/web/favicon.svg
+841e44f84219288d1d3aacf7a236d98e3f7e6a3267d2817fd28059c1a5b175f0  brand/logo/svg/knobs-lockup-stacked-dark.svg
+288b2587ebf2e818457b3f2cc8358dfcd76ba0a9f421cea3a2be621abc43373c  brand/logo/svg/knobs-lockup-horizontal-dark.svg
+scheme.light.ground  #eef0f4

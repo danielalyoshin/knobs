@@ -154,6 +154,9 @@ class SetupWindow final : private SetupUiaHost {
   HWND window_ = nullptr;
   HICON icon_large_ = nullptr;
   HICON icon_small_ = nullptr;
+  // Which ground each icon was loaded for: 1 dark, 0 light, -1 not loaded.
+  int icon_large_dark_ = -1;
+  int icon_small_dark_ = -1;
   std::optional<WPARAM> quit_;  // WM_QUIT came while the window was open.
 
   // What's shown.

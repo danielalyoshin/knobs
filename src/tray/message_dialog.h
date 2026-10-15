@@ -5,13 +5,14 @@
 
 #include <string>
 
-// What the tray's windows share: the knob icon, and the task dialog that
+// What the tray's windows share: the app icon, and the task dialog that
 // tells the user something, with a Close button (an error, About).
 namespace knobs::tray {
 
-// The knob (IDI_KNOBS in `instance`) at LIM_SMALL's or LIM_LARGE's size, as
-// an icon for the caller to destroy, or null.
-HICON LoadAppIcon(HINSTANCE instance, int size);
+// The colour mark at LIM_SMALL's or LIM_LARGE's size, for a light ground
+// (IDI_KNOBS in `instance`, the exe's own) or with `on_dark` a dark one, as an
+// icon for the caller to destroy, or null.
+HICON LoadAppIcon(HINSTANCE instance, int size, bool on_dark = false);
 
 struct MessageDialog {
   // The window it's about, which it opens over and keeps from being clicked

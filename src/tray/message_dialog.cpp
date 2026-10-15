@@ -8,9 +8,11 @@
 
 namespace knobs::tray {
 
-HICON LoadAppIcon(HINSTANCE instance, int size) {
+HICON LoadAppIcon(HINSTANCE instance, int size, bool on_dark) {
   HICON icon = nullptr;
-  if (FAILED(LoadIconMetric(instance, MAKEINTRESOURCEW(IDI_KNOBS), size, &icon))) return nullptr;
+  if (FAILED(LoadIconMetric(instance, MAKEINTRESOURCEW(on_dark ? IDI_KNOBS_ON_DARK : IDI_KNOBS), size, &icon))) {
+    return nullptr;
+  }
   return icon;
 }
 

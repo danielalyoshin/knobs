@@ -1,33 +1,19 @@
-# Logo
+# Logo files
 
-The knob mark, the app icon and the lockups. The SVGs are the masters. The wordmark in them is outlined, so they need no fonts.
+knobs's icons and the installer's images, rendered from the logo's masters in `brand/`: the [knobs-brand](https://github.com/danielalyoshin/knobs-brand) repository, a git submodule. The masters, the brand's colors and the rules for using the logo are there, in `brand/BRAND.md`. Nothing here is drawn by hand: change the logo in knobs-brand, move the submodule, and render these again.
 
-- `knobs-mark.svg`: the mark alone.
-- `knobs-app-icon.svg`: the app icon: the mark alone, scaled up to fill a square. It has no tile (decided 2026-10-05).
-- `knobs.ico`: the app icon for Windows, for the tray app's exe, its tray icon, its windows and its notifications. It has the small (16 px) and large (32 px) icons at every display scale from 100% to 300%: 16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80 and 96 px, and 256. `tools/render-icon.ps1 -Svg assets\knobs-app-icon.svg -Out assets\knobs.ico` makes it: headless Edge renders the SVG at 8 times each size, and each 8×8 block is averaged into a pixel, for smooth edges. Sizes below 256 are 32-bit bitmaps, and 256 is a PNG.
-- `knobs-lockup-horizontal-dark.svg`: mark and wordmark with dark text, for light backgrounds.
-- `knobs-lockup-horizontal-light.svg`: mark and wordmark with light text, for dark backgrounds.
-- `knobs-lockup-stacked-dark.svg` and `knobs-lockup-stacked-light.svg`: the mark above the wordmark, for tall spaces such as the installer's side panel. The wordmark is 1.3 times the knob's width, 24 units below it.
-- `installer/`: the installer's images, at each size Inno Setup asks for from 100% to 250% display scaling. `wizard-<width>.png` is the stacked lockup centered on `#e8eaee`, for the "Completing setup" page. `header-<size>.png` is the horizontal lockup with dark text on a transparent ground, top right on the other pages: 32 px tall at 100%, centered on the 58 px header, with a 24 px margin on its right, the page title's inset on the left. The uninstaller shows `knobs.ico` there, as tall as the lockup and with the same margin. `tools/render-installer-images.ps1` makes them from the SVGs, as `render-icon.ps1` makes `knobs.ico`.
+- `knobs.ico`: the app icon, the color mark with no tile: the graphite dial and the red sweep (`brand/logo/svg/knobs-mark-dark.svg`). It is knobs.exe's icon, as Explorer and Start show it, the installer's and the uninstaller's, and the windows' and notifications' icon on a light ground. It has the small (16 px) and large (32 px) icons at every display scale from 100% to 300%: 16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80 and 96 px, and 256. 96 is also the notifications' icon at 100%.
+- `knobs-on-dark.ico`: the color mark for dark grounds, the white dial (`knobs-mark-light.svg`), at the same sizes, for the windows and notifications knobs shows on a dark ground.
+- `knobs-tray-white.ico` and `knobs-tray-black.ico`: the tray icon, the one-color mark, white on a dark taskbar and black on a light one (`knobs-mark-white.svg` and `knobs-mark-black.svg`). At 16 and 20 px it's the knob alone (`knobs-knob-white.svg` and `knobs-knob-black.svg`), filling its square, since the sweep and its gap are under a pixel there. Each has the tray's small icon at display scales from 100% to 400%: 16, 20, 24, 28, 32, 36, 40, 48, 56 and 64 px.
+- `installer/`: the installer's images, at each size Inno Setup asks for from 100% to 250% display scaling. `wizard-<width>.png` is the stacked lockup with dark ink, centered on the brand's light ground (`scheme.light.ground`), for the "Completing setup" page; the installer fills the rest of that area with the same ground. `header-<size>.png` is the horizontal lockup with dark ink on a transparent ground, top right on the other pages: 32 px tall at 100%, centered on the 58 px header, with a 24 px margin on its right, the page title's inset on the left. The uninstaller shows `knobs.ico` there, as tall as the lockup and with the same margin.
+- `brand-sources.txt`: what these were made from. It has the SHA-256 of each master used, with its line endings counted as LF, and each token used, with its value.
 
-## Colors
+## Making them
 
-| | On light backgrounds | On dark backgrounds |
-|---|---|---|
-| "kn" in the wordmark | `#17181b` | `#e8eaee` |
-| "obs" in the wordmark | `#d63c42` | `#e5484d` |
+`tools\render-brand-assets.ps1` renders them all from `brand/`, with `tools\render-icon.ps1` and `tools\render-installer-images.ps1`, and writes `brand-sources.txt`. Headless Edge draws each SVG at 8 times each size, once on black and once on white, and each 8×8 block is averaged into one pixel, with its alpha from the two pictures. Each icon frames the mark as the brand's favicon does (the viewBox of `brand/web/favicon.svg`), so the mark fills its square. Icon sizes below 256 are 32-bit bitmaps, and 256 is a PNG.
 
-The knob is the same everywhere: a dark body, a `#e5484d` pointer and `#e8eaee` ticks. That light tone is the knob's own cool graphite gray, lightened; it replaced the cream (`#f2f0eb`, `#efebe3`, `#ebe8e1`) on 2026-10-05.
-
-## Rules
-
-- Keep clear space around the mark at least as long as its pointer. The app icon is the exception: it fills its square.
-- Don't show the mark smaller than 32 px. The app icon's smaller sizes are the exception.
-- Don't recolor, rotate or stretch the knob.
-- In the horizontal lockup, the wordmark is about 73% of the knob's height, centered on it, and starts 66 units right of the knob, as on getknobs.app (decided 2026-10-08, up from 60%).
-- The wordmark is Sora: "kn" in SemiBold 600 and "obs" in Bold 700, tracked −0.055em.
-- The mark is original artwork. Where it appears next to the OBS name or logo, check the OBS Project's trademark guidelines.
+The `brand_assets` test (`tools/check-brand-assets.cmake`) compares `brand-sources.txt` with `brand/` as it is. When the submodule moves on to a knobs-brand with a different logo or ground, the tests fail until these are rendered again. `packaging\package.ps1` gives the installer the ground recorded there, so its color always matches its images.
 
 ## License
 
-These files aren't under the GPL like the rest of knobs. They're Copyright © 2026 Daniel Alyoshin, all rights reserved, apart from what [TRADEMARKS.md](../TRADEMARKS.md) allows: sharing them unmodified with the knobs source and its official builds, and using them unmodified to refer to knobs. A fork that you distribute needs its own icon in place of `knobs.ico`.
+These files aren't under the GPL like the rest of knobs. They're Copyright © 2026 Daniel Alyoshin, all rights reserved, apart from what [TRADEMARKS.md](../TRADEMARKS.md) allows: sharing them unmodified with the knobs source and its official builds, and using them unmodified to refer to knobs. A fork that you distribute needs icons of its own in place of `knobs.ico` and the tray icons.

@@ -67,6 +67,17 @@ bool WindowsModeIsDark() {
   return status == ERROR_SUCCESS && light == 0;
 }
 
+bool TaskbarIsDark(MenuTheme theme) {
+  // High contrast first, as the setup window has it: the taskbar takes the
+  // user's colours whatever the theme asked for.
+  if (HighContrast()) {
+    const COLORREF window = GetSysColor(COLOR_WINDOW);
+    return GetRValue(window) * 299 + GetGValue(window) * 587 + GetBValue(window) * 114 < 128 * 1000;
+  }
+  if (theme != MenuTheme::kSystem) return theme == MenuTheme::kDark;
+  return WindowsModeIsDark();
+}
+
 void ApplyMenuTheme(MenuTheme theme) {
   const UxTheme& ux = GetUxTheme();
   if (!ux.set_preferred_app_mode) return;

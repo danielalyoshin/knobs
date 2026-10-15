@@ -1,0 +1,3 @@
+[submodule "brand"]
+	path = brand
+	url = https://github.com/danielalyoshin/knobs-brand.git

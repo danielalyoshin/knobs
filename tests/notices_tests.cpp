@@ -18,6 +18,7 @@
 
 #include "app_info.h"
 #include "core/controller.h"
+#include "knobs_tokens.h"
 #include "core/state.h"
 #include "test_harness.h"
 #include "tray/badge.h"
@@ -1118,14 +1119,42 @@ TEST(BadgesSitInTheCorner) {
       CHECK(Alpha(At(badged, middle, middle)) == 255 && At(badged, middle, middle) != 0xff808080);
       CHECK(Alpha(At(badged, static_cast<int>(center - radius - gap / 2), middle)) < 128);
     }
-    // The logo's red and the knob's graphite, beside the mark.
-    const auto fill = [&](Badge badge) {
-      const IconPixels badged = AddBadge(icon, badge);
+    // The state marks' stop and info colours (knobs-brand's tokens), beside
+    // the mark, with the info disc turned over on a dark taskbar.
+    const auto fill = [&](Badge badge, bool on_dark = false) {
+      const IconPixels badged = AddBadge(icon, badge, on_dark);
       const float radius = std::round(size * 7.0f / 16) / 2;
       const float center = size - radius;
       return At(badged, static_cast<int>(center - 0.6f * radius), static_cast<int>(center + 0.3f * radius)) & 0xffffff;
     };
-    CHECK(fill(Badge::kAttention) == 0xe5484d && fill(Badge::kPaused) == 0x4a4c52);
+    CHECK(fill(Badge::kAttention) == (tokens::status::kStop & 0xffffff) &&
+          fill(Badge::kPaused) == (tokens::status::kInfo & 0xffffff));
+    CHECK(fill(Badge::kAttention, true) == (tokens::status::kStop & 0xffffff) &&
+          fill(Badge::kPaused, true) == (tokens::status::kInfoOnDark & 0xffffff));
+  }
+}
+
+TEST(BadgeMarksSitOnWholePixels) {
+  // Down the middle of the "!": a bar, a gap, then a square dot shorter than
+  // the bar, every pixel the disc's colour or the mark's, with no blend.
+  for (const int size : {16, 20, 24, 28, 32, 40, 48, 64}) {
+    const IconPixels icon{size, std::vector<uint32_t>(static_cast<size_t>(size) * size, 0)};
+    const IconPixels badged = AddBadge(icon, Badge::kAttention);
+    const int diameter = static_cast<int>(std::lround(size * 7.0f / 16));
+    const int x = size - diameter + diameter / 2 - (diameter % 2 == 0 ? 1 : 0);
+    std::string column;
+    for (int y = size - diameter; y < size; ++y) {
+      const uint32_t rgb = At(badged, x, y) & 0xffffff;
+      const bool mark = rgb == (tokens::status::kOnStatus & 0xffffff);
+      CHECK(mark || rgb == (tokens::status::kStop & 0xffffff));
+      column += mark ? '#' : '.';
+    }
+    const size_t bar = column.find('#');
+    const size_t gap = column.find('.', bar);
+    const size_t dot = column.find('#', gap);
+    CHECK(bar != std::string::npos && gap != std::string::npos && dot != std::string::npos);
+    const size_t end = std::min(column.find('.', dot), column.size());
+    CHECK(gap - bar > end - dot && column.find('#', end) == std::string::npos);
   }
 }
 

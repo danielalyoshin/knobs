@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Checks that assets\ was made from brand\ as it is: each file and token that
+# assets\brand-sources.txt names still has the hash or value recorded there,
+# as tools\render-brand-assets.ps1 wrote it. A file's hash counts its CRLFs as
+# LFs, so it's the same on any checkout.
+#
+#   cmake -DROOT=<repository> -P tools/check-brand-assets.cmake
+
+if(NOT ROOT)
+  get_filename_component(ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+endif()
+set(record "${ROOT}/assets/brand-sources.txt")
+set(rerun "run tools\\render-brand-assets.ps1 and commit assets\\")
+if(NOT EXISTS "${ROOT}/brand/dist/tokens.flat.json")
+  message(FATAL_ERROR "brand/ is empty. Run: git submodule update --init")
+endif()
+if(NOT EXISTS "${record}")
+  message(FATAL_ERROR "There's no assets/brand-sources.txt: ${rerun}.")
+endif()
+
+file(READ "${ROOT}/brand/dist/tokens.flat.json" tokens)
+file(STRINGS "${record}" lines)
+set(stale "")
+set(checked 0)
+foreach(line IN LISTS lines)
+  if(line MATCHES "^#" OR line STREQUAL "")
+    continue()
+  elseif(line MATCHES "^([0-9a-f]+)  (.+)$")
+    set(want "${CMAKE_MATCH_1}")
+    set(path "${CMAKE_MATCH_2}")
+    if(NOT EXISTS "${ROOT}/${path}")
+      list(APPEND stale "${path} is missing")
+    else()
+      file(READ "${ROOT}/${path}" content)
+      string(REPLACE "\r\n" "\n" content "${content}")
+      string(SHA256 have "${content}")
+      if(NOT have STREQUAL want)
+        list(APPEND stale "${path} has changed")
+      endif()
+    endif()
+  elseif(line MATCHES "^([a-z0-9.-]+)  (.+)$")
+    set(name "${CMAKE_MATCH_1}")
+    set(want "${CMAKE_MATCH_2}")
+    string(JSON have ERROR_VARIABLE missing GET "${tokens}" "${name}")
+    if(missing)
+      list(APPEND stale "the token ${name} is missing")
+    elseif(NOT have STREQUAL want)
+      list(APPEND stale "the token ${name} is ${have}, not ${want}")
+    endif()
+  else()
+    message(FATAL_ERROR "assets/brand-sources.txt has a line this can't read: ${line}")
+  endif()
+  math(EXPR checked "${checked} + 1")
+endforeach()
+
+if(stale)
+  list(JOIN stale "\n  " detail)
+  message(FATAL_ERROR "assets/ was made from an older knobs-brand: ${rerun}.\n  ${detail}")
+endif()
+message(STATUS "assets/ matches brand/ (${checked} files and tokens).")

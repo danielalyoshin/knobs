@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "tray/setup_theme.h"
 
-#include <cstdint>
-
 namespace knobs::tray {
 namespace {
-
-constexpr D2D1_COLOR_F Hex(uint32_t rgb) {
-  return {((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f, (rgb & 0xFF) / 255.0f, 1.0f};
-}
 
 D2D1_COLOR_F System(int index) {
   const COLORREF color = GetSysColor(index);
@@ -53,65 +47,67 @@ SetupMode CurrentSetupMode(MenuTheme theme) {
 SetupPalette MakeSetupPalette(SetupMode mode) {
   SetupPalette p;
   p.mode = mode;
-  // The tray icon's badge colours (badge.cpp), and Windows' amber.
-  p.badge_ok = Hex(0x23875A);
-  p.badge_stop = Hex(0xE5484D);
-  p.badge_warning = Hex(0xF0A33C);
-  p.badge_info = Hex(0x4A4C52);
-  p.badge_glyph = Hex(0xFFFFFF);
-  p.badge_glyph_dark = Hex(0x17181B);
-  switch (mode) {
-    case SetupMode::kLight:
-      p.paper = Hex(0xF7F8FA);
-      p.paper_subtle = Hex(0xEEF0F3);
-      p.surface = Hex(0xFFFFFF);
-      p.sunken = Hex(0xF0F1F4);
-      p.line = Hex(0xE1E3E8);
-      p.line_strong = Hex(0xC8CCD3);
-      p.ink = Hex(0x17181B);
-      p.ink_hover = Hex(0x34363C);
-      p.on_ink = Hex(0xFFFFFF);
-      p.text2 = Hex(0x4A4E57);
-      p.text3 = Hex(0x686D77);
-      p.lift_opacity = 0.10f;
-      break;
-    case SetupMode::kDark:
-      p.paper = Hex(0x0F1012);
-      p.paper_subtle = Hex(0x141518);
-      p.surface = Hex(0x17181B);
-      p.sunken = Hex(0x121316);
-      p.line = Hex(0x26282D);
-      p.line_strong = Hex(0x363940);
-      p.ink = Hex(0xE8EAEE);
-      p.ink_hover = Hex(0xFFFFFF);
-      p.on_ink = Hex(0x17181B);
-      p.text2 = Hex(0xB0B4BC);
-      p.text3 = Hex(0x8B8F98);
-      p.lift_opacity = 0.5f;
-      break;
-    case SetupMode::kHighContrast: {
-      // The user's colours only: shapes and text carry the meaning.
-      const D2D1_COLOR_F window = System(COLOR_WINDOW);
-      const D2D1_COLOR_F text = System(COLOR_WINDOWTEXT);
-      p.paper = p.paper_subtle = p.surface = p.sunken = window;
-      p.line = p.line_strong = p.text2 = p.text3 = p.control_edge = text;
-      p.ink = p.ink_hover = text;
-      p.on_ink = window;
-      p.link = System(COLOR_HOTLIGHT);
-      p.disabled = System(COLOR_GRAYTEXT);
-      p.here = System(COLOR_HIGHLIGHT);
-      p.badge_ok = p.badge_stop = p.badge_warning = p.badge_info = text;
-      p.badge_glyph = p.badge_glyph_dark = window;
-      p.lift_opacity = 0;
-      p.caption = 0xFFFFFFFF;
-      return p;
-    }
+  p.mark_ok = TokenColor(tokens::status::kOk);
+  p.mark_stop = TokenColor(tokens::status::kStop);
+  p.mark_warn = TokenColor(tokens::status::kWarn);
+  p.mark_info = TokenColor(tokens::status::kInfo);
+  p.on_mark = TokenColor(tokens::status::kOnStatus);
+  p.on_warn = TokenColor(tokens::status::kOnWarn);
+  p.on_info = p.on_mark;
+  if (mode == SetupMode::kDark) {
+    // The graphite disc barely shows on the dark ground, so it turns over.
+    p.mark_info = TokenColor(tokens::status::kInfoOnDark);
+    p.on_info = TokenColor(tokens::status::kOnInfoOnDark);
   }
+  if (mode == SetupMode::kHighContrast) {
+    // The user's colours only: shapes and text carry the meaning.
+    const D2D1_COLOR_F window = System(COLOR_WINDOW);
+    const D2D1_COLOR_F text = System(COLOR_WINDOWTEXT);
+    p.ground = p.ground_deep = p.raised = p.raised_2 = p.sunken = window;
+    p.line = p.line_strong = p.text = p.text2 = p.text3 = p.control_edge = text;
+    p.action = p.action_text = p.focus = text;
+    p.on_action = window;
+    // Under the pointer, the user's highlight, as Windows' own controls have.
+    p.hover = p.action_hover = p.action_pressed = System(COLOR_HIGHLIGHT);
+    p.on_action_hover = System(COLOR_HIGHLIGHTTEXT);
+    p.link_underline = p.link_hover = System(COLOR_HOTLIGHT);
+    p.disabled = System(COLOR_GRAYTEXT);
+    p.here = System(COLOR_HIGHLIGHT);
+    p.mark_ok = p.mark_stop = p.mark_warn = p.mark_info = text;
+    p.on_mark = p.on_warn = p.on_info = window;
+    p.caption = 0xFFFFFFFF;
+    return p;
+  }
+  const tokens::Scheme& s = mode == SetupMode::kDark ? tokens::kDark : tokens::kLight;
+  p.ground = TokenColor(s.ground);
+  p.ground_deep = TokenColor(s.ground_deep);
+  p.raised = TokenColor(s.raised);
+  p.raised_2 = TokenColor(s.raised_2);
+  p.sunken = TokenColor(s.sunken);
+  p.line = TokenColor(s.line);
+  p.line_strong = TokenColor(s.line_strong);
+  p.text = TokenColor(s.text);
+  p.text2 = TokenColor(s.text_2);
+  p.text3 = TokenColor(s.text_3);
+  p.action = TokenColor(s.action);
+  p.action_hover = TokenColor(s.action_hover);
+  p.action_text = TokenColor(s.action_text);
+  p.on_action = TokenColor(s.on_action);
+  p.link_underline = TokenColor(s.link_underline);
+  p.link_hover = TokenColor(s.link_hover);
+  p.focus = TokenColor(s.focus);
+  // Pressed goes a step deeper than under the pointer: the light scheme's red
+  // words' tone, which is deeper than its hover. The dark scheme lights its
+  // buttons under the pointer, so pressed goes back to cap red.
+  p.action_pressed = mode == SetupMode::kDark ? p.action : p.action_text;
+  p.on_action_hover = p.on_action;
+  p.hover = p.action;
+  // An idle control's edge is an idle icon's colour, which holds 3:1 against
+  // the panel, as line_strong doesn't.
   p.control_edge = p.text3;
-  p.link = p.ink;
   p.disabled = p.text3;
-  p.here = p.ink;
-  p.caption = ToColorRef(p.paper);
+  p.here = p.text;
+  p.caption = ToColorRef(p.ground);
   return p;
 }
 

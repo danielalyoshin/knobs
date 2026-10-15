@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// knobs-tray.exe's resources: the icon the tray shows, and the name its
-// notifications show, which is knobs.exe's.
+// knobs-tray.exe's resources: the icons the tray and its notifications show,
+// and the name its notifications show, which is knobs.exe's.
 
 #include <winver.h>
 
@@ -8,8 +8,12 @@
 #include "tray/resource.h"
 #include "version.h"
 
-// assets\knobs.ico, found through the resource compiler's include path.
+// assets\knobs.ico, first, so it's the exe's icon, found through the resource
+// compiler's include path, and the other marks beside it.
 IDI_KNOBS ICON "knobs.ico"
+IDI_KNOBS_ON_DARK ICON "knobs-on-dark.ico"
+IDI_TRAY_WHITE ICON "knobs-tray-white.ico"
+IDI_TRAY_BLACK ICON "knobs-tray-black.ico"
 
 // The setup's screenshots, in src\tray\pictures, found the same way.
 #include "pictures.rc2"

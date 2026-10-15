@@ -458,6 +458,13 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (wparam == SPI_SETHIGHCONTRAST ||
           (lparam && std::wstring_view(reinterpret_cast<const wchar_t*>(lparam)) == L"ImmersiveColorSet")) {
         ApplyMenuTheme(options_.theme);
+        // The tray's and the notifications' marks follow the taskbar, as the
+        // menu does.
+        LoadIcons();
+        NOTIFYICONDATAW data = {sizeof(data)};
+        data.uFlags = NIF_ICON;
+        data.hIcon = icons_[static_cast<size_t>(badge_)];
+        ModifyIcon(data);
       }
       break;
     case WM_QUERYENDSESSION:
@@ -503,18 +510,27 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
 
 void TrayApp::LoadIcons() {
   DestroyIcons();
-  const HICON small_icon = LoadAppIcon(options_.instance, LIM_SMALL);
+  // The one-colour mark, as Windows' own tray icons are: white on a dark
+  // taskbar, black on a light one.
+  const bool dark = TaskbarIsDark(options_.theme);
+  HICON small_icon = nullptr;
+  if (FAILED(LoadIconMetric(options_.instance, MAKEINTRESOURCEW(dark ? IDI_TRAY_WHITE : IDI_TRAY_BLACK), LIM_SMALL,
+                            &small_icon))) {
+    small_icon = nullptr;
+  }
   // Windows 11 draws a notification's icon about 50 px wide at 100%, and
   // resamples whatever it's given. Twice that is sharpest: an icon that size
   // or a little bigger blurs, and a much bigger one comes out jagged.
   const int size = MulDiv(2 * 48, static_cast<int>(GetDpiForSystem()), 96);
   HICON notification = nullptr;
-  if (FAILED(LoadIconWithScaleDown(options_.instance, MAKEINTRESOURCEW(IDI_KNOBS), size, size, &notification))) {
+  // The colour mark for the notification's ground, which is the taskbar's.
+  if (FAILED(LoadIconWithScaleDown(options_.instance, MAKEINTRESOURCEW(dark ? IDI_KNOBS_ON_DARK : IDI_KNOBS), size,
+                                   size, &notification))) {
     notification = nullptr;
   }
   for (const Badge badge : kBadges) {
-    icons_[static_cast<size_t>(badge)] = BadgedIcon(small_icon, badge);
-    notification_icons_[static_cast<size_t>(badge)] = BadgedIcon(notification, badge);
+    icons_[static_cast<size_t>(badge)] = BadgedIcon(small_icon, badge, dark);
+    notification_icons_[static_cast<size_t>(badge)] = BadgedIcon(notification, badge, dark);
   }
   if (small_icon) DestroyIcon(small_icon);
   if (notification) DestroyIcon(notification);

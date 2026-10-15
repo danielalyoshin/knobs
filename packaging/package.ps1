@@ -129,9 +129,15 @@ if (-not $NoInstaller) {
     }
   }
   if (-not $Iscc -or -not (Test-Path $Iscc)) { throw "Couldn't find Inno Setup 6's ISCC.exe. Install it, or pass -Iscc." }
+  # The ground the wizard image was rendered on, which Setup fills the rest of
+  # its area with (tools\render-brand-assets.ps1).
+  $sources = Get-Content "$root\assets\brand-sources.txt"
+  $ground = $sources | ForEach-Object { if ($_ -match '^scheme\.light\.ground  (#[0-9a-f]{6})$') { $Matches[1] } } |
+    Select-Object -First 1
+  if (-not $ground) { throw "assets\brand-sources.txt has no scheme.light.ground. Run tools\render-brand-assets.ps1." }
   # KnobsAppId: knobs's own AppId, which a test build without it doesn't get.
   $defines = @("/DAppName=$name", "/DKnobsAppId", "/DAppVersion=$version", "/DStageDir=$stage", "/DOutputDir=$out",
-    "/DVbCablePack=$((Resolve-Path $VbCablePack).Path)")
+    "/DVbCablePack=$((Resolve-Path $VbCablePack).Path)", "/DWizardGround=$ground")
   if ($Sign) {
     # Inno Setup signs the uninstaller and the installer with this command:
     # $q is a quote and $f the quoted file.

@@ -47,11 +47,12 @@ knobs gives OBS's mic sound without OBS. It loads the filter binaries from the u
 - **Name:** "knobs", all lowercase, even at the start of a sentence, as in the audio kind. It was knOBS until 2026-10-05. Code keeps it in one constant (`KNOBS_DISPLAY_NAME`), and user-facing strings use that constant.
 - **Tagline:** "Your OBS mic chain, in every app.", the headline of getknobs.app. The README, the About box and the GitHub repository's description use it (decided 2026-10-08, replacing "Your OBS mic chain, without OBS.").
 - **Voice:** plain and exact, like the README. Say what happened and what to do, in everyday words. Short sentences, no hype, no exclamation marks, no jokes. Give numbers when they help ("88 ms").
-- **Logo:** the knob mark (a dark knob with a red pointer, original artwork), the app icon, and the horizontal and stacked lockups, in `assets/`. Don't recolor, rotate or stretch the knob. Usage rules are in `assets/README.md`.
-- **Logo colors:** ink `#17181b` on light and `#e8eaee` on dark. Red `#d63c42` on light and `#e5484d` on dark, for the pointer and "obs" in the wordmark. The knob's ticks are `#e8eaee`, a light tone of the knob's cool graphite. No cream (decided 2026-10-05). The app icon is the knob alone, with no tile (decided 2026-10-05).
+- **Brand:** the knobs-brand repository, a git submodule at `brand/`, holds the brand's rules (`brand/BRAND.md`), the logo's masters and the design tokens, for the app and getknobs.app alike. The app's UI is drawn from those tokens, and its icons and installer images are rendered from those masters, so a change there reaches the app in its next release. The app keeps Windows' own type rather than the brand's (decided 2026-10-14).
+- **Logo:** the knob mark (a knob turned to its top position, with the red sweep it has swept through, original artwork), the wordmark and their lockups, in `brand/logo/`. Don't recolor, rotate or stretch it. The app icon is the mark alone, with no tile (decided 2026-10-05, kept 2026-10-15): the graphite dial with the red sweep as the exe's and the installer's icon (decided 2026-10-15), and the white dial where knobs shows its icon on a dark ground itself, in its windows and notifications.
+- **Colors:** graphite `#191b1d`, ink `#e5ecf6`, and cap red `#df695e` (`#c55149` on light grounds), which marks what can be pressed and what is knobs and never an error. No cream.
 - **Red "obs" in the wordmark:** kept on purpose (decided 2026-10-05), although the rename to knobs dropped "OBS" from the name. If the OBS team objects, revisit it, as with the name.
-- **Tray badges:** discs in the logo's colors: a white "!" on the red `#e5484d` and white pause bars on the graphite `#4a4c52`, 7/16 of the icon (decided 2026-10-07, replacing Windows 11's yellow and gray).
-- **Logo license:** the files in `assets/` are all rights reserved, outside the GPL that covers the code. `TRADEMARKS.md` says how the name and logo may be used; forks need their own (decided 2026-10-07).
+- **State marks and tray badges:** the brand's state marks, cut square as the logo is: a green disc with a check, a red disc with "!", an amber triangle with "!", and a graphite disc with "i" or pause bars, which turns over to white on a dark ground (decided 2026-10-14 and 2026-10-15). The tray's badges are the red "!" and the graphite pause, 7/16 of the icon. The tray icon is the one-colour mark, white on a dark taskbar and black on a light one (decided 2026-10-14), and the knob alone at 16 and 20 px, where the sweep would smear (decided 2026-10-15).
+- **Logo license:** the logo files in knobs-brand's `logo/` and `web/`, and the icons and images rendered from them in `assets/`, are all rights reserved, outside the GPL that covers the code. `TRADEMARKS.md` says how the name and logo may be used; forks need their own (decided 2026-10-07).
 - **Independence:** knobs isn't affiliated with or endorsed by the OBS Project. Say so wherever knobs is presented.
 
 ## Evidence on Hand
@@ -60,7 +61,7 @@ knobs gives OBS's mic sound without OBS. It loads the filter binaries from the u
 - Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (Audient iD4; docs/design.md, Mic-to-cable latency).
 - On real hardware (docs/design.md, On real hardware): running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB. After a cold boot, the filtered mic was on the cable 9.5 s after signing in, with nothing clicked.
 - [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
-- The logo, app icon and lockups in `assets/`.
+- The logo, its lockups and the brand's rules in `brand/` (knobs-brand), and the icons rendered from them in `assets/`.
 - Pictures of the tray menu, first run, notifications and icon: `knobs-tray --screenshot` and `--icons` take them on its fake core, whose state is made up but realistic.
 - Not on hand, and not to be made up: users, testimonials, download counts, a website.
 
