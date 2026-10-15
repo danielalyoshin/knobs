@@ -598,6 +598,49 @@ TEST(PlanLeavesOutAnOptionalModuleItCantRead) {
   CHECK(plan->files.size() == 11);
 }
 
+TEST(EnsureCopiesAnOptionalModuleItLeftOutOnceItsFixed) {
+  // Left out while it couldn't be read, the module stays out of a copy that's
+  // reused, and is copied once its DLL changes, as an OBS repair would.
+  TempDir dir(L"skipped");
+  const ObsInstall install{MakeFakeInstall(dir.path / L"obs"), {32, 2, 2}};
+  const fs::path module = install.root / L"obs-plugins" / L"64bit" / L"nv-filters.dll";
+  WriteFile(module, "not a DLL");
+  const fs::path base = dir.path / L"runtime";
+  auto first = EnsureRuntimeCopy(install, base, false);
+  CHECK(first.ok() && !first->reused && first->skipped.size() == 1);
+  auto again = EnsureRuntimeCopy(install, base, false);
+  CHECK(again.ok() && again->reused && again->skipped.size() == 1 && again->skipped[0].starts_with("nv-filters: "));
+  fs::remove(module);
+  fs::copy_file(SelfPath(), module);
+  auto fixed = EnsureRuntimeCopy(install, base, false);
+  CHECK(fixed.ok() && !fixed->reused && fixed->skipped.empty());
+  CHECK(fs::exists(base / L"32.2.2" / L"obs-plugins" / L"64bit" / L"nv-filters.dll"));
+  auto settled = EnsureRuntimeCopy(install, base, false);
+  CHECK(settled.ok() && settled->reused && settled->skipped.empty());
+}
+
+TEST(EnsureLeavesOutAnOptionalModuleItCantCopy) {
+  // A file of obs-vst's held open with no sharing, as an antivirus can for a
+  // moment: the copy goes without obs-vst, and the next start copies it.
+  TempDir dir(L"copy-skip");
+  const ObsInstall install{MakeFakeInstall(dir.path / L"obs"), {32, 2, 2}};
+  const fs::path base = dir.path / L"runtime";
+  const fs::path held = install.root / L"data" / L"obs-plugins" / L"obs-vst" / L"locale" / L"en-US.ini";
+  const HANDLE lock = CreateFileW(held.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+  CHECK(lock != INVALID_HANDLE_VALUE);
+  auto first = EnsureRuntimeCopy(install, base, false);
+  if (lock != INVALID_HANDLE_VALUE) CloseHandle(lock);
+  CHECK(first.ok() && !first->reused && first->file_count == 9);
+  CHECK(first.ok() && first->skipped.size() == 1 && first->skipped[0].starts_with("obs-vst: Couldn't copy"));
+  CHECK(!fs::exists(base / L"32.2.2" / L"obs-plugins" / L"64bit" / L"obs-vst.dll"));
+  CHECK(fs::exists(base / L"32.2.2" / L"obs-plugins" / L"64bit" / L"obs-filters.dll"));
+  auto again = EnsureRuntimeCopy(install, base, false);
+  CHECK(again.ok() && !again->reused && again->skipped.empty() && again->file_count == 11);
+  CHECK(fs::exists(base / L"32.2.2" / L"obs-plugins" / L"64bit" / L"obs-vst.dll"));
+  auto settled = EnsureRuntimeCopy(install, base, false);
+  CHECK(settled.ok() && settled->reused);
+}
+
 TEST(EnsureRecopiesWhenAnOptionalModuleAppears) {
   // A copy made while the install had no nv-filters isn't reused once it has.
   TempDir dir(L"appears");

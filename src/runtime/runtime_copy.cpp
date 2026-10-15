@@ -51,11 +51,16 @@ std::vector<std::string_view> OptionalModulesIn(const fs::path& install_root, co
 
 // The binaries the file set is built from. Recorded in the manifest so a
 // knobs that loads more modules, or an install that has an optional module
-// it didn't have, doesn't reuse a copy made without them.
-std::string RootsLine(const fs::path& install_root, const ObsVersion& version) {
+// it didn't have, doesn't reuse a copy made without them. A copy that
+// couldn't copy an optional module's files leaves it out of its line, so the
+// next start copies it again.
+std::string RootsLine(const fs::path& install_root, const ObsVersion& version,
+                      const std::set<std::string, std::less<>>& left_out = {}) {
   std::string roots(kGraphicsModule);
   for (std::string_view module : kObsModules) roots += std::format(" {}", module);
-  for (std::string_view module : OptionalModulesIn(install_root, version)) roots += std::format(" {}", module);
+  for (std::string_view module : OptionalModulesIn(install_root, version)) {
+    if (!left_out.contains(module)) roots += std::format(" {}", module);
+  }
   return roots;
 }
 
@@ -116,11 +121,13 @@ bool SplitNumber(std::string_view& text, Number& number) {
 struct ManifestSummary {
   size_t file_count = 0;
   uint64_t total_bytes = 0;
+  std::vector<std::string> skipped;  // RuntimeCopy::skipped
 };
 
 // Returns the summary if `copy_root` holds a complete copy of `install`: made
 // for its version and the current module list, every file still whole, and
-// every install file unchanged since the copy was made.
+// every install file unchanged since the copy was made, the main DLLs of the
+// optional modules it left out included, so a module fixed since is copied.
 std::optional<ManifestSummary> ReadIntactManifest(const fs::path& copy_root, const ObsInstall& install) {
   std::ifstream in(copy_root / kManifestName, std::ios::binary);
   std::string line;
@@ -135,6 +142,20 @@ std::optional<ManifestSummary> ReadIntactManifest(const fs::path& copy_root, con
       version_matches = rest.substr(12) == install.version.ToString();
     } else if (rest.starts_with("roots ")) {
       roots_match = rest.substr(6) == RootsLine(install.root, install.version);
+    } else if (rest.starts_with("skipped ")) {
+      rest.remove_prefix(8);
+      uint64_t size = 0;
+      int64_t write_time = 0;
+      if (!SplitNumber(rest, size) || !SplitNumber(rest, write_time) ||
+          std::none_of(kOptionalObsModules.begin(), kOptionalObsModules.end(),
+                       [&](const OptionalObsModule& module) { return module.name == rest; })) {
+        return std::nullopt;
+      }
+      const fs::path dll = PluginDll(install.root, rest, install.version);
+      std::error_code ec;
+      if (fs::file_size(dll, ec) != size || ec) return std::nullopt;
+      if (WriteTime(dll, ec) != write_time || ec) return std::nullopt;
+      summary.skipped.push_back(std::format("{}: its files couldn't be read when the copy was made", rest));
     } else if (rest.starts_with("file ")) {
       rest.remove_prefix(5);
       uint64_t size = 0;
@@ -153,14 +174,31 @@ std::optional<ManifestSummary> ReadIntactManifest(const fs::path& copy_root, con
   return summary;
 }
 
-Status WriteManifest(const fs::path& copy_root, const ObsInstall& install,
-                     const RuntimeFileSet& file_set) {
+Status WriteManifest(const fs::path& copy_root, const ObsInstall& install, const RuntimeFileSet& file_set,
+                     const std::set<std::string, std::less<>>& left_out) {
   const fs::path manifest = copy_root / kManifestName;
   std::ofstream out(manifest, std::ios::binary | std::ios::trunc);
   out << kManifestHeader << '\n'
       << "obs-version " << install.version.ToString() << '\n'
-      << "roots " << RootsLine(install.root, install.version) << '\n'
+      << "roots " << RootsLine(install.root, install.version, left_out) << '\n'
       << "source " << ToObsPath(install.root) << '\n';
+  for (const std::string_view module : OptionalModulesIn(install.root, install.version)) {
+    const std::string prefix = std::format("{}: ", module);
+    if (std::none_of(file_set.skipped.begin(), file_set.skipped.end(),
+                     [&](const std::string& skipped) { return skipped.starts_with(prefix); })) {
+      continue;
+    }
+    // Left out: copied again once its DLL changes.
+    const fs::path dll = PluginDll(install.root, module, install.version);
+    std::error_code size_error;
+    std::error_code time_error;
+    const uint64_t size = fs::file_size(dll, size_error);
+    const int64_t write_time = WriteTime(dll, time_error);
+    if (size_error || time_error) {
+      return Error{std::format("Couldn't read {}: {}", ToUtf8(dll), Describe(size_error ? size_error : time_error))};
+    }
+    out << "skipped " << size << ' ' << write_time << ' ' << module << '\n';
+  }
   for (const fs::path& file : file_set.files) {
     std::error_code size_error;
     std::error_code time_error;
@@ -489,6 +527,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
       file_set.skipped.push_back(std::format("{}: {}", module, part.error()));
       continue;
     }
+    file_set.optional_files.emplace(module, part->files);
     take(*part);
   }
 
@@ -506,7 +545,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   const fs::path target = runtime_base / FromUtf8(version);
   if (!force) {
     if (auto intact = ReadIntactManifest(target, install)) {
-      return RuntimeCopy{target, true, intact->file_count, intact->total_bytes};
+      return RuntimeCopy{target, true, intact->file_count, intact->total_bytes, std::move(intact->skipped)};
     }
   }
 
@@ -518,20 +557,47 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   fs::remove_all(staging, ec);
   if (ec) return Error{std::format("Couldn't clear {}: {}", ToUtf8(staging), Describe(ec))};
 
+  // An optional module's file that won't copy leaves that module out, as
+  // one that can't be read does, so a chain that doesn't need it still runs.
+  std::map<fs::path, std::string> module_of;
+  for (const auto& [module, files] : file_set->optional_files) {
+    for (const fs::path& file : files) module_of.emplace(file, module);
+  }
+  std::set<std::string, std::less<>> left_out;
+  std::vector<std::string> skipped = file_set->skipped;
   for (const fs::path& file : file_set->files) {
+    const auto module = module_of.find(file);
+    if (module != module_of.end() && left_out.contains(module->second)) continue;
     const fs::path from = install.root / file;
     const fs::path to = staging / file;
+    std::string error;
     fs::create_directories(to.parent_path(), ec);
     if (!ec) fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
     if (ec) {
-      return Error{std::format("Couldn't copy {} to {}: {}", ToUtf8(from), ToUtf8(to), Describe(ec))};
+      error = std::format("Couldn't copy {} to {}: {}", ToUtf8(from), ToUtf8(to), Describe(ec));
+    } else {
+      ClearReadOnly(to);
+      if (!FlushToDisk(to)) error = std::format("Couldn't write {}: {}", ToUtf8(to), DescribeWinError(GetLastError()));
     }
-    ClearReadOnly(to);
-    if (!FlushToDisk(to)) {
-      return Error{std::format("Couldn't write {}: {}", ToUtf8(to), DescribeWinError(GetLastError()))};
-    }
+    if (error.empty()) continue;
+    if (module == module_of.end()) return Error{error};
+    left_out.insert(module->second);
+    skipped.push_back(std::format("{}: {}", module->second, error));
+    ec.clear();
   }
-  if (auto written = WriteManifest(staging, install, *file_set); !written) {
+  if (!left_out.empty()) {
+    std::erase_if(file_set->files, [&](const fs::path& file) {
+      const auto module = module_of.find(file);
+      if (module == module_of.end() || !left_out.contains(module->second)) return false;
+      std::error_code size_ec;
+      const uint64_t size = fs::file_size(install.root / file, size_ec);
+      if (!size_ec) file_set->total_bytes -= std::min(size, file_set->total_bytes);
+      std::error_code ignored;
+      fs::remove(staging / file, ignored);
+      return true;
+    });
+  }
+  if (auto written = WriteManifest(staging, install, *file_set, left_out); !written) {
     return Error{written.error()};
   }
 
@@ -563,7 +629,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
     return Error{std::format("Couldn't move {} into place: {}", ToUtf8(staging), Describe(ec))};
   }
   RemoveRetiredCopies(runtime_base, version);
-  return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes, std::move(file_set->skipped)};
+  return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes, std::move(skipped)};
 }
 
 PrunedCopies PruneRuntimeCopies(const fs::path& runtime_base, const fs::path& keep, const PruneOptions& options) {

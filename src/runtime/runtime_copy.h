@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,9 @@ struct RuntimeFileSet {
   // Optional modules left out because their files couldn't be read, each
   // with why: "obs-vst: Couldn't read ...".
   std::vector<std::string> skipped;
+  // The files each optional module brings, which a copy that can't copy one
+  // of them leaves out with the rest of that module.
+  std::map<std::string, std::vector<std::filesystem::path>, std::less<>> optional_files;
 };
 
 // Works out what knobs needs from an OBS install:
@@ -31,7 +35,8 @@ struct RuntimeFileSet {
 //    next to them;
 //  - data\libobs and those modules' data folders.
 // An optional module whose files can't be read is left out (skipped), so the
-// rest still copies.
+// rest still copies, and so is one whose files can't be copied
+// (EnsureRuntimeCopy).
 // The modules are where that version of OBS keeps them (HasCoreModules).
 // Imports are resolved like the loader will once they run from the copy: the
 // importing DLL's own folder, then bin\64bit, then the system.
@@ -42,7 +47,9 @@ struct RuntimeCopy {
   bool reused = false;         // An intact copy was already there.
   size_t file_count = 0;
   uint64_t total_bytes = 0;
-  // RuntimeFileSet::skipped, for a copy just made.
+  // RuntimeFileSet::skipped, and the modules whose files couldn't be copied,
+  // for a copy just made, which tries those again at the next start. Or the
+  // modules a copy reused left out, which it copies once their DLLs change.
   std::vector<std::string> skipped;
 };
 
