@@ -1391,7 +1391,8 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
   }
   D2D1_MATRIX_3X2_F identity;
   target->GetTransform(&identity);
-  target->SetTransform(D2D1::Matrix3x2F::Translation(0, -state.scroll + (1 - state.arrive) * 4) * identity);
+  const float rise = (1 - state.arrive) * tokens::motion::kRise;
+  target->SetTransform(D2D1::Matrix3x2F::Translation(0, -state.scroll + rise) * identity);
   for (size_t i = 0; i < scene.items.size(); ++i) {
     if (scene.items[i].in_panel) paint_item(scene.items[i], static_cast<int>(i));
   }

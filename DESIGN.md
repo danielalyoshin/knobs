@@ -200,7 +200,7 @@ components:
 
 knobs's own UI is one window, the setup window, and it is about one thing: where the mic goes. Every page sits under a band that draws the path (your mic › OBS's filters › virtual cable › your other apps), and the panel below answers the one question for the stage its caret points at. The look is the knobs brand's, carried into a Windows window: graphite grounds and cool greys, cap red for everything that can be pressed, hairlines, square corners and stroked icons, set in Windows' own type, so the window reads as a native app that belongs to knobs.
 
-Every colour, the state marks' shapes, the corner radius, hairline and focus ring, and the motion's curve and durations come from knobs-brand's tokens (`brand/dist/knobs_tokens.h`, generated from the submodule's `tokens/tokens.json`; the rules are in `brand/BRAND.md`). This file mirrors those values; where they differ, the tokens win.
+Every colour, the state marks' shapes, the corner radius, hairline and focus ring, and the motion's curve, durations and rise come from knobs-brand's tokens (`brand/dist/knobs_tokens.h`, generated from the submodule's `tokens/tokens.json`; the rules are in `brand/BRAND.md`). This file mirrors those values; where they differ, the tokens win.
 
 It is calm and dense in the way a settings window is: a fixed 760 × 520 DIP client area, one panel, one heading per page, plain sentences in the product's voice, and nothing decorative. Colour other than graphite and cap red appears only as state marks, cut as the tray's badges are. Light and dark follow Windows' app mode; high contrast drops the palette entirely and uses the user's colours. On Windows 11 the title bar takes the window's ground, and the title bar and taskbar each carry the colour mark drawn for their own ground.
 
@@ -227,11 +227,11 @@ The brand's two schemes by role: a cool pale grey desk with white panels in ligh
 
 ### Neutral
 - **Ground** (#eef0f4 light, #191b1d dark): the window's ground under the panel and the foot, the rest fill of the foot's secondary buttons, and the title bar on Windows 11.
-- **Ground Deep** (#e3e6ec light, #0c0e10 dark): the band, and the clear ring round a stage's mark.
+- **Ground Deep** (#e3e6ec light, #0c0e10 dark): the band, the clear ring round a stage's mark, and the light frame round a walkthrough of Windows' Explorer.
 - **Raised** (#ffffff light, #202225 dark): the panel, doors, the box of choices, an idle radio or check box, and the numerals on a step disc.
 - **Raised 2** (#f4f6f8 light, #25282c dark): a door under the pointer.
 - **Sunken** (#e6eaef light, #131518 dark): the chain's well and a pressed door.
-- **Screen** (#ffffff light, #131518 dark): the brand's frame for a screenshot. A walkthrough's frame shows its screenshots' own ground instead: #111317 round OBS, #e3e6ee round Windows' light Explorer.
+- **Screen** (#ffffff light, #131518 dark): the brand's frame for a screenshot. A walkthrough of OBS has the dark Screen round it, and one of Windows' Explorer the light Ground Deep, close to its screenshots' own grounds.
 - **Line** (#d0d4dc light, #2d2f33 dark): hairlines: the band's bottom rule, the panel's edge, rules between choices, the well's edge, and the scroll edges.
 - **Line Strong** (#b3b8c0 light, #3e4146 dark): the box of choices' edge, a door's edge other than the suggested one, a walkthrough's frame, and a disabled control's edge.
 - **Text** (#191b1d light, #e5ecf6 dark): headings, body text, names, door and choice titles, the stage the page is about, the caret, the wire as far as the signal has got, and the step disc.
@@ -355,14 +355,14 @@ Numbered steps with the number in Text 3 at Numeral size, text in Body. Beside t
 Notes are body text 28 DIPs in, each led by a 14.5 DIP mark: the amber triangle for a warning, the "i" disc for information (graphite in light, turned over to white in dark). A page that waits shows a 7 DIP Text 3 dot in the foot, breathing between 35% and 100% opacity over 1.6 s, beside the status in Body Small, Text 2.
 
 ### Motion
-One curve, cubic-bezier(0.2, 0, 0, 1): quick to start, then settling. Structure, the wire and the caret, takes 320 ms; a page arriving fades in and rises 4 DIPs over 160 ms. The waiting dot breathes at its own 1.6 s. A guide's walkthrough eases in and out on its own timing, so the camera never whips. With Windows' animations off, nothing moves until the user plays a walkthrough.
+One curve, cubic-bezier(0.2, 0, 0, 1): quick to start, then settling. Structure, the wire and the caret, takes 320 ms; a page arriving fades in and rises 4 DIPs over 160 ms, as feedback. The waiting dot breathes once every 1.6 s. A guide's walkthrough eases in and out on its own timing, so the camera never whips. With Windows' animations off, nothing moves until the user plays a walkthrough.
 
 ## Do's and Don'ts
 
 ### Do:
 - **Do** keep the band and its four stages on every page, at x 48, 220, 392 and 564.
 - **Do** make the page's default button solid cap red, and every other button a cap red outline with red words that fills red under the pointer.
-- **Do** take every colour, mark shape, radius, hairline, focus ring and duration from knobs-brand's tokens, and mirror them here.
+- **Do** take every colour, mark shape, radius, hairline, focus ring, duration and distance moved from knobs-brand's tokens, and mirror them here.
 - **Do** show state with the brand's marks at the tray badge's proportions: 7/16 of the icon, flush with the corner, a 1 DIP clear ring.
 - **Do** set file names, URLs and literal text in Consolas, and names from other UIs at 600 in the text colour.
 - **Do** snap hairlines to whole device pixels, and draw icons with 1.5 DIP strokes, butt caps and miter joins.

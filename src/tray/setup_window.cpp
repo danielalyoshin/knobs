@@ -36,12 +36,12 @@ constexpr UINT_PTR kWalkTimer = 3;  // A walkthrough's frames.
 constexpr UINT kWalkUnseenMs = 250;  // How often an unseen walkthrough looks again.
 constexpr UINT kRenderMs = 200;
 constexpr UINT kFrameMs = 16;
-// The motion (docs/design.md, The setup window), the brand's two durations:
-// structure for the wire and the caret, feedback for a page coming in. The
-// waiting dot breathes at its own pace.
+// The motion (docs/design.md, The setup window), from the brand's tokens:
+// structure for the wire and the caret, feedback for a page coming in, and the
+// waiting dot's breath.
 constexpr float kStructureMs = tokens::motion::kSlowMs;
 constexpr float kArriveMs = tokens::motion::kFastMs;
-constexpr float kBreathMs = 1600;
+constexpr float kBreathMs = tokens::motion::kBreathMs;
 constexpr UINT kBreathFrameMs = 50;  // The dot needs no more.
 // DWM's attributes, by number: older SDKs lack the names.
 constexpr DWORD kDarkMode = 20;      // DWMWA_USE_IMMERSIVE_DARK_MODE

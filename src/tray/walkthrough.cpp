@@ -5,6 +5,8 @@
 #include <cmath>
 #include <numbers>
 
+#include "tray/setup_theme.h"
+
 namespace knobs::tray {
 namespace {
 
@@ -62,7 +64,7 @@ Walkthrough ObsFilters() {
   walk.length = 13.6f;
   // Filters highlighted in Mic/Aux's menu, the part that's hard to find.
   walk.still = 5.5f;
-  walk.ground = D2D1::ColorF(0x111317);
+  walk.ground = TokenColor(tokens::kDark.screen);
   return walk;
 }
 
@@ -121,7 +123,7 @@ Walkthrough VbCableSetup() {
   walk.length = 19.1f;
   // Run as administrator, which is the one people miss.
   walk.still = 12.95f;
-  walk.ground = D2D1::ColorF(0xe3e6ee);
+  walk.ground = TokenColor(tokens::kLight.ground_deep);
   return walk;
 }
 
