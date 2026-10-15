@@ -34,6 +34,20 @@ class WorkingDirectoryGuard {
 
 }  // namespace
 
+void SetObsProcessPolicies() {
+  PROCESS_MITIGATION_DEP_POLICY dep = {};
+  dep.Enable = 1;
+  dep.DisableAtlThunkEmulation = 1;
+  dep.Permanent = TRUE;
+  SetProcessMitigationPolicy(ProcessDEPPolicy, &dep, sizeof(dep));
+  PROCESS_MITIGATION_ASLR_POLICY aslr = {};
+  aslr.EnableBottomUpRandomization = 1;
+  aslr.EnableHighEntropy = 1;
+  aslr.EnableForceRelocateImages = 1;
+  aslr.DisallowStrippedImages = 1;
+  SetProcessMitigationPolicy(ProcessASLRPolicy, &aslr, sizeof(aslr));
+}
+
 Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path& runtime_root,
                                                      const ObsVersion& install_version) {
   const std::filesystem::path bin = BinDir(runtime_root);

@@ -175,6 +175,34 @@ TEST(UnresolvedImportsFindsAMissingDll) {
   CHECK(!UnresolvedDllImports(SelfPath().parent_path() / L"missing.dll", {}).ok());
 }
 
+TEST(UnresolvedImportsFollowsADllsSideBySideManifest) {
+  // knobs-test-needs-sxs.dll imports knobs-test-dep.dll, which only a private
+  // assembly its manifest names has, as a plugin built with Visual C++ 2008
+  // finds its runtime in WinSxS.
+  fs::path dll;
+  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-sxs")) {
+    if (entry.path().filename() == L"knobs-test-needs-sxs.dll") dll = entry.path();
+  }
+  CHECK(!dll.empty());
+  if (dll.empty()) return;
+  auto missing = UnresolvedDllImports(dll, {SelfPath().parent_path()});
+  CHECK(missing.ok() && missing->empty());
+}
+
+TEST(PeTellsA64BitBinaryFromOthers) {
+  CHECK(IsWindows64Binary(SelfPath()).ok() && *IsWindows64Binary(SelfPath()));
+  // A 32-bit DLL, as a VST plugin left from 32-bit OBS can be.
+  wchar_t wow64[MAX_PATH] = {};
+  if (GetSystemWow64DirectoryW(wow64, MAX_PATH)) {
+    const auto x86 = IsWindows64Binary(fs::path(wow64) / L"version.dll");
+    CHECK(x86.ok() && !*x86);
+  }
+  TempDir dir(L"pe-kind");
+  WriteFile(dir.path / L"not-a-dll.dll", "MZ but not really a PE file");
+  CHECK(IsWindows64Binary(dir.path / L"not-a-dll.dll").ok() && !*IsWindows64Binary(dir.path / L"not-a-dll.dll"));
+  CHECK(!IsWindows64Binary(dir.path / L"missing.dll").ok());
+}
+
 TEST(PeImportsRejectsNonBinaries) {
   TempDir dir(L"pe");
   WriteFile(dir.path / L"not-a-dll.dll", "MZ but not really a PE file");

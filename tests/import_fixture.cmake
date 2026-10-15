@@ -64,11 +64,11 @@ if(NOT code EQUAL 0)
   message(FATAL_ERROR "Importing \"Podcast Mic\" failed.")
 endif()
 # The optional modules load for the filters that need them. The VST plugin
-# isn't there, and NVIDIA's SDK isn't either: the test points nv-filters at a
-# folder without it (NVAFX_SDK_DIR).
+# isn't there, at a path no PC has, and NVIDIA's SDK isn't either: the test
+# points nv-filters at a folder without it (NVAFX_SDK_DIR).
 expect("${output}" "[ok  ] modules            loaded obs-vst, which the chain needs")
 expect("${output}" "[ok  ] modules            loaded nv-filters, which the chain needs")
-expect("${output}" "[--  ] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll) that isn't at C:/Program Files/VSTPlugins/ReaComp-standalone.dll any more, so it passes audio through untouched, in OBS too.")
+expect("${output}" "[--  ] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll) that isn't at C:/Program Files/VSTPlugins (not installed 7d3f9a2c)/ReaComp-standalone.dll any more, so it passes audio through untouched, in OBS too.")
 expect("${output}" "[--  ] pre-flight         Filter \"VST\" opens its VST plugin's window in OBS.")
 # Without the SDK, OBS passes the filter's audio through too: a note.
 expect("${output}" "[--  ] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It isn't installed")

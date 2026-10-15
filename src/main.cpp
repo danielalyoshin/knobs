@@ -255,6 +255,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   // Plain LoadLibrary calls skip PATH and the working directory; see
   // ObsRuntime::Load.
   SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+  runtime::SetObsProcessPolicies();
   bool startup = false;
   bool resume_setup = false;
   bool restart = false;

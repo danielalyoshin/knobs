@@ -160,6 +160,13 @@ std::vector<fs::path> PluginSearchFolders() {
   return folders;
 }
 
+// Whether a VST plugin's file is a 64-bit DLL, which obs-vst can load, in
+// OBS too. Yes if it can't tell.
+bool VstPluginIs64Bit(const std::string& path) {
+  const auto is64 = runtime::IsWindows64Binary(FromUtf8(path));
+  return !is64 || *is64;
+}
+
 // The DLLs a VST plugin imports that knobs's process can't find, so obs-vst
 // couldn't load it. Empty if it can't tell.
 std::vector<std::string> VstMissingDlls(const std::string& path) {
@@ -208,7 +215,7 @@ bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& fa
   }
   if (id == kVstFilterId) {
     const std::string path = VstPluginPath(api, filter);
-    if (!VstPluginFound(path) || !VstMissingDlls(path).empty()) return false;
+    if (!VstPluginFound(path) || !VstPluginIs64Bit(path) || !VstMissingDlls(path).empty()) return false;
   }
   const auto ducking = AsDucking(api, filter);
   return !ducking || ducking->output_gain != 0;
@@ -345,7 +352,9 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
     // An optional module's filter, with the module or what it needs missing.
     const std::string plugin = id == kVstFilterId ? FileName(VstPluginPath(api, filter)) : "";
     notes.push_back(WhyNotLoaded(api, name, id, plugin, modules));
-    key("unknown");
+    // Not 0.3.0's keys, "vst" and "unknown", which its own warnings left in
+    // the warned list (Notifier::Options::warned) for these filters.
+    key(id == kVstFilterId ? "vst-module" : "nvidia-module");
     notes.back().file = plugin;
     return true;
   }
@@ -364,6 +373,13 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
                        .changes_expectations = true,
                        .file = FileName(path)});
       key("vst");
+    } else if (!VstPluginIs64Bit(path)) {
+      notes.push_back({.text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't a 64-bit plugin, so it "
+                                           "passes audio through untouched, in OBS too.",
+                                           name, FileName(path)),
+                       .changes_expectations = true,
+                       .file = FileName(path)});
+      key("vst");
     } else if (const std::vector<std::string> missing = VstMissingDlls(path); !missing.empty()) {
       // In OBS, the program's folder is OBS's bin\64bit, which can have
       // them (PluginSearchFolders).
@@ -372,7 +388,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
                                            "in Windows or in its copy of OBS, so it passes audio through untouched.",
                                            name, FileName(path), JoinNames(missing), kDisplayName),
                        .file = FileName(path)});
-      key("vst");
+      key("vst-dlls");
     }
     // audio::LoadSourceJson turns the window off, and the chain key leaves
     // the setting out.
@@ -653,15 +669,20 @@ bool NvidiaAudioEffectsInstalled(const runtime::ObsApi& api) {
 }
 
 fs::path NvidiaAudioEffectsFolder(const runtime::ObsVersion& obs) {
-  const auto variable = [](const wchar_t* name) {
-    wchar_t value[MAX_PATH] = {};
-    const DWORD length = GetEnvironmentVariableW(name, value, MAX_PATH);
-    return length == 0 || length >= MAX_PATH - 1 ? fs::path() : fs::path(value);
+  // As nv-filters reads them (nvafx_get_sdk_path): in the system's code page,
+  // into MAX_PATH bytes, so a name it can't hold is one it doesn't find.
+  const auto variable = [](const char* name) {
+    char value[MAX_PATH] = {};
+    const DWORD length = GetEnvironmentVariableA(name, value, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH - 1) return fs::path();
+    wchar_t wide[MAX_PATH] = {};
+    const int converted = MultiByteToWideChar(CP_ACP, 0, value, static_cast<int>(length), wide, MAX_PATH);
+    return converted > 0 ? fs::path(std::wstring(wide, converted)) : fs::path();
   };
-  fs::path dir = variable(L"NVAFX_SDK_DIR");
-  if (dir.empty() && obs >= runtime::ObsVersion{33, 0, 0}) dir = variable(L"AFX_SDK_DIR");
+  fs::path dir = variable("NVAFX_SDK_DIR");
+  if (dir.empty() && obs >= runtime::ObsVersion{33, 0, 0}) dir = variable("AFX_SDK_DIR");
   if (dir.empty()) {
-    const fs::path program_files = variable(L"ProgramFiles");
+    const fs::path program_files = variable("ProgramFiles");
     if (!program_files.empty()) dir = program_files / L"NVIDIA Corporation" / L"NVIDIA Audio Effects SDK";
   }
   return dir;

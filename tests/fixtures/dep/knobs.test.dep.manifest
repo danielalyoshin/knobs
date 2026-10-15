@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- A private side-by-side assembly holding knobs-test-dep.dll, which the
+     manifest of knobs-test-needs-sxs.dll names (CMakeLists.txt). -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="knobs.test.dep" version="1.0.0.0" processorArchitecture="amd64"/>
+  <file name="knobs-test-dep.dll"/>
+</assembly>

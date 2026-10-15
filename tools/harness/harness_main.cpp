@@ -303,6 +303,7 @@ int wmain(int argc, wchar_t** argv) {
   // Plain LoadLibrary calls skip PATH and the working directory; see
   // ObsRuntime::Load.
   SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+  runtime::SetObsProcessPolicies();
   SetConsoleOutputCP(CP_UTF8);
   for (int i = 1; i < argc; ++i) {
     if (argv[i] == std::wstring_view(L"--help") || argv[i] == std::wstring_view(L"-h")) {

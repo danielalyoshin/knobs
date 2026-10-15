@@ -183,6 +183,20 @@ set_target_properties(knobs-test-dep PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE
 add_library(knobs-test-needs-dep SHARED tests/fixtures/dep/test_needs_dep.cpp)
 target_link_libraries(knobs-test-needs-dep PRIVATE knobs-test-dep)
 add_dependencies(knobs-tests knobs-test-needs-dep)
+# The same import, found through a private side-by-side assembly its manifest
+# names, beside it, as a plugin built with Visual C++ 2005 or 2008 finds its
+# runtime in WinSxS.
+add_library(knobs-test-needs-sxs SHARED tests/fixtures/dep/test_needs_dep.cpp)
+target_link_libraries(knobs-test-needs-sxs PRIVATE knobs-test-dep)
+set_target_properties(knobs-test-needs-sxs PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test-sxs)
+target_link_options(knobs-test-needs-sxs PRIVATE
+  "/MANIFESTDEPENDENCY:type='win32' name='knobs.test.dep' version='1.0.0.0' processorArchitecture='amd64'")
+add_custom_command(TARGET knobs-test-needs-sxs POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:knobs-test-needs-sxs>/knobs.test.dep
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:knobs-test-dep>
+          ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/dep/knobs.test.dep.manifest
+          $<TARGET_FILE_DIR:knobs-test-needs-sxs>/knobs.test.dep)
+add_dependencies(knobs-tests knobs-test-needs-sxs)
 
 # A VST 2 plugin of our own, for the vst test: OBS's VST filter needs one,
 # and the tests can't count on any being installed.

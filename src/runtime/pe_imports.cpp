@@ -124,32 +124,55 @@ struct ViewUnmapper {
   void operator()(const void* view) const { UnmapViewOfFile(view); }
 };
 
-}  // namespace
+// A file mapped for reading, unmapped and closed in reverse.
+struct MappedFile {
+  UniqueHandle file;
+  UniqueHandle mapping;
+  std::unique_ptr<const void, ViewUnmapper> view;
+  size_t size = 0;
 
-Result<std::vector<std::string>> ReadDllImports(const std::filesystem::path& file, bool delay_loaded) {
+  std::span<const std::byte> bytes() const { return {static_cast<const std::byte*>(view.get()), size}; }
+};
+
+Result<MappedFile> MapForReading(const std::filesystem::path& file) {
   const std::string name = ToUtf8(file);
+  MappedFile mapped;
   HANDLE raw = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (raw == INVALID_HANDLE_VALUE) {
     return Error{std::format("Couldn't open {}: {}", name, DescribeWinError(GetLastError()))};
   }
-  UniqueHandle handle(raw);
+  mapped.file.reset(raw);
 
   LARGE_INTEGER size{};
-  if (!GetFileSizeEx(handle.get(), &size) || size.QuadPart == 0) {
+  if (!GetFileSizeEx(mapped.file.get(), &size) || size.QuadPart == 0) {
     return Error{std::format("{} is empty or unreadable.", name)};
   }
-  UniqueHandle mapping(CreateFileMappingW(handle.get(), nullptr, PAGE_READONLY, 0, 0, nullptr));
-  if (!mapping) {
+  mapped.mapping.reset(CreateFileMappingW(mapped.file.get(), nullptr, PAGE_READONLY, 0, 0, nullptr));
+  if (!mapped.mapping) {
     return Error{std::format("Couldn't map {}: {}", name, DescribeWinError(GetLastError()))};
   }
-  std::unique_ptr<const void, ViewUnmapper> view(
-      MapViewOfFile(mapping.get(), FILE_MAP_READ, 0, 0, 0));
-  if (!view) {
+  mapped.view.reset(MapViewOfFile(mapped.mapping.get(), FILE_MAP_READ, 0, 0, 0));
+  if (!mapped.view) {
     return Error{std::format("Couldn't map {}: {}", name, DescribeWinError(GetLastError()))};
   }
+  mapped.size = static_cast<size_t>(size.QuadPart);
+  return mapped;
+}
 
-  PeFile pe({static_cast<const std::byte*>(view.get()), static_cast<size_t>(size.QuadPart)});
+}  // namespace
+
+Result<bool> IsWindows64Binary(const std::filesystem::path& file) {
+  auto mapped = MapForReading(file);
+  if (!mapped) return Error{mapped.error()};
+  return PeFile(mapped->bytes()).Parse();
+}
+
+Result<std::vector<std::string>> ReadDllImports(const std::filesystem::path& file, bool delay_loaded) {
+  const std::string name = ToUtf8(file);
+  auto mapped = MapForReading(file);
+  if (!mapped) return Error{mapped.error()};
+  PeFile pe(mapped->bytes());
   if (!pe.Parse()) return Error{std::format("{} isn't a 64-bit Windows binary.", name)};
 
   std::vector<std::string> names;
@@ -181,6 +204,26 @@ Result<std::vector<std::string>> UnresolvedDllImports(const std::filesystem::pat
     });
     if (!found) unresolved.push_back(name);
   }
+  if (unresolved.empty()) return unresolved;
+  // The loader also finds a DLL's imports through the side-by-side
+  // assemblies its own manifest names, as a DLL built with Visual C++ 2005 or
+  // 2008 finds its runtime in WinSxS. Reading the manifest runs nothing.
+  ACTCTXW request = {sizeof(request)};
+  request.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
+  request.lpSource = file.c_str();
+  request.lpResourceName = MAKEINTRESOURCEW(2);  // ISOLATIONAWARE_MANIFEST_RESOURCE_ID
+  const HANDLE context = CreateActCtxW(&request);
+  if (context == INVALID_HANDLE_VALUE) return unresolved;
+  ULONG_PTR cookie = 0;
+  if (ActivateActCtx(context, &cookie)) {
+    std::erase_if(unresolved, [](const std::string& name) {
+      ACTCTX_SECTION_KEYED_DATA data = {sizeof(data)};
+      return FindActCtxSectionStringW(0, nullptr, ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION, FromUtf8(name).c_str(),
+                                      &data) != FALSE;
+    });
+    DeactivateActCtx(0, cookie);
+  }
+  ReleaseActCtx(context);
   return unresolved;
 }
 

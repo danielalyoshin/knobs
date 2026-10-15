@@ -10,6 +10,12 @@
 
 namespace knobs::runtime {
 
+// Sets the process mitigation policies OBS sets before it loads any module
+// (set_process_mitigation_policies, frontend/obs-main.cpp): DEP, and ASLR
+// that relocates every image and refuses one that can't be. A module or VST
+// plugin then loads only if it would in OBS. Call it as the process starts.
+void SetObsProcessPolicies();
+
 // obs.dll loaded from a runtime copy, with its exports resolved.
 //
 // Unloading is partial by design of libobs: it never unloads module DLLs
@@ -31,7 +37,7 @@ class ObsRuntime {
   //
   // Hosts should also call SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)
   // once at startup, so plain LoadLibrary calls skip PATH and the working
-  // directory too.
+  // directory too, and SetObsProcessPolicies.
   //
   // `install_version` is the version of the install the copy was made from
   // (ObsInstall::version), which decides where its modules are.
