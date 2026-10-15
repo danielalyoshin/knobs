@@ -4,7 +4,7 @@ The name "knobs" and the knob logo are trademarks of Daniel Alyoshin. This page 
 
 ## The logo isn't under the GPL
 
-knobs's code is licensed under GPL-2.0-or-later ([LICENSE](LICENSE)). The logo isn't: the knob mark and the lockups with the wordmark, whose masters are in [knobs-brand](https://github.com/danielalyoshin/knobs-brand) (`brand/` here), and the icons and images rendered from them in [`assets/`](assets/). They're Copyright © 2026 Daniel Alyoshin, all rights reserved, apart from what this page allows. Official builds of knobs carry the app icon, `assets/knobs.ico`.
+knobs's code is licensed under GPL-2.0-or-later ([LICENSE](LICENSE)). The logo isn't: the knob mark and the lockups with the wordmark, whose masters are in [knobs-brand](https://github.com/danielalyoshin/knobs-brand) (`brand/` here), and the icons and images rendered from them in [`assets/`](assets/). They're Copyright © 2026 Daniel Alyoshin, all rights reserved, apart from what this page allows. Official builds of knobs carry the icons and images in `assets/`.
 
 ## What you can do without asking
 

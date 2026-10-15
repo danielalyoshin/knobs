@@ -13,10 +13,10 @@ https://github.com/danielalyoshin/knobs/tree/v@VERSION@
 
 @NAME@ runs the filters of the OBS Studio you installed. It ships no OBS code:
 when it runs, it loads OBS’s libobs from a private copy of your install. Its
-source includes declarations from OBS Studio’s libobs headers, under the GNU
-General Public License, version 2 or later.
+source includes declarations from OBS Studio’s libobs headers, under their own
+notices: the GNU General Public License, version 2 or later, or the ISC license.
 
-The installer can also install VB-CABLE, a virtual audio cable by VB-Audio
+The installer can also install VB-CABLE, a virtual cable by VB-Audio
 Software, when the PC has no virtual cable. It carries VB-CABLE’s driver pack
 as VB-Audio ships it, and runs VB-Audio’s own installer, as VB-Audio allows
 (https://vb-audio.com/Services/licensing.htm). VB-CABLE comes from

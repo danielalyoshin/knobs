@@ -1,6 +1,6 @@
 # The setup's screenshots
 
-Real screenshots for the setup window's two walkthroughs, built into knobs.exe and knobs-tray.exe as `RCDATA` resources: `pictures.rc2` lists them, and `knobs.rc` and `knobs-tray.rc` both take it in. A picture's name, `"obs-main"`, is its resource's, `OBS_MAIN`.
+Real screenshots for the setup window's two walkthroughs, built into knobs.exe, knobs-tray.exe and knobs-tests.exe as `RCDATA` resources: `pictures.rc2` lists them, and `knobs.rc` and `knobs-tray.rc` take it in. A picture's name, `"obs-main"`, is its resource's, `OBS_MAIN`.
 
 ## The OBS walkthrough
 
@@ -16,9 +16,9 @@ All but the first are cropped to what the camera sees of them, and `walkthrough.
 
 ### Taking them
 
-From a portable copy of OBS, such as the one `knobs-compare` makes in `%LocalAppData%\knobs\compare`, with settings of its own in its `config` folder, so `%AppData%\obs-studio` stays as it is. Its scene collection has no sources and one Mic/Aux in Settings > Audio (`AuxAudioDevice1`), an Audio Input Capture on a device that doesn't exist, with no filters, so OBS opens no mic: its log says the device failed to start, and Windows lists no mic use for the copy.
+From a portable copy of OBS, such as the one `knobs-compare` makes in `%LocalAppData%\knobs\compare`, with settings of its own in its `config` folder, so `%AppData%\obs-studio` stays as it is. Its scene collection has no sources and one Mic/Aux in Settings > Audio (`AuxAudioDevice1`), an Audio Input Capture on a device that doesn't exist, with no filters, so OBS opens no mic.
 
-1. Start `bin\64bit\obs64.exe --portable --multi --disable-updater --disable-missing-files-check` from `bin\64bit` with `QT_SCALE_FACTOR=2`, on a 100% screen, and maximize it there. OBS must fit the screen: OBS 32.2.2 crashes opening the mixer's menu if Mic/Aux's button is off it (`VolumeControl::showVolumeControlMenu` looks up the screen under it).
+1. Start `bin\64bit\obs64.exe --portable --multi --disable-updater --disable-missing-files-check` from `bin\64bit` with `QT_SCALE_FACTOR=2`, on a 100% screen, and maximize it there. OBS must fit the screen: OBS 32.2.2 crashes opening the mixer's menu if Mic/Aux's button is off it.
 2. The main window.
 3. Click Mic/Aux's name in the Audio Mixer (UI Automation's Invoke works): its menu.
 4. Up twice from the bottom: Filters highlighted.
@@ -27,20 +27,20 @@ From a portable copy of OBS, such as the one `knobs-compare` makes in `%LocalApp
 
 Capture the screen, not the window, so the menus show, and with no other window over OBS. The pointer is drawn by the setup window, so it doesn't matter where the real one is, except over a control it lights up.
 
-## The VB-Cable walkthrough
+## The VB-CABLE walkthrough
 
-Installing VB-Cable has a walkthrough too, eleven screenshots of Windows 11 at 200% on a 2560 by 1285 screen, 2560 by 1189 above the taskbar, which they leave out:
+Installing VB-CABLE has a walkthrough too, eleven screenshots of Windows 11 at 200% on a 2560 by 1285 screen, 2560 by 1189 above the taskbar, which they leave out:
 
 - `vb-downloads.png`, `vb-zip.png`: VB-Audio's driver pack (`VBCABLE_Driver_Pack45.zip`) in Downloads, then with the pointer on it.
 - `vb-zip-menu.png`, `vb-extract-all.png`: its right-click menu, then with Extract All highlighted.
 - `vb-extract-window.png`, `vb-extract.png`: the window that asks where to extract it, then with Extract highlighted.
 - `vb-folder.png`, `vb-setup-file.png`: the extracted folder, then with the pointer on `VBCABLE_Setup_x64.exe`.
 - `vb-setup-menu.png`, `vb-run-as-admin.png`: its right-click menu, then with Run as administrator highlighted.
-- `vb-setup.jpg`: VB-Cable's setup, with Install Driver. A JPEG, at quality 92: its banner is a photo, which a PNG keeps at twice the size.
+- `vb-setup.jpg`: VB-CABLE's installer, with Install Driver. A JPEG: its banner is a photo, which a PNG keeps at twice the size.
 
 ### Taking them
 
-In Windows Sandbox, where VB-Cable isn't installed, so its setup offers Install Driver, not Remove Driver. A `.wsb` file maps the downloaded driver pack in read-only and a folder for the screenshots, turns networking off, and runs a PowerShell script at sign-in. The script copies the pack to Downloads, opens it in Explorer, maximizes each Explorer window as it opens, and saves the screen as a numbered PNG whenever it changes, a few times a second, with no pointer in it.
+In Windows Sandbox, where VB-CABLE isn't installed, so its installer offers Install Driver, not Remove Driver. A `.wsb` file, which isn't kept in the repository, maps the downloaded driver pack in read-only and a folder for the screenshots, turns networking off, and runs a PowerShell script at sign-in. The script copies the pack to Downloads, opens it in Explorer, maximizes each Explorer window as it opens, and saves the screen as a numbered PNG whenever it changes, a few times a second, with no pointer in it.
 
 1. Set the monitor the sandbox will be on to 200% in Windows' Settings. The sandbox takes it from there, as its own Settings has no display scale.
 2. Open the sandbox, maximize it, and start the script again if the scale changed after it started: the screen it records changes with the scale.

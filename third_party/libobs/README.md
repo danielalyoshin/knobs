@@ -6,7 +6,7 @@ installed `obs.dll` from a shadow copy.
 
 - Source: https://github.com/obsproject/obs-studio/tree/33.0.0-rc1/libobs
 - Commit: `7d98bebe1115b12608837b622164ea5fe6d9483a`
-- License: GPL-2.0-or-later, as stated in each file.
+- License: each file's own notice, GPL-2.0-or-later or ISC. A few state none.
 
 Only the include closure of `obs.h`, `util/base.h` and `util/bmem.h` is
 vendored. `obsconfig.h` is a knobs stub for the header obs-studio generates

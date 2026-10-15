@@ -44,6 +44,8 @@ colors:
   mark-info: "#4a4c52"
   mark-glyph: "#ffffff"
   mark-glyph-on-warn: "#17181b"
+  mark-info-on-dark: "#ffffff"
+  mark-glyph-on-info-on-dark: "#4a4c52"
 typography:
   display:
     fontFamily: "Segoe UI Variable Display, Segoe UI, sans-serif"
@@ -150,7 +152,7 @@ components:
     textColor: "{colors.text}"
     typography: "{typography.title}"
     rounded: "{rounded.none}"
-    padding: "11px 16px"
+    padding: "11px 48px 11px 16px"
   door-hover:
     backgroundColor: "{colors.raised-2}"
   door-pressed:
@@ -160,7 +162,7 @@ components:
     textColor: "{colors.text}"
     typography: "{typography.title}"
     rounded: "{rounded.none}"
-    padding: "10px 16px 10px 44px"
+    padding: "10px 14px 10px 44px"
   radio-selected:
     backgroundColor: "{colors.action}"
     textColor: "{colors.on-action}"
@@ -215,7 +217,7 @@ It is calm and dense in the way a settings window is: a fixed 760 × 520 DIP cli
 The brand's two schemes by role: a cool pale grey desk with white panels in light, graphite grounds in dark, one red for action, and the product's four state marks. Each role below gives light, then dark.
 
 ### Primary
-- **Cap Red** (action; #c55149 light, cap red deep, and #df695e dark): what can be pressed. The default button's fill, every other button's edge, the suggested door's edge and chevron, the chosen radio and the checked box, and a control's edge or chevron under the pointer.
+- **Cap Red** (action; #c55149 light, cap red deep, and #df695e dark): what can be pressed. The default button's fill, every other button's edge, the suggested door's edge, the chosen radio and the checked box, and a control's edge or chevron under the pointer.
 - **Action Hover** (#b2403a light, #e8796d dark): the default button under the pointer: deeper in light, lit a step in dark.
 - **Action Text** (#ab3a34 light, #df695e dark): red words, a secondary button's label. A pressed button takes it in light, a step deeper than hover; dark lights its buttons under the pointer, so a pressed one goes back to Cap Red.
 - **On Action** (#ffffff light, #191b1d dark): words and glyphs on a red fill: white in light, graphite in dark, never ink.
@@ -233,8 +235,8 @@ The brand's two schemes by role: a cool pale grey desk with white panels in ligh
 - **Line** (#d0d4dc light, #2d2f33 dark): hairlines: the band's bottom rule, the panel's edge, rules between choices, the well's edge, and the scroll edges.
 - **Line Strong** (#b3b8c0 light, #3e4146 dark): the box of choices' edge, a door's edge other than the suggested one, a walkthrough's frame, and a disabled control's edge.
 - **Text** (#191b1d light, #e5ecf6 dark): headings, body text, names, door and choice titles, the stage the page is about, the caret, the wire as far as the signal has got, and the step disc.
-- **Text 2** (#494d55 light, #b9bec7 dark): lead paragraphs, notes under door and choice titles, stage names and values once known, the chain's filters, the waiting status.
-- **Text 3** (#5c6169 light, #90969e dark): stages not yet known, the unlit wire, step numerals, the foot's note, idle chevrons, an idle radio's or check box's edge (it holds 3:1 on Raised, as Line Strong doesn't), the waiting dot, and disabled text.
+- **Text 2** (#494d55 light, #b9bec7 dark): lead paragraphs, notes under door and choice titles, stage names and values once known (a name is Text on the page's stage), the chain's filters, the waiting status.
+- **Text 3** (#5c6169 light, #90969e dark): a stage's icon and value while unknown, the unlit wire, step numerals, the foot's note, idle chevrons, an idle radio's or check box's edge (it holds 3:1 on Raised, as Line Strong doesn't), the waiting dot, and disabled text.
 
 ### Tertiary (state marks)
 The same in both schemes but for the info disc, and the product's alone.
@@ -256,7 +258,7 @@ The same in both schemes but for the info disc, and the product's alone.
 **Body Font:** Segoe UI Variable Text (with Segoe UI on Windows 10)
 **Label/Mono Font:** Consolas, inline only
 
-**Character:** Windows' own type, not the brand's Radio Canada, so the window sits with the rest of the system; the brand comes from colour, line, shape and icon. Lines are uniformly spaced with the font's ascent and descent centred in the line, so every line of a paragraph shares a baseline rhythm.
+**Character:** Windows' own type, not the brand's Radio Canada, so the window sits with the rest of the system; the brand comes from colour, line, shape and icon.
 
 ### Hierarchy
 - **Display** (600, 22/28): the page's heading, one per page, at the top of the panel.
@@ -278,11 +280,11 @@ The same in both schemes but for the info disc, and the product's alone.
 
 A fixed client area of 760 × 520 DIPs in three bands, the same on every page:
 
-- **The band** (0–104) on Ground Deep, ruled off by a Line hairline. Four stages with their icons' left edges at x 48, 220, 392 and 564: a 21 DIP icon at y 16, the name at 43, the value (up to two lines, 152 wide, cut with an ellipsis) at 64. The wire runs through the icons' centres, 6 DIPs clear of each icon, ending in an open 45° arrowhead before the next.
+- **The band** (0–104) on Ground Deep, ruled off by a Line hairline. Four stages with their icons' left edges at x 48, 220, 392 and 564: a 21 DIP icon at y 16, the name at 43, the value (up to two lines, 152 wide, cut with an ellipsis) at 64. The wire runs through the icons' centres, starting 6 DIPs after one icon and ending 7 before the next, ending in an open 45° arrowhead before the next.
 - **The panel** (24–736 × 118–452): the gutter is 24 DIPs from the window's sides. Its content starts 24 DIPs in from the panel's outside edge, so it lines up with the band's first icon, 20 from the top and 17 from the bottom. It scrolls when its content doesn't fit, with a hairline at the cut edge as the only sign.
 - **The foot** (468–500): the note and any waiting status on the left from x 24, the buttons on the right ending at x 736, 8 DIPs apart, centred on the 32 DIP button height.
 
-Vertical rhythm inside the panel: heading, then 6 to a lead paragraph and 12 between paragraphs (12 to the chain's well and 12 after it); 20 before doors, 16 before choices or notes, 14 before steps, 18 before check boxes. Doors stack 8 apart, notes 12, steps 5, check boxes 8. The guide's walkthrough takes 300 by 188 DIPs at the right of the steps, level with their top, with a 28 DIP gap.
+Vertical rhythm inside the panel: heading, then 6 before a paragraph in Text 2, such as a lead, and 12 before one in Text (12 to the chain's well and 12 after it); 20 before doors, 16 before choices or notes, 14 before steps, 18 before check boxes. Doors stack 8 apart, notes 12, steps 5, check boxes 8. The guide's walkthrough takes 300 by 188 DIPs at the right of the steps, level with their top, with a 28 DIP gap.
 
 The window scales as a whole: it opens on the pointer's monitor at that monitor's DPI, multiplied by Windows' text size (1 to 2.25), stepping down by 0.05 until it fits the work area. There are no breakpoints and no reflow.
 
@@ -300,11 +302,11 @@ Flat. Depth comes from tone and hairlines: Ground Deep for the band, Ground for 
 
 Square corners and true circles, from the brand's geometry (corner radius 0). The panel, buttons, doors, the box of choices, the chain's well, the check box, a walkthrough's frame and every focus ring are square-cornered. Radios, step discs, the waiting dot, the walkthrough's toggle and the marks' discs are true circles. Borders are single hairlines drawn inside the shape's edge; the default door's is 2 DIPs.
 
-Angles are 45°: the caret, the wire's arrowheads, the chevrons and the checks. The caret is the panel's top edge rising to a point under the current stage: two 6 DIP strokes in Text at 45°, the panel's Raised filled behind them so the edge opens.
+Angles are 45°: the caret, the wire's arrowheads, the chevrons and the checks. The caret is the panel's top edge rising to a point under the current stage: two strokes in Text at 45°, each 6 DIPs across and 6 up, the panel's Raised filled behind them so the edge opens.
 
-Icons are drawn, not filled: 1.5-unit strokes with butt caps and miter joins. The four stages (mic, sliders, plug, square app tiles) are drawn in a 20-unit square in a 21 DIP box, so the 1px wire runs through their centre; at 100% scale they are redrawn on pixel centres with a 1 DIP stroke to match the wire. Small icons (chevrons, the check box's check) use a 16-unit box. Round only where the thing is round: the mic's capsule, the sliders' knobs.
+Icons are drawn, not filled: 1.5 DIP strokes at any size, with butt caps and miter joins. The four stages (mic, sliders, plug, square app tiles) are drawn in a 20-unit square in a 21 DIP box, so the 1px wire runs through their centre; at 100% scale they are redrawn on pixel centres with a 1 DIP stroke to match the wire. Small icons (chevrons, the check box's check) use a 16-unit box. Round only where the thing is round: the mic's capsule, the sliders' knobs.
 
-The state marks are the brand's set "A, Cut", drawn from its `status_shape` paths in a 16-unit box, the glyph filled over the ground, never stroked: square-ended bars and square dots ("!" a 2-unit bar 5.5 tall over a 2-unit square; "i" the same turned over; pause two 2 × 7 bars), a check of two 2-unit arms at 45° in a mitred corner, square-cut, and for a warning an equilateral triangle 18 units across in the 16-unit box, filled amber. Their bars and dots land on whole device pixels.
+The state marks are the brand's, drawn from its `status_shape` paths, the glyph filled over the ground, never stroked; their shapes are in `brand/BRAND.md` (State marks). Their bars and dots land on whole device pixels.
 
 ### Named Rules
 **The Square Corner Rule.** Every rectangle has square corners. No rounded rectangle or pill on a surface or control; anything round is a full circle.
@@ -320,7 +322,7 @@ The brand's buttons, right-aligned in the foot.
 - **Secondary:** a Cap Red outline with Action Text words on the Ground. Under the pointer it fills Cap Red with On Action words; pressed, a step deeper.
 - **Disabled:** the Ground with a Line Strong edge and Text 3 words.
 - **Focus:** the 2 DIP ring, 2 DIPs out, shown once the keyboard is used.
-- **Access keys:** every button, door and the check box has one ("&Back" in the page's data). Its letter is underlined in the label's colour while Alt is held, until the mouse is used, or always when Windows is set to underline access keys; Alt and the letter, or the letter alone, clicks it.
+- **Access keys:** every button, door and check box has one, and the walkthrough's toggle has P ("&Back" in the page's data). Its letter is underlined in the label's colour while Alt is held, until the mouse is used, or always when Windows is set to underline access keys; Alt and the letter, or the letter alone, clicks it.
 
 ### Doors (command links)
 The first page's two ways in, full panel width.
@@ -332,21 +334,22 @@ The first page's two ways in, full panel width.
 - **Style:** one box of rows on Raised with a Line Strong edge, rows ruled by Line hairlines. Each row has an 18 DIP radio 13 DIPs in, the title at 44, its note under it in Text 2.
 - **State:** chosen is a Cap Red disc with an On Action centre (3 DIP radius); unchosen is a Raised disc with a Text 3 ring that turns Cap Red under the pointer. Arrows move the choice.
 - **Focus:** rows sit edge to edge, so a row's ring is drawn inside it, 5 DIPs in, clear of the rules.
+- **More:** other playback devices sit behind a last row, its title 16 DIPs in, the chosen device's name under it in Body Small Text 2, and a 16 DIP chevron, down or up, 30 DIPs from the right in Text 3, Cap Red under the pointer.
 
 ### Check box
 - **Style:** an 18 DIP square box; unchecked is Raised with a Text 3 edge (Cap Red under the pointer), checked is a Cap Red fill with an On Action check at 45°.
 
 ### Links
-- **Style:** the words keep the colour of the text round them, on a one-pixel Link Underline 3 DIPs below the baseline, under the words only. Under the pointer the words turn Link Hover. Each word box takes its own focus ring. In high contrast they take the system's link colour.
+- **Style:** the words keep the colour of the text round them, on a hairline Link Underline 3 DIPs below the baseline, under the words only. Under the pointer the words turn Link Hover. Each word box takes its own focus ring. In high contrast they take the system's link colour. A link ends in Windows' open-in-new-window glyph (Segoe Fluent Icons E8A7) at 0.8 of its text size, which belongs to the link but isn't underlined.
 
 ### Chain well
 The chain as it will run: Sunken fill, Line edge, square. The mic and the cable lead and close with their 16 DIP icons in Text at 600; filters sit between in Text 2, each step separated by a 12 DIP Text 3 chevron, wrapping onto 22 DIP rows.
 
 ### The band (signature)
-Four stages on a wire. A stage's icon and name are in Text when it is the page's stage, Text 2 once known, Text 3 while unknown. The wire is Text from a set stage to the next one that is set or that the page is about, Text 3 elsewhere. As the signal reaches a stage the wire fills along and the caret slides under the new stage, over 320 ms on the brand's one curve, cubic-bezier(0.2, 0, 0, 1).
+Four stages on a wire. A stage's icon is in Text when it is the page's stage, Text 2 once known and Text 3 while unknown; its name is in Text on the page's stage and Text 2 elsewhere. The wire is Text from a set stage to the next one that is set or that the page is about, Text 3 elsewhere. As the signal reaches a stage the wire fills along and the caret slides under the new stage, over 320 ms on the brand's one curve, cubic-bezier(0.2, 0, 0, 1).
 
 ### Guide (signature)
-Numbered steps with the number in Text 3 at Numeral size, text in Body. Beside them, the walkthrough, in a square frame with a Line Strong edge. The step it shows has its number on a 20 DIP Text disc with Raised numerals, and so has the frame's top-left corner, ringed with 2 DIPs of Raised, and both move on as it does. A walkthrough is real screenshots of OBS, or of Windows and VB-Cable's setup, at twice their size, with a camera that follows a drawn Windows arrow pointer (white, with a black edge, as big as Windows' own at the app's size) that clicks with a white ring spreading 20 DIPs and fading. Its play and pause sit on a 26 DIP opaque disc of the dark scheme's Ground (#191b1d, Raised 2 #25282c under the pointer) ringed with its Line Strong, in the frame's bottom-right corner, with a play triangle or the state marks' pause bars in its Text, the same in both schemes since it sits on screenshots of either. In high contrast it is a Window disc ringed and marked in WindowText, Highlight under the pointer, with the click's ring in Highlight and the pointer in Window and WindowText. The whole frame is the toggle, and its focus ring is the frame's. Without a picture the steps take the panel's full width.
+Numbered steps with the number in Text 3 at Numeral size, text in Body. Beside them, the walkthrough, in a square frame with a Line Strong edge. The step it shows has its number on a 20 DIP Text disc with Raised numerals, and so has the frame's top-left corner, ringed with 2 DIPs of Raised, and both move on as it does. A walkthrough is real screenshots of OBS, or of Windows and VB-CABLE's installer, at twice their size, with a camera that follows a drawn Windows arrow pointer (white, with a black edge, as big as Windows' own at the app's size) that clicks with a white ring growing from 4 to 20 DIPs across its radius and fading. Its play and pause sit on a 26 DIP opaque disc of the dark scheme's Ground (#191b1d, Raised 2 #25282c under the pointer) ringed with its Line Strong, in the frame's bottom-right corner, with a play triangle or the state marks' pause bars in its Text, the same in both schemes since it sits on screenshots of either. In high contrast it is a Window disc ringed and marked in WindowText, Highlight under the pointer, with the click's ring in Highlight and the pointer in Window and WindowText. The whole frame is the toggle, and its focus ring is the frame's. Without a picture the steps take the panel's full width.
 
 ### Notes and waiting
 Notes are body text 28 DIPs in, each led by a 14.5 DIP mark: the amber triangle for a warning, the "i" disc for information (graphite in light, turned over to white in dark). A page that waits shows a 7 DIP Text 3 dot in the foot, breathing between 35% and 100% opacity over 1.6 s, beside the status in Body Small, Text 2.
@@ -362,7 +365,7 @@ One curve, cubic-bezier(0.2, 0, 0, 1): quick to start, then settling. Structure,
 - **Do** take every colour, mark shape, radius, hairline, focus ring and duration from knobs-brand's tokens, and mirror them here.
 - **Do** show state with the brand's marks at the tray badge's proportions: 7/16 of the icon, flush with the corner, a 1 DIP clear ring.
 - **Do** set file names, URLs and literal text in Consolas, and names from other UIs at 600 in the text colour.
-- **Do** snap hairlines to whole device pixels, and draw icons with 1.5 strokes, butt caps and miter joins.
+- **Do** snap hairlines to whole device pixels, and draw icons with 1.5 DIP strokes, butt caps and miter joins.
 - **Do** move only on the brand's curve, cubic-bezier(0.2, 0, 0, 1): 320 ms for structure, 160 ms for a page arriving, and nothing when Windows' animations are off.
 - **Do** derive high contrast from the system colours alone, with the user's highlight under the pointer.
 
@@ -373,5 +376,5 @@ One curve, cubic-bezier(0.2, 0, 0, 1): quick to start, then settling. Structure,
 - **Don't** give anything a shadow, glow, gradient or bevel.
 - **Don't** round a corner: rectangles are square and round things are full circles.
 - **Don't** replace the path with a numbered stepper or a "Step 2 of 5" count.
-- **Don't** draw screenshots of OBS or VB-Cable as illustrations; the guide shows real screenshots or none.
+- **Don't** draw screenshots of OBS or VB-CABLE as illustrations; the guide shows real screenshots or none.
 - **Don't** use Consolas for anything but literal text.

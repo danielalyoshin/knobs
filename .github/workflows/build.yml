@@ -13,7 +13,7 @@ permissions:
 env:
   # The OBS versions the tests load libobs from (src/runtime/obs_version.h):
   # the newest tested one, installed as users have it, and the oldest
-  # supported one, unzipped.
+  # tested one, unzipped.
   OBS_VERSION: 33.0.0-rc1
   OBS_INSTALLER_SHA256: 89cda9af39aaa0c6bbdae4d5db3bbfed127c82a6ef57b79acc6a745a872fa85c
   OBS_OLDEST_VERSION: 32.2.2
@@ -47,7 +47,7 @@ jobs:
         run: cmake --build --preset release
 
       - name: Install OBS Studio
-        # The smoke, harness, import and core tests load libobs from it. None of
+        # The smoke, harness, import, core and vst tests load libobs from it. None of
         # them opens an audio device, and the runner has none.
         run: |
           $installer = "$env:RUNNER_TEMP\obs-setup.exe"

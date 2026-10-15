@@ -16,8 +16,8 @@ namespace knobs::tools {
 // A private copy of `install` in `base`\obs-<version>, made once per install
 // and set to portable mode, so OBS keeps a run's settings next to the copy
 // and never touches the user's own. Leaves out what a run doesn't need: debug
-// symbols, the browser source and its Chromium files, obs-websocket, and a
-// portable install's own settings.
+// symbols, a portable install's own settings, and before OBS 33, the browser
+// source with its Chromium files and obs-websocket, which OBS 33 needs.
 Result<std::filesystem::path> PrepareObsCopy(const runtime::ObsInstall& install, const std::filesystem::path& base);
 
 struct ObsRecording {

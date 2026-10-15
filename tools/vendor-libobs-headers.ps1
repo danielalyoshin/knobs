@@ -13,14 +13,15 @@ Also writes a stub for obsconfig.h, which obs-studio generates at build
 time, and a README recording the tag and commit.
 
 .PARAMETER Tag
-obs-studio release tag, e.g. 32.2.2. Match the installed OBS version.
+obs-studio release tag, e.g. 33.0.0-rc1: the newest OBS version knobs is tested
+against.
 
 .PARAMETER Source
 An existing obs-studio checkout of that tag. If omitted, the tag is
 shallow-cloned into a temp folder.
 
 .EXAMPLE
-.\tools\vendor-libobs-headers.ps1 -Tag 32.2.2
+.\tools\vendor-libobs-headers.ps1 -Tag 33.0.0-rc1
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Tag,
@@ -121,7 +122,7 @@ installed ``obs.dll`` from a shadow copy.
 
 - Source: https://github.com/obsproject/obs-studio/tree/$Tag/libobs
 - Commit: ``$commit``
-- License: GPL-2.0-or-later, as stated in each file.
+- License: each file's own notice, GPL-2.0-or-later or ISC. A few state none.
 
 Only the include closure of ``obs.h``, ``util/base.h`` and ``util/bmem.h`` is
 vendored. ``obsconfig.h`` is a knobs stub for the header obs-studio generates

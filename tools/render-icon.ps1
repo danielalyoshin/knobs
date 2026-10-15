@@ -24,7 +24,7 @@ isn't touched. tools\render-brand-assets.ps1 runs this for each of knobs's
 icons.
 
 .EXAMPLE
-tools\render-icon.ps1 -Svg brand\logo\svg\knobs-app-icon.svg -Out assets\knobs.ico
+tools\render-icon.ps1 -Svg brand\logo\svg\knobs-mark-dark.svg -Out assets\knobs.ico -ViewBox '1.23 -0.26 88 88'
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Svg,
