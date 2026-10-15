@@ -421,17 +421,19 @@ The cable sets most of that, and libobs's monitor adds nothing measurable. From 
 
 knobs.exe (Release) ran on one PC (Core Ultra 7 265K) with an Audient iD4, VB-Cable and OBS 32.2.2, running a four-filter chain (3-Band EQ, Expander, Compressor, Limiter). A watcher listed the audio sessions on the cable every 50 ms.
 
-The idle footprint was measured over 60 s with nothing clicked. CPU is the change in processor time, and the cycle counts (`QueryProcessCycleTime`) are exact.
+The idle footprint was measured twice, over 60 s each, with nothing clicked: knobs started as Windows starts it at sign-in, and OBS started minimized to the tray, with the same profile and scene collection. Each figure is the range of the two runs. CPU is the time each process's threads ran, from their cycle counts (`QueryProcessCycleTime`), which are exact. Windows' processor time is given too, but it's sampled at the timer's ticks, and with the timer at 1 ms it read up to three times the cycle counts, and varied more.
 
 | | knobs running (OBS closed) | knobs paused (OBS open) | OBS minimized |
 |---|---|---|---|
-| CPU, one core | 0.72% | 0.44% | 5.64% |
-| CPU by cycles | 1.02% | 0.39% | 7.52% |
-| Working set | 36.2 MB | 30.7 MB | 468.9 MB |
-| Private | 21.0 MB | 17.1 MB | 801.5 MB |
-| Threads | 7–9 | 6–8 | 90–98 |
-| Handles | 687 | 392 | 2205 |
+| CPU, one core | 0.92–0.96% | 0.32–0.33% | 7.06–7.10% |
+| CPU by processor time | 2.55–2.86% | 0.29–0.34% | 7.63–10.64% |
+| Working set | 27.1 MB | 21.5–21.6 MB | 442.5–448.2 MB |
+| Private | 19.1 MB | 15.9–16.4 MB | 784.7–786.7 MB |
+| Threads | 12–13 | 10–12 | 89–90 |
+| Handles | 642 | 349 | 2147–2149 |
 | GPU | none | none | 0.05% |
+
+Running, knobs's CPU goes to win-wasapi's capture thread, which runs the four filters and the monitor (0.61–0.65% of a core), the core's thread (0.14–0.15%), libobs's audio thread (0.11%) and its hotkey thread (0.05–0.06%). Its other threads wait, such as the shutdown watchdog's two workers and the file watchdog. OBS here is `obs64.exe` alone, and most of its CPU, 5.3% of a core, goes to its graphics thread, which knobs doesn't run.
 
 - **Cold boot.** With nothing clicked, Windows started knobs 9.26 s after sign-in, and the chain was running 0.22 s later.
 - **Making way for OBS.** Over six opens and closes of OBS, knobs and OBS were never active on the cable at once, and no echo was heard. knobs was off the cable 0.76–1.45 s before OBS started sending.

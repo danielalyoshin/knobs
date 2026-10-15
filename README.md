@@ -47,12 +47,12 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 
 | | knobs, running | OBS, minimized |
 |:---|--:|--:|
-| CPU, one core | 0.72% | 5.64% |
-| Memory (working set) | 36 MB | 469 MB |
-| Threads | 7–9 | 90–98 |
+| CPU, one core | 0.9% | 7.1% |
+| Memory (working set) | 27 MB | 443–448 MB |
+| Threads | 12–13 | 89–90 |
 | GPU | None | 0.05% |
 
-<sub>Measured on one PC (Core Ultra 7 265K) with OBS 32.2.2, an Audient iD4 and VB-Cable. [docs/design.md](docs/design.md#on-real-hardware) has the method.</sub>
+<sub>Measured twice over 60 s on one PC (Core Ultra 7 265K) with OBS 32.2.2, an Audient iD4 and VB-Cable. [docs/design.md](docs/design.md#on-real-hardware) has the method.</sub>
 
 ## How it works
 
