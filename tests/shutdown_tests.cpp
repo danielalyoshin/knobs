@@ -49,8 +49,8 @@ class ShutdownBackend : public tools::FakeBackend {
         entered_(entered) {}
 
   ~ShutdownBackend() override {
-    if (mode_ == L"destroy" || mode_ == L"restart") Sleep(INFINITE);
-    if (mode_ == L"thread") {
+    if (mode_ == L"destroy" || mode_.starts_with(L"restart")) Sleep(INFINITE);
+    if (mode_ == L"thread" || mode_.starts_with(L"end-thread")) {
       const HMODULE dll = LoadLibraryW((SelfPath().parent_path() / L"knobs-test-stuck-thread.dll").c_str());
       const auto block = dll ? reinterpret_cast<void (*)()>(GetProcAddress(dll, "BlockThisThreadOnExit")) : nullptr;
       if (block) block();
@@ -59,7 +59,7 @@ class ShutdownBackend : public tools::FakeBackend {
   }
 
   Result<core::MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override {
-    if (mode_ == L"busy" || mode_ == L"hold-busy") {
+    if (mode_ == L"busy" || mode_ == L"hold-busy" || mode_.starts_with(L"async") || mode_.starts_with(L"end-busy")) {
       entered_.set_value();
       Sleep(INFINITE);
     }
@@ -73,6 +73,7 @@ class ShutdownBackend : public tools::FakeBackend {
   }
 
   void StopChain() override {
+    if (mode_.starts_with(L"end-clean")) Sleep(150);
     if (mode_ == L"stop" || mode_ == L"hold-stop") {
       Note(folder_ / L"stopping", "stopping");
       Sleep(INFINITE);
@@ -111,7 +112,7 @@ TEST(TrayQuitBoundsAStuckCoreAndCleansUpANormalOne) {
     if (mode == L"clean") {
       CHECK(text.empty() && fs::exists(folder / L"clean"));
     } else {
-      CHECK(text.find("The core did not stop within 0.1 s. Ending the process to release its files.") != std::string::npos);
+      CHECK(text.find("Shutdown did not finish before its deadline. Ending the process to release its files.") != std::string::npos);
       CHECK(text.find("icon removed") != std::string::npos);
     }
     fs::remove_all(folder);
@@ -119,38 +120,40 @@ TEST(TrayQuitBoundsAStuckCoreAndCleansUpANormalOne) {
 }
 
 TEST(TrayForcedQuitPreservesTheInstallersHandoff) {
-  const fs::path folder = fs::temp_directory_path() / std::format(L"knobs-tests-{}-quit-handoff", GetCurrentProcessId());
-  fs::create_directories(folder);
-  fs::path dependency;
-  for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
-    if (entry.path().filename() == L"knobs-test-dep.dll") dependency = entry.path();
+  for (const std::wstring mode : {L"restart", L"restart-budget"}) {
+    const fs::path folder = fs::temp_directory_path() / std::format(L"knobs-tests-{}-quit-{}", GetCurrentProcessId(), mode);
+    fs::create_directories(folder);
+    fs::path dependency;
+    for (const auto& entry : fs::recursive_directory_iterator(SelfPath().parent_path().parent_path() / L"test-dep")) {
+      if (entry.path().filename() == L"knobs-test-dep.dll") dependency = entry.path();
+    }
+    CHECK(!dependency.empty());
+    if (dependency.empty()) return;
+    const fs::path file = folder / L"loaded.dll";
+    fs::copy_file(dependency, file, fs::copy_options::overwrite_existing);
+    auto child = StartProcessToWait(SelfPath(), std::format(L"--tray-shutdown {} \"{}\"", mode, folder.native()), folder);
+    CHECK(child.ok());
+    if (!child) return;
+    CHECK(WaitForFile(folder / L"ready"));
+    auto writer = std::async(std::launch::async, [&] {
+      const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
+      const DWORD error = out == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+      if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
+      return error;
+    });
+    const DWORD ended = WaitForSingleObject(*child, 10000);
+    CHECK(ended == WAIT_OBJECT_0);
+    if (ended != WAIT_OBJECT_0) {
+      TerminateProcess(*child, 1);
+      WaitForSingleObject(*child, 5000);
+    }
+    DWORD code = 1;
+    CHECK(GetExitCodeProcess(*child, &code) && code == ERROR_TIMEOUT);
+    CloseHandle(*child);
+    CHECK(WaitForFile(folder / L"released"));
+    CHECK(writer.get() == ERROR_SUCCESS);
+    fs::remove_all(folder);
   }
-  CHECK(!dependency.empty());
-  if (dependency.empty()) return;
-  const fs::path file = folder / L"loaded.dll";
-  fs::copy_file(dependency, file, fs::copy_options::overwrite_existing);
-  auto child = StartProcessToWait(SelfPath(), std::format(L"--tray-shutdown restart \"{}\"", folder.native()), folder);
-  CHECK(child.ok());
-  if (!child) return;
-  CHECK(WaitForFile(folder / L"ready"));
-  auto writer = std::async(std::launch::async, [&] {
-    const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, 0, nullptr);
-    const DWORD error = out == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
-    if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
-    return error;
-  });
-  const DWORD ended = WaitForSingleObject(*child, 10000);
-  CHECK(ended == WAIT_OBJECT_0);
-  if (ended != WAIT_OBJECT_0) {
-    TerminateProcess(*child, 1);
-    WaitForSingleObject(*child, 5000);
-  }
-  DWORD code = 1;
-  CHECK(GetExitCodeProcess(*child, &code) && code == ERROR_TIMEOUT);
-  CloseHandle(*child);
-  CHECK(WaitForFile(folder / L"released"));
-  CHECK(writer.get() == ERROR_SUCCESS);
-  fs::remove_all(folder);
 }
 
 TEST(FileWatchdogWarnsAndReleasesWhileTheCoreIsStuck) {
@@ -195,6 +198,103 @@ TEST(FileWatchdogWarnsAndReleasesWhileTheCoreIsStuck) {
   }
 }
 
+TEST(TrayQuitKeepsRespondingAndItsDeadlineSurvivesBlockedUiAndLogging) {
+  for (const std::wstring mode : {L"async", L"async-ui", L"async-log"}) {
+    const fs::path folder = fs::temp_directory_path() /
+        std::format(L"knobs-tests-{}-{}", GetCurrentProcessId(), mode);
+    fs::create_directories(folder);
+    auto child = StartProcessToWait(SelfPath(), std::format(L"--tray-shutdown {} \"{}\"", mode, folder.native()), folder);
+    CHECK(child.ok());
+    if (!child) continue;
+    CHECK(WaitForFile(folder / L"quitting"));  // Quit returned with the core still blocked.
+    const HWND window = FindWindowW(std::format(L"knobs-tests-{}-shutdown", GetProcessId(*child)).c_str(), nullptr);
+    if (mode == L"async") {
+      DWORD_PTR result = 1;
+      CHECK(SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &result));
+      // Repeated requests and queued work must not postpone the first deadline.
+      const auto due = std::chrono::steady_clock::now() + 900ms;
+      while (WaitForSingleObject(*child, 25) == WAIT_TIMEOUT && std::chrono::steady_clock::now() < due) {
+        PostMessageW(window, WM_CLOSE, 0, 0);
+      }
+      CHECK(WaitForSingleObject(*child, 0) == WAIT_OBJECT_0);
+    }
+    const DWORD ended = WaitForSingleObject(*child, 2000);
+    CHECK(ended == WAIT_OBJECT_0);
+    if (ended != WAIT_OBJECT_0) {
+      TerminateProcess(*child, 1);
+      WaitForSingleObject(*child, 5000);
+    }
+    DWORD code = 0;
+    CHECK(GetExitCodeProcess(*child, &code) && code == ERROR_TIMEOUT);
+    CloseHandle(*child);
+    CHECK(!fs::exists(folder / L"late-work"));
+    std::ifstream input(folder / L"log");
+    const std::string log(std::istreambuf_iterator<char>{input}, {});
+    input.close();
+    CHECK(log.find("Shutdown did not finish before its deadline") != std::string::npos);
+    CHECK(log.find("icon removed") != std::string::npos);
+    fs::remove_all(folder);
+  }
+}
+
+TEST(EndSessionWaitsForTheCoreEvenAfterAnAsynchronousQuit) {
+  std::vector<std::wstring> modes{L"end-clean-prior", L"end-busy-prior", L"end-thread-0"};
+  for (const DWORD flag : {DWORD{0}, static_cast<DWORD>(ENDSESSION_LOGOFF), static_cast<DWORD>(ENDSESSION_CLOSEAPP)}) {
+    modes.push_back(std::format(L"end-clean-{}", flag));
+    modes.push_back(std::format(L"end-busy-{}", flag));
+  }
+  for (const auto& mode : modes) {
+    const bool clean = mode.starts_with(L"end-clean");
+    const fs::path folder = fs::temp_directory_path() /
+        std::format(L"knobs-tests-{}-{}", GetCurrentProcessId(), mode);
+    fs::create_directories(folder);
+    auto child = StartProcessToWait(SelfPath(), std::format(L"--tray-shutdown {} \"{}\"", mode, folder.native()), folder);
+    CHECK(child.ok());
+    if (!child) continue;
+    const DWORD ended = WaitForSingleObject(*child, 5000);
+    CHECK(ended == WAIT_OBJECT_0);
+    if (ended != WAIT_OBJECT_0) {
+      TerminateProcess(*child, 1);
+      WaitForSingleObject(*child, 5000);
+    }
+    DWORD code = 1;
+    CHECK(GetExitCodeProcess(*child, &code) && code == (clean ? 0u : ERROR_TIMEOUT));
+    CloseHandle(*child);
+    CHECK(fs::exists(folder / L"session-returned") == clean);
+    if (clean) {
+      std::ifstream input(folder / L"session-returned");
+      std::string result;
+      std::getline(input, result);
+      CHECK(result == "core cleaned up");
+    }
+    fs::remove_all(folder);
+  }
+}
+
+TEST(TrayKeepsRespondingWhileAnUpdateJobStops) {
+  const fs::path folder = fs::temp_directory_path() / std::format(L"knobs-tests-{}-quit-update", GetCurrentProcessId());
+  fs::create_directories(folder);
+  auto child = StartProcessToWait(SelfPath(), std::format(L"--tray-shutdown update \"{}\"", folder.native()), folder);
+  CHECK(child.ok());
+  if (!child) return;
+  CHECK(WaitForFile(folder / L"update"));
+  const HWND window = FindWindowW(std::format(L"knobs-tests-{}-shutdown", GetProcessId(*child)).c_str(), nullptr);
+  PostMessageW(window, WM_CLOSE, 0, 0);
+  CHECK(WaitForFile(folder / L"clean"));
+  DWORD_PTR result = 1;
+  CHECK(SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &result));
+  const DWORD ended = WaitForSingleObject(*child, 5000);
+  CHECK(ended == WAIT_OBJECT_0);
+  if (ended != WAIT_OBJECT_0) {
+    TerminateProcess(*child, 1);
+    WaitForSingleObject(*child, 5000);
+  }
+  DWORD code = 1;
+  CHECK(GetExitCodeProcess(*child, &code) && code == 0);
+  CloseHandle(*child);
+  fs::remove_all(folder);
+}
+
 }  // namespace
 
 int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folder_arg) {
@@ -202,10 +302,10 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   const fs::path folder = folder_arg;
   if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 1;
   std::unique_ptr<FileOplock> watch;
-  if (mode == L"restart" || mode.starts_with(L"hold-")) {
+  if (mode.starts_with(L"restart") || mode.starts_with(L"hold-")) {
     const fs::path file = folder / L"loaded.dll";
     if (!LoadLibraryW(file.c_str())) return 2;
-    auto taken = mode == L"restart" ? FileOplock::Take(file) : FileOplock::Take(file, 500ms, 50ms);
+    auto taken = mode == L"restart" ? FileOplock::Take(file) : FileOplock::Take(file, 700ms, 50ms);
     if (!taken) return 3;
     watch = std::move(*taken);
   }
@@ -221,7 +321,20 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   tray::TrayOptions options;
   options.instance = GetModuleHandleW(nullptr);
   options.window_class = std::format(L"knobs-tests-{}-shutdown", GetCurrentProcessId());
-  options.core_stop_wait = 100ms;
+  options.core_stop_wait = mode.starts_with(L"async") || mode.starts_with(L"end-") ? 500ms : 100ms;
+  if (mode == L"restart-budget") options.core_stop_wait = 2s;
+  if (mode == L"update") {
+    options.core_stop_wait = 2s;
+    options.update_settings.check = true;
+    options.updates.first_check = 0s;
+    options.updates.current = {0, 3, 0};
+    options.updates.folder = folder / L"updates";
+    options.updates.latest = [folder](update::Cancel&) -> Result<update::Version> {
+      Note(folder / L"update", "started");
+      Sleep(INFINITE);  // A signature check can outlive cancellation too.
+      return Error{"Stopped."};
+    };
+  }
   options.start_core = [&](core::Observer& observer, const core::Settings&, bool) {
     core::CoreOptions settings;
     settings.watch_devices = false;
@@ -237,9 +350,15 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
     icon.uID = 1;
     icon.uFlags = NIF_TIP;
     if (!Shell_NotifyIconW(NIM_MODIFY, &icon)) Note(folder / L"log", "icon removed");
+    if (mode == L"async-log") Sleep(INFINITE);
+  };
+  options.set_start_with_windows = [&](bool) -> Status {
+    Note(folder / L"late-work", "command");
+    return Ok{};
   };
   options.on_snapshot = [&](const core::Snapshot& snapshot) {
-    if (mode == L"restart" && snapshot.state == core::State::kRunning) core->Reimport();
+    if (mode.starts_with(L"async")) Note(folder / L"late-work", "snapshot");
+    if (mode.starts_with(L"restart") && snapshot.state == core::State::kRunning) core->Reimport();
   };
   options.on_notice = [&](const std::optional<tray::Notice>& notice) {
     if (notice && notice->kind == tray::Notice::Kind::kFileHold) {
@@ -258,14 +377,34 @@ int knobs::test::RunShutdownHelper(const wchar_t* mode_arg, const wchar_t* folde
   if (!app) return 4;
   window = (*app)->window();
   if (ready.wait_for(3s) != std::future_status::ready) return 5;
-  if (mode == L"restart" || mode.starts_with(L"hold-")) {
+  if (mode.starts_with(L"async")) {
+    (*app)->Quit();
+    Note(folder / L"quitting", "returned");
+    (*app)->Execute(tray::kIdStartWithWindows);
+    (*app)->Execute(tray::kIdPauseForObs);
+    (*app)->OnSnapshot(core::Snapshot{.state = core::State::kNeedsSetup});
+    if (mode == L"async-ui") Sleep(INFINITE);
+    (*app)->Run();
+  } else if (mode.starts_with(L"end-")) {
+    const bool prior = mode.ends_with(L"-prior");
+    const LPARAM flags = prior ? 0 : static_cast<LPARAM>(std::stoull(mode.substr(mode.rfind(L'-') + 1)));
+    if (prior) {
+      (*app)->Quit();
+      Sleep(50);
+    }
+    SendMessageW(window, WM_QUERYENDSESSION, 0, flags);
+    SendMessageW(window, WM_ENDSESSION, TRUE, flags);
+    Note(folder / L"session-returned", fs::exists(folder / L"clean") ? "core cleaned up" : "returned too soon");
+  } else if (mode.starts_with(L"restart") || mode == L"update" || mode.starts_with(L"hold-")) {
     Note(folder / L"ready", "ready");
     if (mode == L"hold-stop") core->Pause();
     (*app)->Run();
   } else {
     (*app)->Quit();
+    if (mode == L"clean") (*app)->Run();
   }
   app->reset();
+  if (mode == L"clean") Sleep(300);  // Normal completion disarms the 100 ms watchdog.
   CoUninitialize();
   return 0;
 }

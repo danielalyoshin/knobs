@@ -88,6 +88,7 @@ add_library(knobs_tray STATIC
   src/tray/setup_theme.cpp
   src/tray/setup_uia.cpp
   src/tray/setup_window.cpp
+  src/tray/shutdown_watchdog.cpp
   src/tray/single_instance.cpp
   src/tray/tray_app.cpp
   src/tray/updates.cpp

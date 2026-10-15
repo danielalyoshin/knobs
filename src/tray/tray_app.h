@@ -21,6 +21,7 @@
 #include "tray/badge.h"
 #include "tray/first_run.h"
 #include "tray/setup_window.h"
+#include "tray/shutdown_watchdog.h"
 #include "tray/menu.h"
 #include "tray/menu_theme.h"
 #include "tray/notices.h"
@@ -129,7 +130,8 @@ struct TrayOptions {
   // Starts OBS from its install, for the first run. Default: OpenObs.
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
   std::filesystem::path log_folder;
-  // Writes a line to knobs's log. Default: the core's log, once it runs.
+  // Writes a line to knobs's log, including from the shutdown watchdog.
+  // Default: the core's log, once it runs; forced exit uses the debugger.
   std::function<void(std::string_view line)> log;
   MenuTheme theme = MenuTheme::kSystem;
   // The setup window's zoom in place of Windows' text size, and the moment
@@ -160,8 +162,9 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // core couldn't start once an update at start had held it back: what
   // Create returns otherwise.
   Status Run();
-  // Stops the core, removes the icon and ends Run. A core that exceeds
-  // core_stop_wait ends the process after removing the icon and logging why.
+  // Requests shutdown and returns to the message loop. The independent
+  // watchdog bounds it by core_stop_wait, with at most 100 ms more for icon
+  // removal and logging. WM_ENDSESSION and destruction wait for completion.
   void Quit();
 
   // Opens the menu at `point`, in screen coordinates, as a click on the icon
@@ -196,6 +199,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void AddIcon();
   void RemoveIcon();
   void FollowFileHolds();
+  void FinishQuit();
+  void WaitForQuit();
   // Changes the icon as `data` says, with the tooltip.
   void ModifyIcon(NOTIFYICONDATAW& data);
   void UpdateTip();
@@ -267,8 +272,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // or once the job running is done. If it's no longer offered, says why.
   void InstallUpdate(const update::Version& asked);
   void NotOffered(const update::Version& asked);
-  // Stops the job running, and waits a moment for it.
-  void StopUpdates();
+  // Polls the job during shutdown, detaching after its allowance expires.
+  bool StopUpdates();
   // The installer started for `version`: knobs runs on until it closes this
   // copy. One that ends first didn't update it, which InstallerEnded says.
   void WaitForInstaller(HANDLE process, const update::Version& version);
@@ -307,6 +312,9 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   bool running_ = false;  // In Run.
   bool in_menu_ = false;
   bool quitting_ = false;
+  bool quit_finished_ = false;
+  std::chrono::steady_clock::time_point update_stop_due_;
+  std::unique_ptr<ShutdownWatchdog> shutdown_watchdog_;
   // Why knobs quit by itself, for Run to return.
   std::string failed_;
   core::Settings settings_;

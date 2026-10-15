@@ -45,6 +45,7 @@ constexpr UINT_PTR kNoticeTimer = 1;   // Notifier::NextDeadline.
 constexpr UINT_PTR kRestartTimer = 2;  // RestartByItself, while a window is open.
 constexpr UINT_PTR kUpdateTimer = 3;   // Updater::NextDeadline.
 constexpr UINT_PTR kCoreTimer = 4;     // ReleaseCore, if an update at start takes too long.
+constexpr UINT_PTR kQuitTimer = 5;     // FinishQuit, without blocking window messages.
 // How long an update at start can hold back the mic: its installer's
 // signature is checked again first, which may wait on servers.
 constexpr UINT kCoreHoldMs = 5000;
@@ -185,6 +186,17 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   ApplyMenuTheme(opts.theme);
   app->AddIcon();
   WatchFileHolds(reinterpret_cast<uintptr_t>(app->window_), kFileHoldMessage);
+  auto watchdog = ShutdownWatchdog::Start([window = app->window_, log = opts.log] {
+    NOTIFYICONDATAW data = {sizeof(data)};
+    data.hWnd = window;
+    data.uID = kIconId;
+    Shell_NotifyIconW(NIM_DELETE, &data);
+    constexpr char reason[] = "Shutdown did not finish before its deadline. Ending the process to release its files.";
+    if (log) log(reason);
+    else OutputDebugStringA(reason);
+  });
+  if (!watchdog) return Error{watchdog.error()};
+  app->shutdown_watchdog_ = std::move(*watchdog);
 
   // An update downloaded before installs now, before knobs sends the mic:
   // once knobs runs, it waits for a moment the mic isn't sent anyway.
@@ -218,12 +230,14 @@ TrayApp::TrayApp(TrayOptions options)
 
 TrayApp::~TrayApp() {
   Quit();
+  WaitForQuit();
   StopWatchingFileHolds(reinterpret_cast<uintptr_t>(window_));
   StopWaitingForInstaller();
   DestroyIcons();
 }
 
 Status TrayApp::Run() {
+  if (quit_finished_) return failed_.empty() ? Status(Ok{}) : Status(Error{failed_});
   running_ = true;
   MSG message = {};
   while (GetMessageW(&message, nullptr, 0, 0) > 0) {
@@ -237,34 +251,56 @@ Status TrayApp::Run() {
 void TrayApp::Quit() {
   if (quitting_) return;
   quitting_ = true;
-  const auto stop_due = Clock::now() + options_.core_stop_wait;
-  Notify(notifier_.Quitting());
-  // An update job stops while the core does.
-  if (update_work_) update_work_->cancel.Stop();
-  if (core_) {
-    core_->RequestStop();
-    while (!core_->stopped()) {
-      FollowFileHolds();
-      // The replacement still holds an installer through process exit. A
-      // slow plugin or libobs shutdown must not silence the tray's deadline.
-      const auto now = Clock::now();
-      if (now >= stop_due) {
-        RemoveIcon();
-        Log(std::format("The core did not stop within {:.3g} s. Ending the process to release its files.",
-                        std::chrono::duration<double>(options_.core_stop_wait).count()));
-        // ExitProcess runs DLL detach code, which can deadlock on a lock
-        // the stuck thread owns. Termination also skips the core's join.
-        TerminateProcess(GetCurrentProcess(), ERROR_TIMEOUT);
-      }
-      if (const auto due = notifier_.NextDeadline(); due && now >= *due) Notify(notifier_.Tick(Quiet(), now));
-      Sleep(20);
-    }
-    core_.reset();
+  auto wait = options_.core_stop_wait;
+  if (const uint64_t deadline = FileHandoffDeadline()) {
+    // Keep the cleanup allowance inside the file hold's existing budget,
+    // with a little time for Windows to finish terminating this process.
+    const uint64_t now = GetTickCount64();
+    const auto left = std::chrono::milliseconds(deadline > now + 200 ? deadline - now - 200 : 1);
+    wait = std::min(wait, left);
   }
-  StopUpdates();
+  if (shutdown_watchdog_) shutdown_watchdog_->Arm(wait);
+  update_stop_due_ = Clock::now() + kUpdateStopWait;
+  if (window_) SetTimer(window_, kQuitTimer, 20, nullptr);
+  if (in_menu_) EndMenu();
+  if (setup_window_) DestroyWindow(setup_window_->window());
+  setup_due_ = false;
+  if (core_) core_->RequestStop();
+  if (installer_stop_) SetEvent(installer_stop_);
+  Notify(notifier_.Quitting());
+  UpdateTip();
+  if (update_work_) update_work_->cancel.Stop();
+  FinishQuit();
+}
+
+void TrayApp::FinishQuit() {
+  if (!quitting_ || quit_finished_) return;
+  if (core_ && !core_->stopped()) return;
+  core_.reset();
+  if (!StopUpdates()) return;
+  if (installer_thread_.joinable() && WaitForSingleObject(installer_thread_.native_handle(), 0) != WAIT_OBJECT_0) return;
+  StopWaitingForInstaller();
+  KillTimer(window_, kQuitTimer);
   StopWatchingFileHolds(reinterpret_cast<uintptr_t>(window_));
   RemoveIcon();
   if (window_) DestroyWindow(window_);
+  if (shutdown_watchdog_ && !shutdown_watchdog_->Disarm()) return;
+  quit_finished_ = true;
+  shutdown_watchdog_.reset();
+}
+
+void TrayApp::WaitForQuit() {
+  // Windows can end the process as soon as WM_ENDSESSION returns. The
+  // independent watchdog also runs during this deliberately synchronous wait.
+  while (!quit_finished_) {
+    FinishQuit();
+    if (quit_finished_) break;
+    FollowFileHolds();
+    if (const auto due = notifier_.NextDeadline(); due && Clock::now() >= *due) {
+      Notify(notifier_.Tick(Quiet(), Clock::now()));
+    }
+    Sleep(10);
+  }
 }
 
 void TrayApp::RemoveIcon() {
@@ -303,6 +339,7 @@ LRESULT CALLBACK TrayApp::WindowProc(HWND window, UINT message, WPARAM wparam, L
 
 LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
   if (taskbar_created_ && message == taskbar_created_) {
+    if (quitting_) return 0;
     // Explorer restarted, and the icon went with it, or the taskbar's DPI
     // changed, which may leave it there at the old size.
     NOTIFYICONDATAW data = {sizeof(data)};
@@ -342,6 +379,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         std::lock_guard lock(pending_mutex_);
         snapshot.swap(pending_);
       }
+      if (quitting_) return 0;
       if (snapshot) {
         const core::Snapshot before = std::exchange(snapshot_, std::move(*snapshot));
         UpdateTip();
@@ -357,6 +395,10 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       return 0;
     }
     case kUpdateMessage:
+      if (quitting_) {
+        FinishQuit();
+        return 0;
+      }
       if (wparam == 1) {
         FinishUpdateJob();
       } else {
@@ -364,6 +406,11 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       }
       return 0;
     case WM_TIMER:
+      if (wparam == kQuitTimer) {
+        FinishQuit();
+        return 0;
+      }
+      if (quitting_ && wparam != kNoticeTimer) return 0;
       if (wparam == kUpdateTimer) {
         KillTimer(window_, kUpdateTimer);
         RunUpdates();
@@ -384,6 +431,10 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       Notify(notifier_.Tick(Quiet(), Clock::now()));
       return 0;
     case kActivateMessage:
+      if (quitting_) {
+        ShowMenu(IconPoint());
+        return 0;
+      }
       if (const HWND dialog = OpenDialog()) {
         SetForegroundWindow(dialog);
       } else if (!first_run_.done || wparam) {
@@ -405,6 +456,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       }
       return 0;
     case kErrorMessage:
+      if (quitting_) return 0;
       if (!later_error_.empty()) ShowError(std::exchange(later_error_, {}));
       return 0;
     case kInstallerMessage:
@@ -436,6 +488,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       // returns: let go of the mic and the cable first.
       if (wparam) {
         Quit();
+        WaitForQuit();
       } else {
         // It doesn't end after all: another program said no.
         session_ending_ = false;
@@ -508,7 +561,7 @@ void TrayApp::ModifyIcon(NOTIFYICONDATAW& data) {
   // icons' flyout, for screen readers, from the change it got last, and a
   // change without one leaves the icon nameless.
   data.uFlags |= NIF_TIP | NIF_SHOWTIP;
-  std::wstring tip = std::format(L"{}\n{}", kDisplayNameW, FromUtf8(StatusLine(snapshot_)));
+  std::wstring tip = std::format(L"{}\n{}", kDisplayNameW, quitting_ ? L"Closing" : FromUtf8(StatusLine(snapshot_)));
   if (tip.size() >= std::size(data.szTip)) {
     tip.resize(std::size(data.szTip) - 2);
     tip += L'…';
@@ -664,10 +717,11 @@ POINT TrayApp::IconPoint() const {
 }
 
 void TrayApp::ShowMenu(POINT point) {
-  if (in_menu_ || quitting_) return;
+  if (in_menu_) return;
   in_menu_ = true;
-  const bool starts = options_.starts_with_windows && options_.starts_with_windows();
-  const Menu menu = BuildMenu(snapshot_, settings_, starts, MenuUpdates());
+  const bool starts = !quitting_ && options_.starts_with_windows && options_.starts_with_windows();
+  const Menu menu = quitting_ ? Menu{.items = {{.id = kIdStatus, .text = "Closing", .enabled = false}}}
+                             : BuildMenu(snapshot_, settings_, starts, MenuUpdates());
   const HMENU native = CreateNativeMenu(menu.items);
   // Without this, the menu wouldn't close when the user clicks elsewhere.
   SetForegroundWindow(window_);
@@ -682,11 +736,16 @@ void TrayApp::ShowMenu(POINT point) {
 }
 
 void TrayApp::Execute(unsigned id) {
+  if (quitting_) return;
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
   Execute(id, BuildMenu(snapshot_, settings_, starts, MenuUpdates()));
 }
 
 void TrayApp::OpenNotice() {
+  if (quitting_) {
+    ShowMenu(IconPoint());
+    return;
+  }
   const std::optional<Notice> notice = notifier_.shown();
   notifier_.Clicked();
   if (notice && notice->kind == Notice::Kind::kUpdateReady) {
@@ -703,6 +762,7 @@ void TrayApp::OpenNotice() {
 }
 
 void TrayApp::Execute(unsigned id, const Menu& menu) {
+  if (quitting_) return;
   if (const auto picked = SettingsForPick(menu, id, settings_)) {
     ApplySettings(*picked);
     return;
@@ -793,6 +853,7 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
   setup_window_ = &dialog;
   dialog.Show();
   setup_window_ = nullptr;
+  if (quitting_) return;
   if (RestartByItself()) return;
   // What waited for it to close.
   Notify(notifier_.Tick(Quiet(), Clock::now()));
@@ -801,20 +862,24 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
 }
 
 void TrayApp::ApplySettings(const core::Settings& settings) {
+  if (quitting_) return;
   settings_ = settings;
   if (core_) core_->Apply(settings_);
   Save();
 }
 
 void TrayApp::Reimport() {
+  if (quitting_) return;
   if (core_) core_->Reimport();
 }
 
 Status TrayApp::StartObs(const std::filesystem::path& install_root) {
+  if (quitting_) return Error{"The app is closing."};
   return options_.open_obs ? options_.open_obs(install_root) : OpenObs(install_root);
 }
 
 void TrayApp::FinishFirstRun(const FinishChoices& finish) {
+  if (quitting_) return;
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
   if (options_.set_start_with_windows && finish.start_with_windows != starts) {
     if (const Status set = options_.set_start_with_windows(finish.start_with_windows); !set) ShowError(set.error());
@@ -829,11 +894,13 @@ void TrayApp::FinishFirstRun(const FinishChoices& finish) {
 }
 
 void TrayApp::SaveFirstRun(const FirstRunProgress& progress) {
+  if (quitting_) return;
   first_run_ = progress;
   Save();
 }
 
 void TrayApp::ResumeAfterRestart(bool on) {
+  if (quitting_) return;
   if (!options_.resume_after_restart) return;
   const Status set = options_.resume_after_restart(on);
   if (set) return;
@@ -878,6 +945,7 @@ void TrayApp::OpenLogFolder() {
 }
 
 bool TrayApp::Restart() {
+  if (quitting_) return false;
   if (restart_result_) return true;
   // Once by itself: if it fails, the menu and the first run offer it.
   restart_tried_ = snapshot_.restart;
@@ -932,6 +1000,7 @@ void TrayApp::ShowAbout() {
 }
 
 void TrayApp::ShowError(std::string_view text) {
+  if (quitting_) return;
   // Over the first run while it's open, which keeps its buttons from being
   // clicked again while the error is up: a button's handler may be why.
   const HWND owner = setup_window_ ? setup_window_->window() : nullptr;
@@ -1368,17 +1437,20 @@ void TrayApp::StopWaitingForInstaller() {
   installer_ = nullptr;
 }
 
-void TrayApp::StopUpdates() {
+bool TrayApp::StopUpdates() {
   KillTimer(window_, kUpdateTimer);
-  if (!update_thread_.joinable()) return;
-  update_work_->cancel.Stop();
-  if (update_work_->done.try_acquire_for(kUpdateStopWait)) {
+  if (!update_thread_.joinable()) return true;
+  if (WaitForSingleObject(update_thread_.native_handle(), 0) == WAIT_OBJECT_0) {
     update_thread_.join();
-  } else {
+  } else if (Clock::now() >= update_stop_due_) {
     // It keeps its own share of the work, and its post to a window that's
     // gone does nothing.
     update_thread_.detach();
+  } else {
+    return false;
   }
+  update_work_.reset();
+  return true;
 }
 
 UpdateMenu TrayApp::MenuUpdates() const {
