@@ -35,7 +35,7 @@ knobs gives OBS's mic sound without OBS. It loads the filter binaries from a pri
 
 ## Capabilities and Constraints
 
-- Built: loading libobs from a private copy of the OBS install, importing the mic and its filters, VST filters and NVIDIA's noise removal through OBS's own modules, the live path into the cable, the comparison with OBS, the tray app with its setup window, notifications and icon badges, and an update check that's off until the user turns it on. Released on GitHub (VST and NVIDIA support isn't released yet); open work is tracked in GitHub issues.
+- Built: loading libobs from a private copy of the OBS install, importing the mic and its filters, VST filters and NVIDIA's noise removal through OBS's own modules, the live path into the cable, the comparison with OBS, the tray app with its setup window, notifications and icon badges, and an update check that's off until the user turns it on. Released on GitHub; open work is tracked in GitHub issues.
 - No custom DSP and no "improvements". No filter editing, since users tune in OBS, and no VST plugin windows. Windows only for now.
 - Plain Win32 UI with no UI framework. A small exe that ships no libobs. Target: under 1% CPU and a small memory footprint.
 - Terms: mic, filter chain, virtual cable (or cable), OBS profile, scene collection, monitoring device (OBS's Monitoring Device in user-facing text), setup window, VB-CABLE.

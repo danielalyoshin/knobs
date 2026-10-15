@@ -27,7 +27,7 @@ Your other apps get the same processed mic while OBS stays closed.
 <br>
 
 > [!NOTE]
-> **knobs is new.** It works end to end and has been tested on real hardware with OBS 32.2.2, an Audient iD4 and VB-CABLE, but few people have run it yet. VST plugins and NVIDIA’s noise removal are on `main` and come with the next release; they’ve been checked against OBS, but not yet live on a mic. If something doesn’t work, [open an issue](https://github.com/danielalyoshin/knobs/issues).
+> **knobs is new.** It works end to end and has been tested on real hardware with OBS 32.2.2, an Audient iD4 and VB-CABLE, but few people have run it yet. VST plugins and NVIDIA’s noise removal are new in 1.0.0: they’ve been checked against OBS, but not yet on a live mic. If something doesn’t work, [open an issue](https://github.com/danielalyoshin/knobs/issues).
 
 ## Why knobs
 
