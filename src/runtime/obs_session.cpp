@@ -78,17 +78,11 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
   }
 
   for (std::string_view name : kObsModules) {
-    const std::string binary = ToObsPath(PluginDll(runtime.root(), name, runtime.install_version()));
-    const std::string data = ToObsPath(PluginDataDir(runtime.root(), name, runtime.install_version()));
-    obs_module_t* module = nullptr;
-    const int code = api.obs_open_module(&module, binary.c_str(), data.c_str());
-    if (code != MODULE_SUCCESS) {
-      return Error{std::format("Couldn't open the OBS module {}: {}.", name, DescribeModuleError(code))};
+    auto module = session->OpenModule(name);
+    if (!module) return Error{module.error()};
+    if (const Status initialized = session->InitModule(name, *module); !initialized) {
+      return Error{initialized.error()};
     }
-    if (!api.obs_init_module(module)) {
-      return Error{std::format("The OBS module {} failed to initialize. The log has details.", name)};
-    }
-    session->modules_.emplace_back(name, module);
   }
   api.obs_post_load_modules();
   return session;
@@ -96,6 +90,25 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
 
 ObsSession::ObsSession(const ObsRuntime& runtime, const SessionOptions& options)
     : runtime_(runtime), options_(options), thread_id_(GetCurrentThreadId()) {}
+
+Result<obs_module_t*> ObsSession::OpenModule(std::string_view name) {
+  const std::string binary = ToObsPath(PluginDll(runtime_.root(), name, runtime_.install_version()));
+  const std::string data = ToObsPath(PluginDataDir(runtime_.root(), name, runtime_.install_version()));
+  obs_module_t* module = nullptr;
+  const int code = runtime_.api().obs_open_module(&module, binary.c_str(), data.c_str());
+  if (code != MODULE_SUCCESS) {
+    return Error{std::format("Couldn't open the OBS module {}: {}.", name, DescribeModuleError(code))};
+  }
+  return module;
+}
+
+Status ObsSession::InitModule(std::string_view name, obs_module_t* module) {
+  if (!runtime_.api().obs_init_module(module)) {
+    return Error{std::format("The OBS module {} failed to initialize. The log has details.", name)};
+  }
+  modules_.emplace_back(name, module);
+  return Ok{};
+}
 
 ObsSession::~ObsSession() { Shutdown(); }
 
@@ -117,36 +130,25 @@ Status ObsSession::LoadOptionalModule(std::string_view name) {
     return Error{std::format("{} doesn't load the OBS module {}.", kDisplayName, name)};
   }
 
-  const ObsApi& api = runtime_.api();
   const auto open = [&]() -> Status {
-    const std::filesystem::path dll = PluginDll(runtime_.root(), name, runtime_.install_version());
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(dll, ec)) {
+    if (!std::filesystem::is_regular_file(PluginDll(runtime_.root(), name, runtime_.install_version()), ec)) {
       // The install lacks it, or its files couldn't be read when the copy
       // was made (RuntimeFileSet::skipped), which the log says.
       return Error{std::format("{}'s copy of OBS has no {} module.", kDisplayName, name)};
     }
-    const std::string binary = ToObsPath(dll);
-    const std::string data = ToObsPath(PluginDataDir(runtime_.root(), name, runtime_.install_version()));
-    obs_module_t* module = nullptr;
-    const int code = api.obs_open_module(&module, binary.c_str(), data.c_str());
-    if (code != MODULE_SUCCESS) {
-      return Error{std::format("Couldn't open the OBS module {}: {}.", name, DescribeModuleError(code))};
-    }
+    auto module = OpenModule(name);
+    if (!module) return Error{module.error()};
     // Before any of its filters exist, so their objects belong to this
     // thread's application.
-    if (name == "obs-vst" && !qt_) {
+    if (name == kVstModule && !qt_) {
       auto qt = QtApp::Start();
       if (!qt) return Error{std::format("Couldn't start the Qt application obs-vst needs: {}", qt.error())};
       qt_ = std::move(*qt);
     }
-    if (!api.obs_init_module(module)) {
-      return Error{std::format("The OBS module {} failed to initialize. The log has details.", name)};
-    }
     // Neither module has a post_load callback, which obs_post_load_modules()
     // would run, for every module again.
-    modules_.emplace_back(name, module);
-    return Ok{};
+    return InitModule(name, *module);
   };
   Status opened = open();
   if (!opened) module_errors_.emplace(name, opened.error());

@@ -12,6 +12,7 @@
 #include <set>
 
 #include "app_info.h"
+#include "runtime/obs_data.h"
 #include "runtime/obs_layout.h"
 #include "runtime/obs_session.h"
 #include "runtime/obs_version.h"
@@ -24,15 +25,23 @@ namespace {
 
 namespace fs = std::filesystem;
 
+using runtime::ArrayPtr;
+using runtime::DataPtr;
+using runtime::DataReleaser;
+using runtime::kNvidiaFilterId;
+using runtime::kVstFilterId;
+using runtime::kVstOpenWhenActive;
+using runtime::OptionalModuleFor;
+using runtime::Own;
+using runtime::String;
+using runtime::VersionedId;
+
 // win-wasapi's input source.
 constexpr std::string_view kMicSourceId = "wasapi_input_capture";
 // The global audio devices, in the order OBS loads them (OBSBasic::LoadData).
 constexpr std::array<const char*, 6> kGlobalDeviceKeys = {"DesktopAudioDevice1", "DesktopAudioDevice2",
                                                           "AuxAudioDevice1",     "AuxAudioDevice2",
                                                           "AuxAudioDevice3",     "AuxAudioDevice4"};
-constexpr std::string_view kVstFilterId = "vst_filter";
-constexpr std::string_view kNvidiaFilterId = "nvidia_audiofx_filter";
-using runtime::kVstOpenWhenActive;
 constexpr std::string_view kCompressorId = "compressor_filter";
 constexpr std::string_view kGainId = "gain_filter";
 // What ImportedMic::chain_key leaves out of a saved source (obs.c,
@@ -50,33 +59,6 @@ constexpr std::array<const char*, 17> kKeysTheCableIgnores = {
 // What it leaves out of each filter: the same name and UUID. A filter's
 // "enabled" stays, since it turns the filter off.
 constexpr std::array<const char*, 2> kFilterKeysTheCableIgnores = {"name", "uuid"};
-
-struct DataReleaser {
-  const runtime::ObsApi* api;
-  void operator()(obs_data_t* data) const { api->obs_data_release(data); }
-};
-using DataPtr = std::unique_ptr<obs_data_t, DataReleaser>;
-
-struct ArrayReleaser {
-  const runtime::ObsApi* api;
-  void operator()(obs_data_array_t* array) const { api->obs_data_array_release(array); }
-};
-using ArrayPtr = std::unique_ptr<obs_data_array_t, ArrayReleaser>;
-
-DataPtr Own(const runtime::ObsApi& api, obs_data_t* data) { return DataPtr(data, DataReleaser{&api}); }
-ArrayPtr Own(const runtime::ObsApi& api, obs_data_array_t* array) { return ArrayPtr(array, ArrayReleaser{&api}); }
-
-std::string String(const runtime::ObsApi& api, obs_data_t* data, const char* name) {
-  const char* value = api.obs_data_get_string(data, name);
-  return value ? value : "";
-}
-
-// libobs creates a source by its versioned type, falling back to its type
-// (obs_load_source_type).
-std::string VersionedId(const runtime::ObsApi& api, obs_data_t* data) {
-  std::string id = String(api, data, "versioned_id");
-  return id.empty() ? String(api, data, "id") : id;
-}
 
 // A key the loader defaults when it's missing (obs_load_source_type).
 bool Bool(const runtime::ObsApi& api, obs_data_t* data, const char* name, bool missing) {
@@ -122,15 +104,6 @@ DataPtr GainInsteadOf(const runtime::ObsApi& api, obs_data_t* compressor, double
   return gain;
 }
 
-// The optional module that registers a filter's type, if any
-// (runtime::kOptionalObsModules).
-const runtime::OptionalObsModule* OptionalModuleFor(std::string_view id) {
-  for (const runtime::OptionalObsModule& module : runtime::kOptionalObsModules) {
-    if (module.filter_id == id) return &module;
-  }
-  return nullptr;
-}
-
 // A VST filter's plugin, as obs-vst loads it: the DLL at "plugin_path", or
 // none (vst_update, obs-vst.cpp).
 std::string VstPluginPath(const runtime::ObsApi& api, obs_data_t* filter) {
@@ -143,6 +116,17 @@ bool VstPluginFound(const std::string& path) {
   return !path.empty() && fs::is_regular_file(FromUtf8(path), ec);
 }
 
+// A module's file, however long its path, or none if it can't tell.
+fs::path ModuleFile(HMODULE module) {
+  std::wstring path(MAX_PATH, L'\0');
+  for (;;) {
+    const DWORD length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0) return {};
+    if (length < path.size()) return fs::path(std::wstring_view(path.data(), length));
+    path.resize(path.size() * 2);
+  }
+}
+
 // The folders the loader finds a VST plugin's own DLLs in, as obs-vst loads
 // it, with LoadLibraryW and the process's default directories
 // (SetDefaultDllDirectories): the program's folder, the runtime copy's
@@ -150,37 +134,86 @@ bool VstPluginFound(const std::string& path) {
 // and the system's. In OBS, the program's folder is OBS's bin\64bit.
 std::vector<fs::path> PluginSearchFolders() {
   std::vector<fs::path> folders;
-  wchar_t path[MAX_PATH * 2] = {};
-  const DWORD size = static_cast<DWORD>(std::size(path));
-  if (GetModuleFileNameW(nullptr, path, size)) folders.push_back(fs::path(path).parent_path());
-  if (const HMODULE obs = GetModuleHandleW(runtime::kObsDll.data()); obs && GetModuleFileNameW(obs, path, size)) {
-    folders.push_back(fs::path(path).parent_path());
+  if (const fs::path exe = ModuleFile(nullptr); !exe.empty()) folders.push_back(exe.parent_path());
+  if (const HMODULE obs = GetModuleHandleW(runtime::kObsDll.data())) {
+    if (const fs::path dll = ModuleFile(obs); !dll.empty()) folders.push_back(dll.parent_path());
   }
-  if (GetSystemDirectoryW(path, size)) folders.push_back(path);
+  wchar_t system[MAX_PATH] = {};
+  if (const UINT length = GetSystemDirectoryW(system, MAX_PATH); length > 0 && length < MAX_PATH) {
+    folders.emplace_back(std::wstring_view(system, length));
+  }
   return folders;
 }
 
-// Whether a VST plugin's file is a 64-bit DLL, which obs-vst can load, in
-// OBS too. Yes if it can't tell.
-bool VstPluginIs64Bit(const std::string& path) {
-  const auto is64 = runtime::IsWindows64Binary(FromUtf8(path));
-  return !is64 || *is64;
-}
+// A VST filter's plugin, as obs-vst would load it (VstPluginFiles::Check).
+struct VstPlugin {
+  bool found = false;
+  uint64_t size = 0;
+  int64_t written = 0;
+  // Whether it's a 64-bit DLL, which obs-vst can load, in OBS too. Yes if it
+  // can't tell.
+  bool is64 = true;
+  // The DLLs it imports that knobs's process can't find, so obs-vst couldn't
+  // load it. Empty if it can't tell.
+  std::vector<std::string> missing;
 
-// The DLLs a VST plugin imports that knobs's process can't find, so obs-vst
-// couldn't load it. Empty if it can't tell.
-std::vector<std::string> VstMissingDlls(const std::string& path) {
-  auto missing = runtime::UnresolvedDllImports(FromUtf8(path), PluginSearchFolders());
-  return missing ? *missing : std::vector<std::string>{};
-}
+  bool loads() const { return found && is64 && missing.empty(); }
+};
 
-std::string JoinNames(const std::vector<std::string>& names) {
-  std::string joined;
-  for (size_t i = 0; i < names.size(); ++i) {
-    joined += std::format("{}{}", i == 0 ? "" : i + 1 == names.size() ? " and " : ", ", names[i]);
+}  // namespace
+
+// Each VST plugin's file, read once per import while its size and time stay
+// the same: an import checks the same plugin for every mic's filter list,
+// then for the picked mic's pre-flight and chain key. Its imports are looked
+// up each time, since the loader also finds a DLL that's already loaded, and
+// an import loads modules along the way.
+class VstPluginFiles {
+ public:
+  VstPlugin Check(const std::string& path);
+
+ private:
+  struct Parsed {
+    uint64_t size = 0;
+    int64_t written = 0;
+    // Whether the file could be read. If not, the next check reads it again.
+    bool read = false;
+    bool is64 = true;
+    // What it imports, not delay-loaded, or nothing if it can't tell.
+    std::optional<std::vector<std::string>> imports;
+  };
+  std::map<std::string, Parsed, std::less<>> files_;
+  std::optional<std::vector<fs::path>> folders_;  // PluginSearchFolders.
+};
+
+VstPlugin VstPluginFiles::Check(const std::string& path) {
+  VstPlugin plugin;
+  plugin.found = VstPluginFound(path);
+  if (!plugin.found) return plugin;
+  const fs::path file = FromUtf8(path);
+  std::error_code ec;
+  plugin.size = fs::file_size(file, ec);
+  plugin.written = fs::last_write_time(file, ec).time_since_epoch().count();
+  Parsed& parsed = files_[path];
+  if (!parsed.read || parsed.size != plugin.size || parsed.written != plugin.written) {
+    parsed = {plugin.size, plugin.written};
+    // Only a 64-bit binary has imports to read.
+    if (auto imports = runtime::ReadDllImports(file, false)) {
+      parsed.read = true;
+      parsed.imports = std::move(*imports);
+    } else if (const auto is64 = runtime::IsWindows64Binary(file)) {
+      parsed.read = true;
+      parsed.is64 = *is64;
+    }
   }
-  return joined;
+  plugin.is64 = parsed.is64;
+  if (parsed.imports) {
+    if (!folders_) folders_ = PluginSearchFolders();
+    plugin.missing = runtime::UnresolvedDllImports(file, *parsed.imports, *folders_);
+  }
+  return plugin;
 }
+
+namespace {
 
 // Where nv-filters finds NVIDIA's Audio Effects SDK, which it loads to run
 // the filter: the folder NVAFX_SDK_DIR names, from OBS 33 the one AFX_SDK_DIR
@@ -203,7 +236,7 @@ fs::path FindNvidiaAudioEffects(const runtime::ObsVersion& obs) {
 // running if what it needs is there: knobs loads the module once the mic is
 // picked, and only then, since nv-filters alone costs hundreds of MB.
 // `failed` has the modules that didn't load.
-bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& failed) {
+bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& failed, VstPluginFiles& plugins) {
   if (!Bool(api, filter, "enabled", true)) return false;
   const std::string id = String(api, filter, "id");
   if (api.obs_get_source_output_flags(VersionedId(api, filter).c_str()) == 0) {
@@ -213,10 +246,7 @@ bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& fa
     const runtime::ObsVersion obs = runtime::ObsVersion::FromLibobs(api.obs_get_version());
     if (id == kNvidiaFilterId && FindNvidiaAudioEffects(obs).empty()) return false;
   }
-  if (id == kVstFilterId) {
-    const std::string path = VstPluginPath(api, filter);
-    if (!VstPluginFound(path) || !VstPluginIs64Bit(path) || !VstMissingDlls(path).empty()) return false;
-  }
+  if (id == kVstFilterId && !plugins.Check(VstPluginPath(api, filter)).loads()) return false;
   const auto ducking = AsDucking(api, filter);
   return !ducking || ducking->output_gain != 0;
 }
@@ -225,13 +255,9 @@ bool Runs(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& fa
 // say: whether the plugin's file is there, which file it is, and what it
 // can't load. For the chain key, so a plugin that appears, is updated or
 // goes away restarts the chain.
-std::string VstPluginState(const std::string& path) {
-  if (!VstPluginFound(path)) return "missing";
-  std::error_code ec;
-  const fs::path file = FromUtf8(path);
-  const uint64_t size = fs::file_size(file, ec);
-  const auto written = fs::last_write_time(file, ec).time_since_epoch().count();
-  return std::format("{} {} {}", size, written, JoinNames(VstMissingDlls(path)));
+std::string VstPluginState(const VstPlugin& plugin) {
+  if (!plugin.found) return "missing";
+  return std::format("{} {} {}", plugin.size, plugin.written, JoinWithAnd(plugin.missing));
 }
 
 // Why an optional module's filter isn't one libobs has: the module didn't
@@ -241,7 +267,8 @@ std::string VstPluginState(const std::string& path) {
 // restart will.
 ImportNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::string_view id,
                         const std::string& plugin, const ModuleErrors& modules, bool nvidia_sdk_arrived) {
-  const auto failed = modules.find(id == kVstFilterId ? "obs-vst" : "nv-filters");
+  const runtime::OptionalObsModule* module = OptionalModuleFor(id);
+  const auto failed = module ? modules.find(module->name) : modules.end();
   const std::string error = failed == modules.end() ? "" : failed->second;
   if (id == kVstFilterId) {
     return {true, std::format("Filter \"{}\" is a VST plugin ({}), and {} couldn't load OBS's VST module: {} It "
@@ -293,7 +320,8 @@ obs_data_t* ParseCollection(const runtime::ObsApi& api, const fs::path& file, bo
   return backup;
 }
 
-std::optional<MicCandidate> AsMic(const runtime::ObsApi& api, obs_data_t* source, const ModuleErrors& failed) {
+std::optional<MicCandidate> AsMic(const runtime::ObsApi& api, obs_data_t* source, const ModuleErrors& failed,
+                                  VstPluginFiles& plugins) {
   if (String(api, source, "id") != kMicSourceId) return std::nullopt;
   MicCandidate mic;
   mic.name = String(api, source, "name");
@@ -308,7 +336,7 @@ std::optional<MicCandidate> AsMic(const runtime::ObsApi& api, obs_data_t* source
   const size_t count = filters ? api.obs_data_array_count(filters.get()) : 0;
   for (size_t i = 0; i < count; ++i) {
     DataPtr filter = Own(api, api.obs_data_array_item(filters.get(), i));
-    if (Runs(api, filter.get(), failed)) mic.filters.push_back(String(api, filter.get(), "name"));
+    if (Runs(api, filter.get(), failed, plugins)) mic.filters.push_back(String(api, filter.get(), "name"));
   }
   return mic;
 }
@@ -321,7 +349,7 @@ std::string FileName(std::string_view path) {
 // One filter's pre-flight. Returns whether to keep it, and sets `instead` to
 // a filter to load in its place, if any.
 bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErrors& modules,
-                 bool nvidia_sdk_arrived, std::vector<ImportNote>& notes, DataPtr& instead) {
+                 bool nvidia_sdk_arrived, VstPluginFiles& plugins, std::vector<ImportNote>& notes, DataPtr& instead) {
   const std::string name = String(api, filter, "name");
   const std::string id = String(api, filter, "id");
   const std::string type = VersionedId(api, filter);
@@ -335,23 +363,20 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   const bool optional = OptionalModuleFor(id) != nullptr;
   const bool known = api.obs_get_source_output_flags(type.c_str()) != 0;
 
-  if (!known && !(enabled && optional)) {
+  if (!known && !optional) {
     // libobs knows no such type, so it loads a placeholder that does nothing.
-    // knobs loads an optional module only for a filter that's on.
-    if (!enabled) {
-      notes.push_back(optional ? ImportNote{false, std::format("Filter \"{}\" is off in OBS, and stays off.", name)}
-                               : ImportNote{false, std::format("Filter \"{}\" ({}) isn't one {} has, but it's off "
-                                                               "in OBS anyway.",
-                                                               name, type, kDisplayName)});
-      key(optional ? "off" : "unknown");
-    } else {
-      notes.push_back({true, std::format("Filter \"{}\" ({}) isn't one {} has. It passes audio through untouched.",
-                                         name, type, kDisplayName)});
-      key("unknown");
-    }
+    notes.push_back(enabled ? ImportNote{true, std::format("Filter \"{}\" ({}) isn't one {} has. It passes audio "
+                                                           "through untouched.",
+                                                           name, type, kDisplayName)}
+                            : ImportNote{false, std::format("Filter \"{}\" ({}) isn't one {} has, but it's off in "
+                                                            "OBS anyway.",
+                                                            name, type, kDisplayName)});
+    key("unknown");
     return true;
   }
   if (!enabled) {
+    // Whether libobs has its type or not: knobs loads an optional module
+    // only for a filter that's on.
     notes.push_back({false, std::format("Filter \"{}\" is off in OBS, and stays off.", name)});
     key("off");
     return true;
@@ -368,33 +393,34 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   }
   if (id == kVstFilterId) {
     const std::string path = VstPluginPath(api, filter);
+    const VstPlugin plugin = plugins.Check(path);
     if (path.empty()) {
       notes.push_back({.text = std::format("VST filter \"{}\" has no plugin chosen, so it passes audio through "
                                            "untouched, in OBS too.",
                                            name),
                        .changes_expectations = true});
       key("vst");
-    } else if (!VstPluginFound(path)) {
+    } else if (!plugin.found) {
       notes.push_back({.text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't at {} any more, so it "
                                            "passes audio through untouched, in OBS too.",
                                            name, FileName(path), path),
                        .changes_expectations = true,
                        .file = FileName(path)});
       key("vst");
-    } else if (!VstPluginIs64Bit(path)) {
+    } else if (!plugin.is64) {
       notes.push_back({.text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't a 64-bit plugin, so it "
                                            "passes audio through untouched, in OBS too.",
                                            name, FileName(path)),
                        .changes_expectations = true,
                        .file = FileName(path)});
       key("vst");
-    } else if (const std::vector<std::string> missing = VstMissingDlls(path); !missing.empty()) {
+    } else if (!plugin.missing.empty()) {
       // In OBS, the program's folder is OBS's bin\64bit, which can have
       // them (PluginSearchFolders).
       notes.push_back({.warning = true,
                        .text = std::format("Filter \"{}\" is a VST plugin ({}) that needs {}, which {} can't find "
                                            "in Windows or in its copy of OBS, so it passes audio through untouched.",
-                                           name, FileName(path), JoinNames(missing), kDisplayName),
+                                           name, FileName(path), JoinWithAnd(plugin.missing), kDisplayName),
                        .file = FileName(path)});
       key("vst-dlls");
     }
@@ -454,24 +480,22 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
 // matter.
 void CheckSourceState(const runtime::ObsApi& api, obs_data_t* source, const MicCandidate& mic,
                       std::vector<ImportNote>& notes) {
-  std::vector<std::string_view> silencers;
+  std::vector<std::string> silencers;
   if (!Bool(api, source, "enabled", true)) silencers.push_back("disabled");
   if (Bool(api, source, "muted", false)) silencers.push_back("muted");
   if (Bool(api, source, "push-to-talk", false)) silencers.push_back("on push-to-talk");
   if (Bool(api, source, "push-to-mute", false)) silencers.push_back("on push-to-mute");
   if (!silencers.empty()) {
-    std::string states;
-    for (size_t i = 0; i < silencers.size(); ++i) {
-      states += std::format("{}{}", i == 0 ? "" : i + 1 == silencers.size() ? " and " : ", ", silencers[i]);
-    }
     // obs_source_t's enabled flag counts as muted (obs-source.c). What to
     // do instead: the apps that use the cable have their own.
-    std::string keys;
-    if (Bool(api, source, "push-to-talk", false)) keys = "push-to-talk";
-    if (Bool(api, source, "push-to-mute", false)) keys += keys.empty() ? "push-to-mute" : " and push-to-mute";
-    const std::string instead = keys.empty() ? "Mute it in each app that uses the cable instead."
-                                             : std::format("Set up {} in each app that uses the cable.", keys);
-    notes.push_back({.text = std::format("The mic is {} in OBS, which doesn't silence the cable. {}", states, instead),
+    std::vector<std::string> keys;
+    if (Bool(api, source, "push-to-talk", false)) keys.push_back("push-to-talk");
+    if (Bool(api, source, "push-to-mute", false)) keys.push_back("push-to-mute");
+    const std::string instead =
+        keys.empty() ? "Mute it in each app that uses the cable instead."
+                     : std::format("Set up {} in each app that uses the cable.", JoinWithAnd(keys));
+    notes.push_back({.text = std::format("The mic is {} in OBS, which doesn't silence the cable. {}",
+                                         JoinWithAnd(silencers), instead),
                      .changes_expectations = true});
   }
   if (const int64_t sync = api.obs_data_get_int(source, "sync"); sync != 0) {
@@ -573,6 +597,9 @@ Result<std::unique_ptr<SceneCollection>> SceneCollection::Read(const runtime::Ob
   return collection;
 }
 
+SceneCollection::SceneCollection(const runtime::ObsApi& api, obs_data_t* data)
+    : api_(api), data_(data), plugins_(std::make_unique<VstPluginFiles>()) {}
+
 SceneCollection::~SceneCollection() { api_.obs_data_release(data_); }
 
 std::string SceneCollection::name() const { return String(api_, data_, "name"); }
@@ -582,7 +609,7 @@ std::vector<MicCandidate> SceneCollection::Mics(const ModuleErrors& modules) con
   for (const char* key : kGlobalDeviceKeys) {
     DataPtr source = Own(api_, api_.obs_data_get_obj(data_, key));
     if (!source) continue;
-    if (auto mic = AsMic(api_, source.get(), modules)) {
+    if (auto mic = AsMic(api_, source.get(), modules, *plugins_)) {
       mic->location = key;
       mic->origin = MicOrigin::kGlobalDevice;
       mic->key = key;
@@ -593,7 +620,7 @@ std::vector<MicCandidate> SceneCollection::Mics(const ModuleErrors& modules) con
   const size_t count = sources ? api_.obs_data_array_count(sources.get()) : 0;
   for (size_t i = 0; i < count; ++i) {
     DataPtr source = Own(api_, api_.obs_data_array_item(sources.get(), i));
-    if (auto mic = AsMic(api_, source.get(), modules)) {
+    if (auto mic = AsMic(api_, source.get(), modules, *plugins_)) {
       mic->location = std::format("sources[{}]", i);
       mic->origin = MicOrigin::kSource;
       mic->key = "sources";
@@ -614,7 +641,7 @@ std::vector<std::string> SceneCollection::NeededModules(const MicCandidate& mic)
 Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const ModuleErrors& modules,
                                             bool nvidia_sdk_arrived) const {
   DataPtr saved = SavedMic(api_, data_, mic);
-  if (!saved || !AsMic(api_, saved.get(), modules)) {
+  if (!saved || !AsMic(api_, saved.get(), modules, *plugins_)) {
     return Error{std::format("The scene collection has no mic at {}.", mic.location)};
   }
   // A copy, so the collection stays as read.
@@ -632,11 +659,12 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
     for (size_t i = 0; i < count; ++i) {
       DataPtr filter = Own(api_, api_.obs_data_array_item(filters.get(), i));
       DataPtr instead;
-      const bool keep = CheckFilter(api_, filter.get(), modules, nvidia_sdk_arrived, imported.notes, instead);
+      const bool keep =
+          CheckFilter(api_, filter.get(), modules, nvidia_sdk_arrived, *plugins_, imported.notes, instead);
       changed |= !keep || instead;
       if (!keep) continue;
       api_.obs_data_array_push_back(kept.get(), instead ? instead.get() : filter.get());
-      if (Runs(api_, filter.get(), modules)) imported.filters.push_back(String(api_, filter.get(), "name"));
+      if (Runs(api_, filter.get(), modules, *plugins_)) imported.filters.push_back(String(api_, filter.get(), "name"));
     }
     if (changed) api_.obs_data_set_array(source.get(), "filters", kept.get());
   }
@@ -656,7 +684,7 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
       // Every VST filter loads with its window off (audio::LoadSourceJson).
       DataPtr settings = Own(api_, api_.obs_data_get_obj(filter.get(), "settings"));
       if (settings) api_.obs_data_erase(settings.get(), kVstOpenWhenActive);
-      imported.plugins_key += std::format("{}\n", VstPluginState(plugin));
+      imported.plugins_key += std::format("{}\n", VstPluginState(plugins_->Check(plugin)));
     }
   }
   const char* key_json = api_.obs_data_get_json(source.get());

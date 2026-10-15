@@ -101,11 +101,6 @@ std::map<std::string, fs::path> ListDlls(const fs::path& dir) {
   return dlls;
 }
 
-// API set names (api-ms-*, ext-ms-*) are resolved by the loader, not files.
-bool IsApiSet(std::string_view lower_name) {
-  return lower_name.starts_with("api-ms-") || lower_name.starts_with("ext-ms-");
-}
-
 // Splits "<number> <rest>". Returns false if there's no valid number.
 template <typename Number>
 bool SplitNumber(std::string_view& text, Number& number) {

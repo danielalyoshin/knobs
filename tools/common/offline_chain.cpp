@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/push_source.h"
+#include "runtime/obs_layout.h"
 
 namespace knobs::tools {
 namespace {
@@ -28,7 +29,7 @@ constexpr DWORD kMinLateStartWaitMs = 5000;
 double WaitForLateStarts(const audio::ChainInfo& chain, uint32_t channels) {
   DWORD models = 0;
   for (const audio::ChainInfo::Filter& filter : chain.filters) {
-    if (filter.type == "nvidia_audiofx_filter" && filter.known && filter.enabled) models += channels;
+    if (filter.type == runtime::kNvidiaFilterId && filter.known && filter.enabled) models += channels;
   }
   if (models == 0) return 0;
   const DWORD wait = std::max(kMinLateStartWaitMs, models * kModelLoadWaitMs);

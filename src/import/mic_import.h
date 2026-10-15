@@ -126,7 +126,12 @@ struct ImportedMic {
   size_t warning_count() const;
 };
 
-// A scene collection as libobs parses it.
+// The VST plugins' files pre-flight reads (mic_import.cpp).
+class VstPluginFiles;
+
+// A scene collection as libobs parses it. Pre-flight reads each VST plugin's
+// file once while it lasts, and again only if the file changes, so use it on
+// one thread, for one import.
 class SceneCollection {
  public:
   // Reads `file`, or `file`.bak if `file` doesn't parse. OBS falls back the
@@ -165,12 +170,13 @@ class SceneCollection {
                              bool nvidia_sdk_arrived = false) const;
 
  private:
-  SceneCollection(const runtime::ObsApi& api, obs_data_t* data) : api_(api), data_(data) {}
+  SceneCollection(const runtime::ObsApi& api, obs_data_t* data);
 
   const runtime::ObsApi& api_;
   obs_data_t* data_;
   std::filesystem::path file_;
   bool from_backup_ = false;
+  std::unique_ptr<VstPluginFiles> plugins_;
 };
 
 // NeededModules for one OBS source object, such as knobs-harness's --source.

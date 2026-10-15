@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace knobs {
 
@@ -22,6 +23,9 @@ std::string ToObsPath(const std::filesystem::path& path);
 
 // ASCII-only lowercase, for comparing DLL names.
 std::string AsciiLower(std::string_view text);
+
+// "a", "a and b", "a, b and c".
+std::string JoinWithAnd(const std::vector<std::string>& items);
 
 // Windows' description of a Win32 error code, plus the code itself.
 std::string DescribeWinError(unsigned long code);

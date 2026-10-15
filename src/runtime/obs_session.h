@@ -86,6 +86,11 @@ class ObsSession {
  private:
   ObsSession(const ObsRuntime& runtime, const SessionOptions& options);
 
+  // Opens a module from the runtime copy, which InitModule then initializes
+  // and records. Start and LoadOptionalModule both load modules this way.
+  Result<obs_module_t*> OpenModule(std::string_view name);
+  Status InitModule(std::string_view name, obs_module_t* module);
+
   const ObsRuntime& runtime_;
   SessionOptions options_;
   unsigned long thread_id_ = 0;  // The thread that called obs_startup().

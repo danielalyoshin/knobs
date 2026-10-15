@@ -17,10 +17,61 @@
 namespace knobs::runtime {
 namespace {
 
+struct HandleCloser {
+  void operator()(HANDLE handle) const { CloseHandle(handle); }
+};
+using UniqueHandle = std::unique_ptr<void, HandleCloser>;
+
+// A file read a few bytes at a time, where the parse needs them, rather than
+// mapped: while a mapping exists, Windows refuses to truncate the file, as an
+// installer that overwrites a plugin does (CREATE_ALWAYS), and an open handle
+// that shares every kind of access doesn't stop that.
+class FileReader {
+ public:
+  static Result<FileReader> Open(const std::filesystem::path& file) {
+    const std::string name = ToUtf8(file);
+    FileReader reader;
+    HANDLE raw = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (raw == INVALID_HANDLE_VALUE) {
+      return Error{std::format("Couldn't open {}: {}", name, DescribeWinError(GetLastError()))};
+    }
+    reader.file_.reset(raw);
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(reader.file_.get(), &size) || size.QuadPart == 0) {
+      return Error{std::format("{} is empty or unreadable.", name)};
+    }
+    reader.size_ = static_cast<uint64_t>(size.QuadPart);
+    return reader;
+  }
+
+  uint64_t size() const { return size_; }
+
+  // `count` bytes at `offset`, kept until the reader goes. Null past the end,
+  // or if they can't be read, as when another program truncated the file
+  // meanwhile.
+  const std::byte* Read(uint64_t offset, size_t count) {
+    if (offset > size_ || size_ - offset < count || count > MAXDWORD) return nullptr;
+    auto bytes = std::make_unique_for_overwrite<std::byte[]>(count);
+    OVERLAPPED at = {};
+    at.Offset = static_cast<DWORD>(offset);
+    at.OffsetHigh = static_cast<DWORD>(offset >> 32);
+    DWORD read = 0;
+    if (!ReadFile(file_.get(), bytes.get(), static_cast<DWORD>(count), &read, &at) || read != count) return nullptr;
+    reads_.push_back(std::move(bytes));
+    return reads_.back().get();
+  }
+
+ private:
+  UniqueHandle file_;
+  uint64_t size_ = 0;
+  std::vector<std::unique_ptr<std::byte[]>> reads_;
+};
+
 // Bounds-checked view of a PE file's bytes.
 class PeFile {
  public:
-  explicit PeFile(std::span<const std::byte> bytes) : bytes_(bytes) {}
+  explicit PeFile(FileReader& file) : file_(file) {}
 
   // Reads the headers. Returns false if this isn't a 64-bit PE file.
   bool Parse() {
@@ -34,13 +85,10 @@ class PeFile {
     const uint64_t sections_offset = static_cast<uint64_t>(dos->e_lfanew) +
                                      offsetof(IMAGE_NT_HEADERS64, OptionalHeader) +
                                      nt_->FileHeader.SizeOfOptionalHeader;
-    const uint64_t count = nt_->FileHeader.NumberOfSections;
-    if (sections_offset > bytes_.size() ||
-        (bytes_.size() - sections_offset) / sizeof(IMAGE_SECTION_HEADER) < count) {
-      return false;
-    }
-    sections_ = {reinterpret_cast<const IMAGE_SECTION_HEADER*>(bytes_.data() + sections_offset),
-                 static_cast<size_t>(count)};
+    const size_t count = nt_->FileHeader.NumberOfSections;
+    const std::byte* sections = file_.Read(sections_offset, count * sizeof(IMAGE_SECTION_HEADER));
+    if (!sections) return false;
+    sections_ = {reinterpret_cast<const IMAGE_SECTION_HEADER*>(sections), count};
     return true;
   }
 
@@ -59,9 +107,10 @@ class PeFile {
 
   std::optional<std::string_view> StringAtRva(uint32_t rva) const {
     const auto offset = RvaToOffset(rva);
-    if (!offset || *offset >= bytes_.size()) return std::nullopt;
-    const auto* begin = reinterpret_cast<const char*>(bytes_.data() + *offset);
-    const size_t limit = std::min<size_t>(bytes_.size() - *offset, MAX_PATH);
+    if (!offset || *offset >= file_.size()) return std::nullopt;
+    const size_t limit = static_cast<size_t>(std::min<uint64_t>(file_.size() - *offset, MAX_PATH));
+    const auto* begin = reinterpret_cast<const char*>(file_.Read(*offset, limit));
+    if (!begin) return std::nullopt;
     const size_t length = strnlen(begin, limit);
     if (length == 0 || length == limit) return std::nullopt;
     return std::string_view(begin, length);
@@ -70,8 +119,7 @@ class PeFile {
  private:
   template <typename T>
   const T* At(uint64_t offset) const {
-    if (offset > bytes_.size() || bytes_.size() - offset < sizeof(T)) return nullptr;
-    return reinterpret_cast<const T*>(bytes_.data() + offset);
+    return reinterpret_cast<const T*>(file_.Read(offset, sizeof(T)));
   }
 
   std::optional<uint64_t> RvaToOffset(uint32_t rva) const {
@@ -88,7 +136,7 @@ class PeFile {
     return std::nullopt;
   }
 
-  std::span<const std::byte> bytes_;
+  FileReader& file_;
   const IMAGE_NT_HEADERS64* nt_ = nullptr;
   std::span<const IMAGE_SECTION_HEADER> sections_;
 };
@@ -115,64 +163,19 @@ bool ReadDescriptorNames(const PeFile& pe, unsigned directory, NameRva name_rva,
   return false;
 }
 
-struct HandleCloser {
-  void operator()(HANDLE handle) const { CloseHandle(handle); }
-};
-using UniqueHandle = std::unique_ptr<void, HandleCloser>;
-
-struct ViewUnmapper {
-  void operator()(const void* view) const { UnmapViewOfFile(view); }
-};
-
-// A file mapped for reading, unmapped and closed in reverse.
-struct MappedFile {
-  UniqueHandle file;
-  UniqueHandle mapping;
-  std::unique_ptr<const void, ViewUnmapper> view;
-  size_t size = 0;
-
-  std::span<const std::byte> bytes() const { return {static_cast<const std::byte*>(view.get()), size}; }
-};
-
-Result<MappedFile> MapForReading(const std::filesystem::path& file) {
-  const std::string name = ToUtf8(file);
-  MappedFile mapped;
-  HANDLE raw = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
-                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (raw == INVALID_HANDLE_VALUE) {
-    return Error{std::format("Couldn't open {}: {}", name, DescribeWinError(GetLastError()))};
-  }
-  mapped.file.reset(raw);
-
-  LARGE_INTEGER size{};
-  if (!GetFileSizeEx(mapped.file.get(), &size) || size.QuadPart == 0) {
-    return Error{std::format("{} is empty or unreadable.", name)};
-  }
-  mapped.mapping.reset(CreateFileMappingW(mapped.file.get(), nullptr, PAGE_READONLY, 0, 0, nullptr));
-  if (!mapped.mapping) {
-    return Error{std::format("Couldn't map {}: {}", name, DescribeWinError(GetLastError()))};
-  }
-  mapped.view.reset(MapViewOfFile(mapped.mapping.get(), FILE_MAP_READ, 0, 0, 0));
-  if (!mapped.view) {
-    return Error{std::format("Couldn't map {}: {}", name, DescribeWinError(GetLastError()))};
-  }
-  mapped.size = static_cast<size_t>(size.QuadPart);
-  return mapped;
-}
-
 }  // namespace
 
 Result<bool> IsWindows64Binary(const std::filesystem::path& file) {
-  auto mapped = MapForReading(file);
-  if (!mapped) return Error{mapped.error()};
-  return PeFile(mapped->bytes()).Parse();
+  auto reader = FileReader::Open(file);
+  if (!reader) return Error{reader.error()};
+  return PeFile(*reader).Parse();
 }
 
 Result<std::vector<std::string>> ReadDllImports(const std::filesystem::path& file, bool delay_loaded) {
   const std::string name = ToUtf8(file);
-  auto mapped = MapForReading(file);
-  if (!mapped) return Error{mapped.error()};
-  PeFile pe(mapped->bytes());
+  auto reader = FileReader::Open(file);
+  if (!reader) return Error{reader.error()};
+  PeFile pe(*reader);
   if (!pe.Parse()) return Error{std::format("{} isn't a 64-bit Windows binary.", name)};
 
   std::vector<std::string> names;
@@ -191,11 +194,15 @@ Result<std::vector<std::string>> UnresolvedDllImports(const std::filesystem::pat
                                                       const std::vector<std::filesystem::path>& folders) {
   auto imports = ReadDllImports(file, false);
   if (!imports) return Error{imports.error()};
+  return UnresolvedDllImports(file, *imports, folders);
+}
+
+std::vector<std::string> UnresolvedDllImports(const std::filesystem::path& file,
+                                              const std::vector<std::string>& imports,
+                                              const std::vector<std::filesystem::path>& folders) {
   std::vector<std::string> unresolved;
-  for (const std::string& name : *imports) {
-    const std::string lower = AsciiLower(name);
-    // API sets are resolved by the loader, not found as files.
-    if (lower.starts_with("api-ms-") || lower.starts_with("ext-ms-")) continue;
+  for (const std::string& name : imports) {
+    if (IsApiSet(AsciiLower(name))) continue;
     const std::wstring wide = FromUtf8(name);
     if (GetModuleHandleW(wide.c_str())) continue;
     const bool found = std::any_of(folders.begin(), folders.end(), [&](const std::filesystem::path& folder) {

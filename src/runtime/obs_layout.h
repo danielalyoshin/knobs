@@ -23,10 +23,23 @@ struct OptionalObsModule {
   // The filter it registers, by its saved "id".
   std::string_view filter_id;
 };
+inline constexpr std::string_view kVstModule = "obs-vst";
+inline constexpr std::string_view kVstFilterId = "vst_filter";
+inline constexpr std::string_view kNvidiaModule = "nv-filters";
+// NVIDIA's noise removal.
+inline constexpr std::string_view kNvidiaFilterId = "nvidia_audiofx_filter";
 inline constexpr std::array<OptionalObsModule, 2> kOptionalObsModules = {{
-    {"obs-vst", "vst_filter"},
-    {"nv-filters", "nvidia_audiofx_filter"},
+    {kVstModule, kVstFilterId},
+    {kNvidiaModule, kNvidiaFilterId},
 }};
+
+// The optional module that registers a filter's type, if any.
+inline const OptionalObsModule* OptionalModuleFor(std::string_view filter_id) {
+  for (const OptionalObsModule& module : kOptionalObsModules) {
+    if (module.filter_id == filter_id) return &module;
+  }
+  return nullptr;
+}
 
 // obs-vst's "Open interface when active" setting. On, obs-vst opens the
 // plugin's window as the filter loads, in a QWidget, and with no

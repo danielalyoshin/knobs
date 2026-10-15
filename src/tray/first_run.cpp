@@ -48,15 +48,6 @@ std::string Count(size_t count, std::string_view thing) {
   return std::format("{} {}{}", count, thing, count == 1 ? "" : "s");
 }
 
-// "a", "a and b", "a, b and c".
-std::string ListNames(const std::vector<std::string>& names) {
-  std::string text;
-  for (size_t i = 0; i < names.size(); ++i) {
-    text += std::format("{}{}", i == 0 ? "" : i + 1 == names.size() ? " and " : ", ", names[i]);
-  }
-  return text;
-}
-
 // The device knobs sends the mic to: its own pick, else OBS's monitoring
 // device. The name is the connected device's, when it's connected.
 audio::AudioDevice SendsTo(const core::Snapshot& snapshot) {
@@ -335,7 +326,7 @@ std::string ObsUserNote(const core::Snapshot& snapshot) {
   if (snapshot.mics.size() > 1 && !snapshot.chain) {
     std::vector<std::string> names;
     for (const import::MicCandidate& mic : snapshot.mics) names.push_back(mic.name);
-    return std::format("Found {}: {}.", Count(names.size(), "mic"), ListNames(names));
+    return std::format("Found {}: {}.", Count(names.size(), "mic"), JoinWithAnd(names));
   }
   if (snapshot.chain) {
     if (snapshot.chain->filters.empty()) return std::format("{} has no filters yet.", snapshot.chain->mic);

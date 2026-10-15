@@ -38,6 +38,14 @@ std::string AsciiLower(std::string_view text) {
   return out;
 }
 
+std::string JoinWithAnd(const std::vector<std::string>& items) {
+  std::string text;
+  for (size_t i = 0; i < items.size(); ++i) {
+    text += std::format("{}{}", i == 0 ? "" : i + 1 == items.size() ? " and " : ", ", items[i]);
+  }
+  return text;
+}
+
 std::string DescribeWinError(unsigned long code) {
   wchar_t* buffer = nullptr;
   const DWORD length = FormatMessageW(

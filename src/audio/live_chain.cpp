@@ -3,6 +3,7 @@
 
 #include <format>
 
+#include "runtime/obs_data.h"
 #include "runtime/obs_layout.h"
 #include "util/json.h"
 
@@ -30,23 +31,20 @@ void SetMonitoring(const runtime::ObsApi& api, obs_source_t* source, bool on) {
 // loader loads (obs_load_source_type). The loader loads a filter's own
 // filters too. Nested objects are shared, so this changes `source` itself.
 void CloseVstWindows(const runtime::ObsApi& api, obs_data_t* source) {
-  obs_data_array_t* filters = api.obs_data_get_array(source, "filters");
-  const size_t count = filters ? api.obs_data_array_count(filters) : 0;
+  using runtime::kVstFilterId;
+  using runtime::Own;
+  using runtime::String;
+  const runtime::ArrayPtr filters = Own(api, api.obs_data_get_array(source, "filters"));
+  const size_t count = filters ? api.obs_data_array_count(filters.get()) : 0;
   for (size_t i = 0; i < count; ++i) {
-    obs_data_t* filter = api.obs_data_array_item(filters, i);
-    const std::string id = OrEmpty(api.obs_data_get_string(filter, "id"));
-    const std::string versioned_id = OrEmpty(api.obs_data_get_string(filter, "versioned_id"));
-    if (id == "vst_filter" || versioned_id.starts_with("vst_filter")) {
-      obs_data_t* settings = api.obs_data_get_obj(filter, "settings");
-      if (settings) {
-        api.obs_data_set_bool(settings, runtime::kVstOpenWhenActive, false);
-        api.obs_data_release(settings);
-      }
+    const runtime::DataPtr filter = Own(api, api.obs_data_array_item(filters.get(), i));
+    if (String(api, filter.get(), "id") == kVstFilterId ||
+        String(api, filter.get(), "versioned_id").starts_with(kVstFilterId)) {
+      const runtime::DataPtr settings = Own(api, api.obs_data_get_obj(filter.get(), "settings"));
+      if (settings) api.obs_data_set_bool(settings.get(), runtime::kVstOpenWhenActive, false);
     }
-    CloseVstWindows(api, filter);
-    api.obs_data_release(filter);
+    CloseVstWindows(api, filter.get());
   }
-  if (filters) api.obs_data_array_release(filters);
 }
 
 }  // namespace
