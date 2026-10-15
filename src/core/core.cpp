@@ -24,7 +24,7 @@ Result<std::unique_ptr<Core>> Core::Start(std::unique_ptr<Backend> backend, Obse
     if (!options.other_obs) options.other_obs = [watch] { return watch->Others(); };
   }
   std::unique_ptr<Core> core(new Core(observer, std::move(options)));
-  if (!core->wake_) return Error{"Couldn't create an event for the core's thread."};
+  if (!core->wake_) return Error{"Couldn’t create an event for the core’s thread."};
   std::promise<Status> started;
   std::future<Status> result = started.get_future();
   core->thread_ = std::thread(&Core::Run, core.get(), std::move(backend), &started);
@@ -122,7 +122,7 @@ void Core::Run(std::unique_ptr<Backend> backend, std::promise<Status>* started) 
   // shut down.
   const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   if (FAILED(com)) {
-    started->set_value(Error{std::format("Couldn't initialize COM for the core (0x{:08X}).", static_cast<uint32_t>(com))});
+    started->set_value(Error{std::format("Couldn’t initialize COM for the core (0x{:08X}).", static_cast<uint32_t>(com))});
     return;
   }
   started->set_value(Ok{});  // `started` is gone after this.

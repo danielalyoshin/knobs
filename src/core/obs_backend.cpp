@@ -28,7 +28,7 @@ Result<runtime::ObsInstall> FindInstalledObs() {
   const std::vector<fs::path> candidates = runtime::ObsInstallCandidates();
   if (candidates.empty()) {
     // It may be installed elsewhere, as through Steam: the page says so.
-    return Error{std::format("OBS Studio isn't where its installer puts it. {} needs {}.", kDisplayName,
+    return Error{std::format("OBS Studio isn’t where its installer puts it. {} needs {}.", kDisplayName,
                              runtime::DescribeSupportedObsVersions())};
   }
   return runtime::FindObsInstall(candidates);
@@ -153,11 +153,11 @@ bool ObsBackend::LibobsCanRetry() {
 }
 
 Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, std::string_view pick) {
-  if (!host_) return Error{"libobs isn't running."};
+  if (!host_) return Error{"libobs isn’t running."};
   auto collection = import::ReadActiveCollection(host_->api(), config);
   if (!collection) return Error{collection.error()};
   if ((*collection)->from_backup()) {
-    Log(std::format("The scene collection doesn't parse, so this is its backup: {}", ToUtf8((*collection)->file())));
+    Log(std::format("The scene collection doesn’t parse, so this is its backup: {}", ToUtf8((*collection)->file())));
   }
   importing_ = std::move(*collection);
   importing_->ProbePluginsOnWorkers();
@@ -219,7 +219,7 @@ Result<MicImport> ObsBackend::FinishImport(import::SceneCollection& collection, 
 audio::Endpoints ObsBackend::ListDevices() { return audio::ListEndpoints(); }
 
 Status ObsBackend::StartChain(const ChainPlan& plan) {
-  if (!host_) return Error{"libobs isn't running."};
+  if (!host_) return Error{"libobs isn’t running."};
   StopChain();
   const runtime::ObsApi& api = host_->api();
   // libobs makes no monitor for a device it can't open, and says nothing, so
@@ -263,7 +263,7 @@ void ObsBackend::WatchFile(const fs::path& file, std::vector<std::unique_ptr<Fil
     // Once a file: every chain start would say it again, as on a drive
     // without oplocks.
     unwatchable_.push_back(file);
-    Log(std::format("Couldn't watch for an update: {} {}", watch.error(), advice));
+    Log(std::format("Couldn’t watch for an update: {} {}", watch.error(), advice));
   }
 }
 

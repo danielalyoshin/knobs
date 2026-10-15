@@ -18,7 +18,6 @@
 #include "tray/message_dialog.h"
 #include "tray/open_obs.h"
 #include "tray/resource.h"
-#include "tray/rich_text.h"
 #include "tray/settings_file.h"
 #include "util/win_strings.h"
 #include "version.h"
@@ -69,7 +68,7 @@ HMENU CreateNativeMenu(const std::vector<MenuItem>& items) {
   UINT position = 0;
   for (const MenuItem& item : items) {
     MENUITEMINFOW info = {sizeof(info)};
-    std::wstring text = CurlQuotes(FromUtf8(item.text));
+    std::wstring text = FromUtf8(item.text);
     if (item.kind == MenuItem::Kind::kSeparator) {
       info.fMask = MIIM_FTYPE;
       info.fType = MFT_SEPARATOR;
@@ -93,7 +92,7 @@ HMENU CreateNativeMenu(const std::vector<MenuItem>& items) {
 // Copies `text` into a NOTIFYICONDATAW field, shortened with "…" to fit.
 template <size_t N>
 void CopyField(wchar_t (&field)[N], std::string_view text) {
-  std::wstring wide = CurlQuotes(FromUtf8(text));
+  std::wstring wide = FromUtf8(text);
   if (wide.size() >= N) {
     wide.resize(N - 2);
     wide += L'…';
@@ -173,13 +172,13 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   window_class.hInstance = opts.instance;
   window_class.lpszClassName = opts.window_class.c_str();
   if (!RegisterClassExW(&window_class) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-    return Error{std::format("Couldn't register the tray's window class: {}", DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t register the tray’s window class: {}", DescribeWinError(GetLastError()))};
   }
   // A top-level window, not a message-only one: only those hear
   // TaskbarCreated when Explorer restarts.
   if (!CreateWindowExW(0, opts.window_class.c_str(), std::wstring(kDisplayNameW).c_str(), WS_OVERLAPPED, 0, 0, 0, 0,
                        nullptr, nullptr, opts.instance, app.get())) {
-    return Error{std::format("Couldn't create the tray's window: {}", DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t create the tray’s window: {}", DescribeWinError(GetLastError()))};
   }
   app->taskbar_created_ = RegisterWindowMessageW(L"TaskbarCreated");
   if (app->taskbar_created_) ChangeWindowMessageFilterEx(app->window_, app->taskbar_created_, MSGFLT_ALLOW, nullptr);
@@ -192,7 +191,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
     data.hWnd = window;
     data.uID = kIconId;
     notify_icon(NIM_DELETE, data);
-    constexpr char reason[] = "Shutdown didn't finish before its deadline. Ending the process to release its files.";
+    constexpr char reason[] = "Shutdown didn’t finish before its deadline. Ending the process to release its files.";
     if (log) log(reason);
     else OutputDebugStringA(reason);
   });
@@ -210,7 +209,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   }
   app->KeepReopening();
   if (!settings_error.empty()) {
-    app->ShowError(std::format("Couldn't read {}'s settings, so it uses its defaults until you change them.\n\n{}",
+    app->ShowError(std::format("Couldn’t read {}’s settings, so it uses its defaults until you change them.\n\n{}",
                                kDisplayName, settings_error));
   }
   // Once Run pumps messages: the dialog's loop needs Run's to end with it.
@@ -571,7 +570,7 @@ void TrayApp::ModifyIcon(NOTIFYICONDATAW& data) {
   // change without one leaves the icon nameless.
   data.uFlags |= NIF_TIP | NIF_SHOWTIP;
   std::wstring tip =
-      std::format(L"{}\n{}", kDisplayNameW, quitting_ ? L"Closing…" : CurlQuotes(FromUtf8(StatusLine(snapshot_))));
+      std::format(L"{}\n{}", kDisplayNameW, quitting_ ? L"Closing…" : FromUtf8(StatusLine(snapshot_)));
   if (tip.size() >= std::size(data.szTip)) {
     tip.resize(std::size(data.szTip) - 2);
     tip += L'…';
@@ -919,7 +918,7 @@ void TrayApp::ResumeAfterRestart(bool on) {
   // The page says knobs opens after the restart. It's in the middle of
   // showing that, so the error waits for it.
   if (on) {
-    later_error_ = std::format("{} can't open by itself after the restart, so open it once Windows has restarted."
+    later_error_ = std::format("{} can’t open by itself after the restart, so open it once Windows has restarted."
                                "\n\n{}",
                                kDisplayName, set.error());
     PostMessageW(window_, kErrorMessage, 0, 0);
@@ -930,7 +929,7 @@ void TrayApp::Save() {
   if (options_.settings_file.empty()) return;
   if (const Status saved = SaveSettings(options_.settings_file, {settings_, first_run_, updater_.settings(), warned_});
       !saved) {
-    ShowError(std::format("Couldn't save the change, so it lasts only until {} quits.\n\n{}", kDisplayName,
+    ShowError(std::format("Couldn’t save the change, so it lasts only until {} quits.\n\n{}", kDisplayName,
                           saved.error()));
   }
 }
@@ -952,7 +951,7 @@ void TrayApp::OpenLogFolder() {
   std::filesystem::create_directories(options_.log_folder, ec);
   const auto opened = reinterpret_cast<INT_PTR>(
       ShellExecuteW(nullptr, L"open", options_.log_folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-  if (opened <= 32) ShowError(std::format("Couldn't open the log folder, {}.", ToUtf8(options_.log_folder)));
+  if (opened <= 32) ShowError(std::format("Couldn’t open the log folder, {}.", ToUtf8(options_.log_folder)));
 }
 
 bool TrayApp::Restart() {
@@ -989,10 +988,10 @@ void TrayApp::FinishRestart() {
                           snapshot_.restart == core::RestartNeed::kPluginUpdating;
     // What happened and what to do first, then the error as it came.
     const std::string advice = updating
-        ? std::format("{0} couldn't restart, so it let the installer continue. If the installer says a file is in "
+        ? std::format("{0} couldn’t restart, so it let the installer continue. If the installer says a file is in "
                       "use, quit {0}, then retry the installer.",
                       kDisplayName)
-        : std::format("{0} couldn't restart. Quit it, then start it again.", kDisplayName);
+        : std::format("{0} couldn’t restart. Quit it, then start it again.", kDisplayName);
     ShowError(std::format("{}\n\n{}", advice, started.error()));
     return;
   }
@@ -1006,7 +1005,7 @@ void TrayApp::ShowAbout() {
                      .instruction = std::format(L"{} {}", kDisplayNameW, L"" KNOBS_VERSION),
                      .content = std::format(L"Your OBS mic chain, in every app. {0} runs the filters from your own "
                                             L"OBS Studio install and sends your mic to a virtual cable.\n\n{0} is "
-                                            L"an independent project. It isn't affiliated with or endorsed by the "
+                                            L"an independent project. It isn’t affiliated with or endorsed by the "
                                             L"OBS Project.",
                                             kDisplayNameW),
                      .footer = L"Free software under the GNU General Public License, version 2 or later."});
@@ -1024,7 +1023,7 @@ void TrayApp::ShowError(std::string_view text) {
 void TrayApp::OpenUrl(const std::string& url) {
   const auto opened = reinterpret_cast<INT_PTR>(
       ShellExecuteW(nullptr, L"open", FromUtf8(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-  if (opened <= 32) ShowError(std::format("Couldn't open {} in your browser.", url));
+  if (opened <= 32) ShowError(std::format("Couldn’t open {} in your browser.", url));
 }
 
 void TrayApp::Log(std::string line) {
@@ -1223,7 +1222,7 @@ void TrayApp::StartUpdateJob(Updater::Job job, bool asked) {
       } else {
         std::filesystem::rename(part, file, ec);
         if (ec) {
-          work->error = std::format("Couldn't move the installer into {}: {}", ToUtf8(file.parent_path()),
+          work->error = std::format("Couldn’t move the installer into {}: {}", ToUtf8(file.parent_path()),
                                     ec.message());
         } else {
           work->downloaded = Updater::Downloaded::kDone;
@@ -1257,7 +1256,7 @@ void TrayApp::FinishUpdateJob() {
       if (work->latest) {
         Log(std::format("The latest release is {} {}.", kDisplayName, work->latest->ToString()));
       } else {
-        Log(std::format("Couldn't check for a new version: {}", work->error));
+        Log(std::format("Couldn’t check for a new version: {}", work->error));
       }
       notice = updater_.Checked(now, work->latest);
       break;
@@ -1272,10 +1271,10 @@ void TrayApp::FinishUpdateJob() {
         break;
       }
       if (work->downloaded == Updater::Downloaded::kDone) {
-        Log(std::format("Downloaded {}, signed as {}'s releases are.", ToUtf8(InstallerFile(*updater_.latest())),
+        Log(std::format("Downloaded {}, signed as {}’s releases are.", ToUtf8(InstallerFile(*updater_.latest())),
                         kDisplayName));
       } else {
-        Log(std::format("Couldn't download the new version: {}", work->error));
+        Log(std::format("Couldn’t download the new version: {}", work->error));
       }
       notice = updater_.DownloadDone(now, work->downloaded);
       break;
@@ -1285,7 +1284,7 @@ void TrayApp::FinishUpdateJob() {
       const bool asked = work->asked || install_asked_ == version;
       install_asked_.reset();
       if (!work->verified.ok()) {
-        Log(std::format("Didn't install {} {}: {}", kDisplayName, version.ToString(), work->verified.error));
+        Log(std::format("Didn’t install {} {}: {}", kDisplayName, version.ToString(), work->verified.error));
         // One Windows couldn't finish checking is kept, and checked again
         // later.
         const bool lost = work->verified.verdict == update::SignatureCheck::Verdict::kRejected;
@@ -1300,12 +1299,12 @@ void TrayApp::FinishUpdateJob() {
           const auto offer = updater_.offer();
           std::string next = "Try again later.";
           if (!offer || offer->version != version) {
-            next = std::format("{} {} isn't the latest version any more.", kDisplayName, version.ToString());
+            next = std::format("{} {} isn’t the latest version any more.", kDisplayName, version.ToString());
           } else if (!offer->install) {
             next = std::format("To download it yourself, choose Get {} {}… in the tray menu.", kDisplayName,
                                version.ToString());
           }
-          error = std::format("Couldn't update to {} {}. {}\n\n{}", kDisplayName, version.ToString(), next,
+          error = std::format("Couldn’t update to {} {}. {}\n\n{}", kDisplayName, version.ToString(), next,
                               work->verified.error);
           // The error says it.
           notice.reset();
@@ -1330,7 +1329,7 @@ void TrayApp::FinishUpdateJob() {
       // Paused, the new copy is too.
       auto started = options_.updates.install(file, Paused());
       if (!started) {
-        Log(std::format("Couldn't start the installer: {}", started.error()));
+        Log(std::format("Couldn’t start the installer: {}", started.error()));
         notice = UpdatedNotice(updater_.settings(), options_.updates.current);
         updater_.Reported();
         break;
@@ -1400,10 +1399,10 @@ void TrayApp::NotOffered(const update::Version& asked) {
     ShowError(std::format("{} {} is out now, so the menu offers that instead.", kDisplayName,
                           offer->version.ToString()));
   } else if (!offer) {
-    ShowError(std::format("{} {} isn't the latest version any more, so it isn't installed.", kDisplayName,
+    ShowError(std::format("{} {} isn’t the latest version any more, so it isn’t installed.", kDisplayName,
                           asked.ToString()));
   } else {
-    ShowError(std::format("{0} {1} isn't ready to install any more. To download it yourself, choose Get {0} {1}… in "
+    ShowError(std::format("{0} {1} isn’t ready to install any more. To download it yourself, choose Get {0} {1}… in "
                           "the tray menu.",
                           kDisplayName, asked.ToString()));
   }

@@ -111,7 +111,7 @@ TEST(WelcomeSaysWhatWasFound) {
   };
   core::Snapshot snapshot = Running();
   CHECK(notes(snapshot) ==
-        "I set up my mic in OBS\nFound Mic/Aux with 4 filters. | I'm new to OBS\nSet up your mic's filters in OBS, "
+        "I set up my mic in OBS\nFound Mic/Aux with 4 filters. | I’m new to OBS\nSet up your mic’s filters in OBS, "
         "step by step. | obs");
   snapshot.chain->filters.clear();
   snapshot.mics[0].filters.clear();
@@ -132,7 +132,7 @@ TEST(WelcomeSaysWhatWasFound) {
 
   core::Snapshot missing;
   missing.state = State::kObsMissing;
-  CHECK(Contains(notes(missing), "I'm new to OBS\nGet OBS Studio and set up your mic in it, step by step."));
+  CHECK(Contains(notes(missing), "I’m new to OBS\nGet OBS Studio and set up your mic in it, step by step."));
   CHECK(notes(missing).ends_with("| new"));
   core::Snapshot unsupported = missing;
   unsupported.state = State::kObsUnsupported;
@@ -147,14 +147,14 @@ TEST(WelcomeSaysWhatWasFound) {
   core::Snapshot settings = missing;
   settings.state = State::kNeedsSetup;
   settings.setup = SetupNeed::kObsSettings;
-  CHECK(Contains(notes(settings), "\nCan't read OBS's settings.") && notes(settings).ends_with("| new"));
+  CHECK(Contains(notes(settings), "\nCan’t read OBS’s settings.") && notes(settings).ends_with("| new"));
   settings.setup = SetupNeed::kNoMic;
   CHECK(Contains(notes(settings), "\nOBS has no mic yet.") && notes(settings).ends_with("| new"));
   CHECK(Contains(notes(core::Snapshot{}), "\nLooking for OBS…"));
 
   const PageView view = FirstRun({}).View(Running());
   CHECK(view.stage == Stage::kFilters);
-  CHECK(view.footer == std::format("{} is an independent project. It isn't affiliated with or endorsed by the OBS Project.", kDisplayName));
+  CHECK(view.footer == std::format("{} is an independent project. It isn’t affiliated with or endorsed by the OBS Project.", kDisplayName));
 }
 
 // --- The first door -----------------------------------------------------------------
@@ -170,7 +170,7 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(cable.content == std::format("Choose the virtual cable {} sends your mic to. Your other apps then use it as "
                                      "their mic.",
                                      kDisplayName));
-  CHECK(Texts(cable.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch\nOBS's Monitoring Device"}));
+  CHECK(Texts(cable.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch\nOBS’s Monitoring Device"}));
   CHECK(Texts(cable.more_choices) == (std::vector<std::string>{"Speakers"}));
   CHECK(cable.more_label == "Other playback devices" && cable.footer.empty());
   CHECK(cable.default_choice == kChoiceFirst + 1 && cable.default_button == kButtonNext);
@@ -202,7 +202,7 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   // Also on the way from a page a notification opened.
   const FirstRunProgress finished = {.done = true, .door = Door::kObsUser, .reached = Page::kDone};
   core::Snapshot warned = Running();
-  warned.notes = {{true, "Filter \"ReaComp\" is a VST plugin."}};
+  warned.notes = {{true, "Filter “ReaComp” is a VST plugin."}};
   for (const bool on : {false, true}) {
     FirstRun again(finished, std::nullopt, {.start_with_windows = on});
     PageView last = again.View(Running());
@@ -225,33 +225,33 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(!Contains(first_run.View(paused).content, "It pauses while OBS is open"));
   core::Snapshot missing = Running();
   missing.state = State::kMicMissing;
-  missing.detail = "The recording device for \"Mic/Aux\" isn't connected.";
+  missing.detail = "The recording device for “Mic/Aux” isn’t connected.";
   missing.inputs.clear();
   CHECK(first_run.View(missing).content.ends_with(
-      std::format("isn't connected. {} starts when the mic is back.", kDisplayName)));
+      std::format("isn’t connected. {} starts when the mic is back.", kDisplayName)));
   // Connected but stalled: the detail already says knobs tries again.
   core::Snapshot stalled = Running();
   stalled.state = State::kMicMissing;
-  stalled.detail = std::format("\"Mic/Aux\" stopped sending audio. {} tries again in 5 s.", kDisplayName);
+  stalled.detail = std::format("“Mic/Aux” stopped sending audio. {} tries again in 5 s.", kDisplayName);
   CHECK(first_run.View(stalled).content.ends_with("\n\n" + stalled.detail));
   core::Snapshot updating = Running();
   updating.state = State::kPausedForUpdate;
   CHECK(Contains(first_run.View(updating).content, "paused while a plugin is being updated"));
   updating.nvidia_update = true;
-  CHECK(Contains(first_run.View(updating).content, "paused while NVIDIA's Audio Effects SDK is being updated"));
+  CHECK(Contains(first_run.View(updating).content, "paused while NVIDIA’s Audio Effects SDK is being updated"));
   updating.chain.reset();  // The new NVIDIA copy has not imported yet.
   updating.state = State::kStarting;
   updating.files_waiting = true;
   updating.detail = "Waiting for the updated files to stop changing.";
   CHECK(first_run.View(updating).page == Page::kLooking);
-  CHECK(first_run.View(updating).instruction == "Waiting for NVIDIA's SDK to update…");
+  CHECK(first_run.View(updating).instruction == "Waiting for NVIDIA’s SDK to update…");
   updating.nvidia_update = false;
   CHECK(first_run.View(updating).instruction == "Waiting for a plugin to update…");
   CHECK(first_run.View(updating).content == "Waiting for the updated files to stop changing.");
   // Any other detail is the heading, and said once.
   updating.files_waiting = false;
-  updating.detail = "Checking your mic's VST plugins…";
-  CHECK(first_run.View(updating).instruction == "Checking your mic's VST plugins…" &&
+  updating.detail = "Checking your mic’s VST plugins…";
+  CHECK(first_run.View(updating).instruction == "Checking your mic’s VST plugins…" &&
         first_run.View(updating).content.empty());
 }
 
@@ -292,7 +292,7 @@ TEST(SeveralMicsAskWhichOne) {
   // A pick that's gone from OBS.
   snapshot = PickMic();
   snapshot.settings.mic = "Old Mic";
-  CHECK(Contains(ObsUser(snapshot).View(snapshot).content, "The one chosen before, \"Old Mic\", is no longer"));
+  CHECK(Contains(ObsUser(snapshot).View(snapshot).content, "The one chosen before, “Old Mic”, is no longer"));
   // There's no default device.
   snapshot.default_input.clear();
   CHECK(ObsUser(snapshot).View(snapshot).choices[0].text.starts_with(
@@ -333,7 +333,7 @@ TEST(NoFiltersOffersTheSteps) {
   first_run = FirstRun({.door = Door::kObsUser, .reached = Page::kDone});
   view = first_run.View(none);
   CHECK(view.page == Page::kFilters && view.instruction == "OBS has no mic yet");
-  CHECK(Contains(view.content, "open OBS's <b>Settings › Audio</b>, set <b>Mic/Auxiliary Audio</b> to your mic"));
+  CHECK(Contains(view.content, "open OBS’s <b>Settings › Audio</b>, set <b>Mic/Auxiliary Audio</b> to your mic"));
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Open OBS", "Show the steps"}));
 }
 
@@ -346,7 +346,7 @@ TEST(CableWhenOBSMonitorsToTheDefaultDevice) {
   FirstRun first_run = ObsUser(snapshot);
   const PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kCable && !view.waiting);
-  CHECK(Contains(view.content, "OBS's <b>Monitoring Device</b> is <b>Default</b>, which is usually your speakers, so"));
+  CHECK(Contains(view.content, "OBS’s <b>Monitoring Device</b> is <b>Default</b>, which is usually your speakers, so"));
   CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch"}));
   CHECK(view.default_choice == kChoiceFirst);
   const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
@@ -371,7 +371,7 @@ TEST(CableAppearsAndTheUserChoosesIt) {
   CHECK(view.page == Page::kCable && view.waiting && view.instruction == "Install a virtual cable");
   // The guide to installing VB-Cable, with a walkthrough of it. Its devices
   // don't wait for a restart: when they do, the page says so.
-  CHECK(view.content == "There's no virtual cable on this PC yet. VB-CABLE, from VB-Audio, is one. To install it:");
+  CHECK(view.content == "There’s no virtual cable on this PC yet. VB-CABLE, from VB-Audio, is one. To install it:");
   CHECK(view.steps.size() == 4);
   CHECK(view.steps[0] == "From <a href=\"https://vb-audio.com/Cable/\"><code>vb-audio.com/Cable</code></a>, download "
                          "its driver pack.");
@@ -442,7 +442,7 @@ TEST(CableThatsOffOrWaitsForARestart) {
   FirstRun first_run = ObsUser(off);
   PageView view = first_run.View(off);
   CHECK(view.page == Page::kCable && view.waiting && view.instruction == "Turn on your virtual cable");
-  CHECK(view.content == "CABLE Input is installed, but it's turned off in Windows' Sound settings.");
+  CHECK(view.content == "CABLE Input is installed, but it’s turned off in Windows’ Sound settings.");
   CHECK((view.steps == std::vector<std::string>{"Click <b>Open Sound settings</b>, below.",
                                                  "Under <b>Output devices</b>, choose <b>CABLE Input</b>.",
                                                  "Next to <b>Audio</b>, click <b>Allow</b>."}));
@@ -485,7 +485,7 @@ TEST(CableThatsOffOrWaitsForARestart) {
   keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
   keep.state = State::kRunning;
   view = ObsUser(keep).View(keep);
-  CHECK(Texts(view.more_choices) == (std::vector<std::string>{"Speakers", "Headphones\nOBS's Monitoring Device"}));
+  CHECK(Texts(view.more_choices) == (std::vector<std::string>{"Speakers", "Headphones\nOBS’s Monitoring Device"}));
   CHECK(view.default_choice == kChoiceFirst + 1 && FindButton(view, kButtonNext)->enabled);
 }
 
@@ -538,9 +538,9 @@ TEST(CableThatIsntACable) {
   FirstRun first_run = ObsUser(snapshot);
   const PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kCable);
-  CHECK(Contains(view.content, "OBS's <b>Monitoring Device</b> is Headphones, which isn't a virtual cable."));
+  CHECK(Contains(view.content, "OBS’s <b>Monitoring Device</b> is Headphones, which isn’t a virtual cable."));
   CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input", "CABLE In 16ch"}));
-  CHECK(Texts(view.more_choices) == (std::vector<std::string>{"Speakers", "Headphones\nOBS's Monitoring Device"}));
+  CHECK(Texts(view.more_choices) == (std::vector<std::string>{"Speakers", "Headphones\nOBS’s Monitoring Device"}));
   CHECK(view.default_choice == kChoiceFirst + 3);
   // Keeping it is the user's pick too: OBS monitoring elsewhere later
   // doesn't move it.
@@ -563,7 +563,7 @@ TEST(CableMissingAlwaysAsks) {
   snapshot.outputs = {{kSpeakers, kSpeakersId}, {kCableInput, kCableInputId}};
   FirstRun first_run({.door = Door::kObsUser, .reached = Page::kDone});
   const PageView view = first_run.View(snapshot);
-  CHECK(view.page == Page::kCable && view.content.starts_with("CABLE In 16ch isn't connected. Choose another cable."));
+  CHECK(view.page == Page::kCable && view.content.starts_with("CABLE In 16ch isn’t connected. Choose another cable."));
   CHECK(Texts(view.choices) == (std::vector<std::string>{"CABLE Input"}));
   const FirstRunAction picked = first_run.Click(kButtonNext, kChoiceFirst, {}, snapshot);
   CHECK(picked.kind == Kind::kApply && picked.settings.cable == kCableInputId);
@@ -572,7 +572,7 @@ TEST(CableMissingAlwaysAsks) {
   snapshot.outputs.push_back({kCable16, kCable16Id});
   first_run = FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, Page::kCable);
   const PageView again = first_run.View(snapshot);
-  CHECK(again.choices.back().text == "CABLE In 16ch\nOBS's Monitoring Device");
+  CHECK(again.choices.back().text == "CABLE In 16ch\nOBS’s Monitoring Device");
   const FirstRunAction obs = first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
   CHECK(obs.kind == Kind::kApply && obs.settings.cable == kCable16Id && obs.settings.cable_name == kCable16);
 }
@@ -616,7 +616,7 @@ TEST(SoundIntoACableIsNoted) {
   // and the cable's apps hear the PC with the mic.
   core::Snapshot snapshot = Running();
   snapshot.default_output = kCableInputId;
-  const std::string note = "Windows plays your PC's sound into CABLE Input, so you can't hear it, and your other apps "
+  const std::string note = "Windows plays your PC’s sound into CABLE Input, so you can’t hear it, and your other apps "
                            "hear it with your mic. In <b>Sound settings</b>, set <b>Output</b> to your speakers or "
                            "headphones.";
   for (const Page page : {Page::kCable, Page::kDone}) {
@@ -630,15 +630,15 @@ TEST(SoundIntoACableIsNoted) {
 
 TEST(WarningsShowWhatChangesExpectations) {
   core::Snapshot snapshot = Running();
-  snapshot.notes = {{true, "Filter \"VST\" is a VST plugin."},
-                    {false, "Filter \"Gate\" is off in OBS, and stays off."},
+  snapshot.notes = {{true, "Filter “VST” is a VST plugin."},
+                    {false, "Filter “Gate” is off in OBS, and stays off."},
                     {false, "The mic is on push-to-talk in OBS.", true}};
   // After the cable.
   FirstRun first_run = ObsUser(snapshot);
   first_run.Click(kButtonNext, kChoiceFirst + 1, {}, snapshot);
   PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kWarnings && view.instruction == "Before you start");
-  CHECK((view.notes == std::vector<PageNote>{{true, "Filter \"VST\" is a VST plugin."},
+  CHECK((view.notes == std::vector<PageNote>{{true, "Filter “VST” is a VST plugin."},
                                              {false, "The mic is on push-to-talk in OBS."}}));
   CHECK(view.stages[static_cast<size_t>(Stage::kFilters)].state == StageState::kWarning);
   first_run.Click(kButtonNext, 0, {}, snapshot);
@@ -647,10 +647,10 @@ TEST(WarningsShowWhatChangesExpectations) {
   // File names are set as the pages set them.
   core::Snapshot named = snapshot;
   named.notes = {{.warning = true,
-                  .text = "Filter \"VST <3\" is a VST plugin (Pro-Q 3.dll).",
+                  .text = "Filter “VST <3” is a VST plugin (Pro-Q 3.dll).",
                   .file = "Pro-Q 3.dll"}};
   const FirstRun past_cable({.door = Door::kObsUser, .reached = Page::kWarnings});
-  CHECK(past_cable.View(named).notes[0].text == "Filter \"VST &lt;3\" is a VST plugin (<code>Pro-Q 3.dll</code>).");
+  CHECK(past_cable.View(named).notes[0].text == "Filter “VST &lt;3” is a VST plugin (<code>Pro-Q 3.dll</code>).");
 
   snapshot.notes.erase(snapshot.notes.begin());
   view = past_cable.View(snapshot);
@@ -666,10 +666,10 @@ TEST(ProblemsWithObsComeFirst) {
         std::format("{} copies the parts of OBS it needs. The first time, this can take a few seconds.", kDisplayName));
 
   snapshot.state = State::kObsMissing;
-  snapshot.detail = "OBS Studio isn't installed.";
+  snapshot.detail = "OBS Studio isn’t installed.";
   FirstRun first_run = ObsUser(snapshot);
   PageView view = first_run.View(snapshot);
-  CHECK(view.page == Page::kFindObs && view.content.starts_with("OBS Studio isn't installed.\n\nIf OBS is installed"));
+  CHECK(view.page == Page::kFindObs && view.content.starts_with("OBS Studio isn’t installed.\n\nIf OBS is installed"));
   CHECK(Contains(view.content, "<a href=\"https://obsproject.com/download\">get OBS Studio</a>"));
   CHECK(view.default_button == kButtonChooseObs);
   CHECK(first_run.Click(kButtonChooseObs, 0, {}, snapshot).kind == Kind::kChooseObs);
@@ -703,11 +703,11 @@ TEST(ProblemsWithObsComeFirst) {
   CHECK(view.page == Page::kProblem && view.instruction == std::format("{} needs to restart", kDisplayName));
   CHECK(first_run.Click(kButtonRestart, 0, {}, snapshot).kind == Kind::kRestart);
   snapshot.state = State::kFailed;
-  snapshot.detail = "\"CABLE In 16ch\" can't be opened (0x88890004).";
+  snapshot.detail = "“CABLE In 16ch” can’t be opened (0x88890004).";
   view = ObsUser(snapshot).View(snapshot);
   CHECK(view.instruction == "Stopped after an error");
   // The error as it came, then what to do, in a paragraph of its own.
-  CHECK(view.content == "\"CABLE In 16ch\" can't be opened (0x88890004).\n\nClick <b>Try again</b>. If it stops "
+  CHECK(view.content == "“CABLE In 16ch” can’t be opened (0x88890004).\n\nClick <b>Try again</b>. If it stops "
                         "again, <b>Open log folder</b> in the tray menu has the details.");
   // Even a page that was answered waits for them.
   CHECK(FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, Page::kCable).Page(snapshot) == Page::kProblem);
@@ -718,11 +718,11 @@ TEST(APickedFolderThatStoppedWorkingIsTheUsersToChange) {
   // as with no pick. Nothing is dropped until the user says.
   core::Snapshot snapshot;
   snapshot.state = State::kObsMissing;
-  snapshot.detail = "D:\\OBS isn't a complete OBS Studio install: bin\\64bit\\obs.dll is missing.";
+  snapshot.detail = "D:\\OBS isn’t a complete OBS Studio install: bin\\64bit\\obs.dll is missing.";
   snapshot.settings.obs_dir = "D:\\OBS";
   FirstRun first_run = ObsUser(snapshot);
   PageView view = first_run.View(snapshot);
-  CHECK(view.page == Page::kFindObs && Contains(view.content, "OBS isn't in the folder you chose."));
+  CHECK(view.page == Page::kFindObs && Contains(view.content, "OBS isn’t in the folder you chose."));
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Look for OBS", "Choose folder…"}));
   CHECK(view.default_button == kButtonChooseObs);
   FirstRunAction action = first_run.Click(kButtonLookForObs, 0, {}, snapshot);
@@ -741,9 +741,9 @@ TEST(APickedFolderThatStoppedWorkingIsTheUsersToChange) {
   snapshot.obs_writes_config = false;
   first_run = ObsUser(snapshot);
   view = first_run.View(snapshot);
-  CHECK(view.page == Page::kObsSettings && Contains(view.content, "aren't in the folder you chose."));
+  CHECK(view.page == Page::kObsSettings && Contains(view.content, "aren’t in the folder you chose."));
   CHECK(Texts(view.buttons) ==
-        (std::vector<std::string>{"Back", "Try again", "Use OBS's own folder", "Choose folder…"}));
+        (std::vector<std::string>{"Back", "Try again", "Use OBS’s own folder", "Choose folder…"}));
   CHECK(view.default_button == kButtonChooseObsSettings && view.footer.empty());
   // The same folder again, such as on a drive plugged back in.
   CHECK(first_run.Click(kButtonTryAgain, 0, {}, snapshot).kind == Kind::kReimport);
@@ -767,18 +767,18 @@ TEST(AnUnsupportedObsOffersAnotherFolder) {
   core::Snapshot snapshot;
   snapshot.state = State::kObsUnsupported;
   snapshot.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
-  snapshot.detail = "OBS 34.0.0 isn't supported.";
+  snapshot.detail = "OBS 34.0.0 isn’t supported.";
   FirstRun first_run = ObsUser(snapshot);
   PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kObsUnsupported);
   CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Choose folder…"}));
   CHECK(view.default_button == kButtonTryAgain);
   CHECK(Contains(view.content, "If a supported OBS is installed somewhere else, choose that folder."));
-  CHECK(view.instruction == std::format("{} doesn't support OBS 34.0.0 yet", kDisplayName));
+  CHECK(view.instruction == std::format("{} doesn’t support OBS 34.0.0 yet", kDisplayName));
   // The heading says which OBS, so the page leads with what knobs supports.
   CHECK(view.content.starts_with(std::format("{} supports OBS Studio 32.2 to 33.x. ", kDisplayName)));
   CHECK(view.content.ends_with(std::format("Or wait for a {0} update that supports OBS 34.0.0, and get it from <a "
-                                           "href=\"https://github.com/danielalyoshin/knobs/releases/latest\">{0}'s "
+                                           "href=\"https://github.com/danielalyoshin/knobs/releases/latest\">{0}’s "
                                            "latest release</a>.",
                                            kDisplayName)));
   CHECK(first_run.Click(kButtonChooseObs, 0, {}, snapshot).kind == Kind::kChooseObs);
@@ -788,7 +788,7 @@ TEST(AnUnsupportedObsOffersAnotherFolder) {
   // ways back. No knobs update supports an older OBS.
   snapshot.settings.obs_dir = "D:\\OBS 31";
   snapshot.obs = {"D:\\OBS 31", {31, 1, 4}};
-  snapshot.detail = "OBS 31.1.4 isn't supported.";
+  snapshot.detail = "OBS 31.1.4 isn’t supported.";
   first_run = ObsUser(snapshot);
   view = first_run.View(snapshot);
   CHECK(view.page == Page::kObsUnsupported && Contains(view.content, "the folder you chose, <code>D:\\OBS 31</code>."));
@@ -814,7 +814,7 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   CHECK((view.steps == std::vector<std::string>{
              "Open OBS.", "In the <b>Audio Mixer</b>, click <b>Mic/Aux</b>, then <b>Filters</b>.",
              "Under <b>Audio Filters</b>, click <b>+</b> to add filters.",
-             "Click each filter and adjust it by ear, starting from OBS's defaults.",
+             "Click each filter and adjust it by ear, starting from OBS’s defaults.",
              std::format("Close OBS. {} then reads your filters and carries on here.", kDisplayName)}));
   CHECK(view.walkthrough && view.walkthrough->name == "obs-filters");
   CHECK(Contains(view.footer, std::format("<a href=\"{}\">", kSetupGuideUrl)));
@@ -863,8 +863,8 @@ TEST(SecondDoorWithoutOBSOrAMic) {
   unsupported.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
   view = FirstRun({}, Page::kSteps).View(unsupported);
   // Why first, then what to do.
-  CHECK(view.steps[0].starts_with(std::format("{} doesn't support OBS 34.0.0 yet. Install ", kDisplayName)));
-  CHECK(view.steps[0].ends_with("OBS's releases on GitHub</a>, and open it."));
+  CHECK(view.steps[0].starts_with(std::format("{} doesn’t support OBS 34.0.0 yet. Install ", kDisplayName)));
+  CHECK(view.steps[0].ends_with("OBS’s releases on GitHub</a>, and open it."));
   unsupported.obs.version = {31, 1, 4};
   view = FirstRun({}, Page::kSteps).View(unsupported);
   CHECK(view.steps[0].starts_with(std::format("OBS 31.1.4 is too old for {}. Install ", kDisplayName)));
@@ -895,17 +895,17 @@ TEST(TheBandFollowsTheMicsPath) {
   CHECK(Band(looking) == "[?: Not read yet] [?: Looking for OBS] [?: Not read yet] [?: Use the cable as their mic]");
   core::Snapshot missing;
   missing.state = State::kObsMissing;
-  CHECK(Contains(Band(missing), "[blocked: Can't find OBS]"));
+  CHECK(Contains(Band(missing), "[blocked: Can’t find OBS]"));
   missing.state = State::kObsUnsupported;
   missing.obs = {"C:\\Program Files\\obs-studio", {34, 0, 0}};
-  CHECK(Contains(Band(missing), "[blocked: Can't run OBS 34.0.0]"));
+  CHECK(Contains(Band(missing), "[blocked: Can’t run OBS 34.0.0]"));
 
   core::Snapshot snapshot = Running();
   snapshot.chain->filters.clear();
   snapshot.mics[0].filters.clear();
   CHECK(Contains(Band(snapshot), "[?: No filters yet]"));
   snapshot = Running();
-  snapshot.notes = {{true, "Filter \"VST\" is a VST plugin."}};
+  snapshot.notes = {{true, "Filter “VST” is a VST plugin."}};
   CHECK(Contains(Band(snapshot), "[warning: 4 filters]"));
   snapshot = Running();
   snapshot.state = State::kMicMissing;
@@ -935,6 +935,57 @@ TEST(TheBandFollowsTheMicsPath) {
   CHECK(!ObsUser(looking).View(looking).stage);
 }
 
+// A view of each page, in the states that change what it says.
+std::vector<PageView> EveryPage() {
+  std::vector<PageView> views;
+  for (const Page page : {Page::kWelcome, Page::kSteps, Page::kLooking, Page::kMic, Page::kCable, Page::kWarnings,
+                          Page::kDone}) {
+    views.push_back(FirstRun({}, page).View(PickMic()));
+  }
+  core::Snapshot missing;
+  missing.state = State::kObsMissing;
+  missing.settings.obs_dir = "D:\\OBS";
+  core::Snapshot settings;
+  settings.state = State::kNeedsSetup;
+  settings.setup = SetupNeed::kObsSettings;
+  settings.obs = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
+  settings.settings.obs_config = "E:\\Portable\\config";
+  core::Snapshot newer = Running();
+  newer.state = State::kObsUnsupported;
+  newer.obs.version = {34, 0, 0};
+  core::Snapshot older = newer;
+  older.obs.version = {31, 1, 4};
+  core::Snapshot no_mic = Running();
+  no_mic.state = State::kNeedsSetup;
+  no_mic.setup = SetupNeed::kNoMic;
+  no_mic.chain.reset();
+  no_mic.mics.clear();
+  no_mic.picked_mic.reset();
+  core::Snapshot no_filters = Running();
+  no_filters.chain->filters.clear();
+  no_filters.mics[0].filters.clear();
+  core::Snapshot keep = Running();
+  keep.obs_cable = {kHeadphones, kHeadphonesId};
+  keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
+  core::Snapshot restart = Running();
+  restart.state = State::kRestartNeeded;
+  core::Snapshot failed = Running();
+  failed.state = State::kFailed;
+  failed.detail = "The chain stopped.";
+  core::Snapshot updating = Running();
+  updating.state = State::kPausedForUpdate;
+  updating.nvidia_update = true;
+  for (const core::Snapshot& snapshot :
+       {missing, settings, newer, older, no_mic, no_filters, keep, restart, failed, updating}) {
+    views.push_back(ObsUser(snapshot).View(snapshot));
+  }
+  // The pages that note the PC's sound going into the cable.
+  core::Snapshot sound = Running();
+  sound.default_output = kCableInputId;
+  for (const Page page : {Page::kCable, Page::kDone}) views.push_back(FirstRun({}, page, {}, true).View(sound));
+  return views;
+}
+
 TEST(EveryButtonHasItsOwnAccessKey) {
   // Each button, door and check box on a page has an access key, and no two
   // share one.
@@ -952,37 +1003,12 @@ TEST(EveryButtonHasItsOwnAccessKey) {
     }
     return true;
   };
-  core::Snapshot missing;
-  missing.state = State::kObsMissing;
-  missing.settings.obs_dir = "D:\\OBS";
-  core::Snapshot settings;
-  settings.state = State::kNeedsSetup;
-  settings.setup = SetupNeed::kObsSettings;
-  settings.obs = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
-  settings.settings.obs_config = "E:\\Portable\\config";
-  core::Snapshot no_filters = Running();
-  no_filters.chain->filters.clear();
-  no_filters.mics[0].filters.clear();
-  core::Snapshot keep = Running();
-  keep.obs_cable = {kHeadphones, kHeadphonesId};
-  keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
-  core::Snapshot restart = Running();
-  restart.state = State::kRestartNeeded;
-  for (const Page page : {Page::kWelcome, Page::kSteps, Page::kLooking, Page::kMic, Page::kCable, Page::kWarnings,
-                          Page::kDone}) {
-    CHECK(keys_ok(FirstRun({}, page).View(PickMic())));
-  }
-  for (const core::Snapshot& snapshot : {missing, settings, no_filters, keep, restart}) {
-    CHECK(keys_ok(ObsUser(snapshot).View(snapshot)));
-  }
-  // The page that notes the PC's sound going into the cable.
-  core::Snapshot sound = Running();
-  sound.default_output = kCableInputId;
-  for (const Page page : {Page::kCable, Page::kDone}) CHECK(keys_ok(FirstRun({}, page, {}, true).View(sound)));
+  for (const PageView& view : EveryPage()) CHECK(keys_ok(view));
   // A choice's name keeps its "&"s: a choice has no access key.
+  core::Snapshot keep = Running();
   keep.obs_cable = {"Speakers & Headphones", kHeadphonesId};
   keep.outputs = {{kSpeakers, kSpeakersId}, keep.obs_cable};
-  CHECK(ObsUser(keep).View(keep).more_choices.back().text == "Speakers & Headphones\nOBS's Monitoring Device");
+  CHECK(ObsUser(keep).View(keep).more_choices.back().text == "Speakers & Headphones\nOBS’s Monitoring Device");
 }
 
 TEST(RichTextReadsThePagesMarkup) {
@@ -1006,20 +1032,26 @@ TEST(RichTextReadsThePagesMarkup) {
   CHECK(rich.spans.empty() && rich.text == L"Found <a href=\"ms-settings:\">Mic</a> & <b>.");
 }
 
-TEST(CurlsQuotesOneForOne) {
-  // The menu, notifications, dialogs and the setup window all show these.
-  const std::wstring straight = L"\"Mic\" isn't in OBS's list (\"Duck\").\n\"Two\"";
-  const std::wstring curled = CurlQuotes(straight);
-  CHECK(curled == L"\x201CMic\x201D isn\x2019t in OBS\x2019s list (\x201C" L"Duck\x201D).\n\x201CTwo\x201D");
-  CHECK(curled.size() == straight.size());
-}
-TEST(LeavesQuotesInPathsStraight) {
-  // A path's quotes are data: curled, it would name a folder that isn't there.
-  CHECK(CurlQuotes(L"Couldn't open C:\\Users\\O'Brien\\AppData.") == L"Couldn\x2019t open C:\\Users\\O'Brien\\AppData.");
-  CHECK(CurlQuotes(L"isn't at C:/VST/Bob's.dll any more") == L"isn\x2019t at C:/VST/Bob's.dll any more");
-  CHECK(CurlQuotes(L"See \"D:\\Bob's\" or https://x.org/a'b") == L"See \x201C" L"D:\\Bob's\x201D or https://x.org/a'b");
-  // A word with one slash is prose, such as OBS's Mic/Aux.
-  CHECK(CurlQuotes(L"\"Mic/Aux\" and Mic/Aux's filters") == L"\x201CMic/Aux\x201D and Mic/Aux\x2019s filters");
+TEST(PagesUseTypographicQuotes) {
+  // Everything a page says, without its markup, whose links quote their
+  // addresses.
+  for (const PageView& view : EveryPage()) {
+    std::vector<std::string> texts = {view.instruction, PlainText(view.content), PlainText(view.footer),
+                                      view.more_label, view.status};
+    for (const std::string& step : view.steps) texts.push_back(PlainText(step));
+    for (const PageNote& note : view.notes) texts.push_back(PlainText(note.text));
+    for (const std::vector<PageButton>* buttons : {&view.buttons, &view.choices, &view.more_choices}) {
+      for (const PageButton& button : *buttons) texts.push_back(button.text);
+    }
+    for (const PageCheck& check : view.checks) texts.push_back(check.text);
+    for (const StageView& stage : view.stages) texts.push_back(stage.value);
+    if (view.walkthrough) texts.push_back(view.walkthrough->alt);
+    for (const std::string& text : texts) CHECK(test::NoStraightQuotes(text));
+  }
+  // A name from OBS keeps its own quotes: it's shown as it is.
+  core::Snapshot named = PickMic();
+  named.mics[0].name = "Bob's \"Desk\" Mic";
+  CHECK(FirstRun({}, Page::kMic).View(named).choices[0].text.starts_with("Bob's \"Desk\" Mic\n"));
 }
 
 // --- Resuming, Back and pages asked for -----------------------------------------

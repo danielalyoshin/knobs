@@ -61,7 +61,7 @@ std::string MicWithGainSourceJson(std::string_view device_id, double gain_db) {
 Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_view json,
                                      const LoadOptions& options) {
   obs_data_t* data = api.obs_data_create_from_json(std::string(json).c_str());
-  if (!data) return Error{"The source isn't valid JSON."};
+  if (!data) return Error{"The source isn’t valid JSON."};
   if (!options.type_id.empty()) {
     const std::string id(options.type_id);
     api.obs_data_set_string(data, "id", id.c_str());
@@ -80,7 +80,7 @@ Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_vie
   CloseVstWindows(api, data);
   obs_source_t* source = api.obs_load_private_source(data);
   api.obs_data_release(data);
-  if (!source) return Error{"libobs couldn't load the source."};
+  if (!source) return Error{"libobs couldn’t load the source."};
   // The loader still turns monitoring on for a type that monitors by default
   // if the source was saved before libobs 23.2.2 (obs_load_source_type).
   // Neither win-wasapi's inputs nor the push source do, but turn it off
@@ -91,7 +91,7 @@ Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_vie
   if (!(api.obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO)) {
     const std::string id = OrEmpty(api.obs_source_get_id(source));
     api.obs_source_release(source);
-    return Error{std::format("libobs has no audio source type \"{}\".", id)};
+    return Error{std::format("libobs has no audio source type “{}”.", id)};
   }
   if (options.load_callbacks) api.obs_source_load2(source);
   return source;

@@ -138,7 +138,7 @@ Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {
   const auto profile = settings.Get("Basic", "Profile");
   const auto collection = settings.Get("Basic", "SceneCollection");
   if (!profile || profile->empty() || !collection || collection->empty()) {
-    return Error{std::format("{} doesn't name an active profile and scene collection.{}", ToUtf8(config.settings_file),
+    return Error{std::format("{} doesn’t name an active profile and scene collection.{}", ToUtf8(config.settings_file),
                              open_obs)};
   }
   config.profile = *profile;
@@ -162,7 +162,7 @@ Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {
     config.audio = std::move(*audio);
     return config;
   }
-  return Error{std::format("OBS's active profile \"{}\" isn't in {}.", config.profile, ToUtf8(profiles_dir))};
+  return Error{std::format("OBS’s active profile “{}” isn’t in {}.", config.profile, ToUtf8(profiles_dir))};
 }
 
 Result<fs::path> FindSceneCollectionFile(const ActiveObsConfig& config, const CollectionNameReader& read_name) {
@@ -174,7 +174,7 @@ Result<fs::path> FindSceneCollectionFile(const ActiveObsConfig& config, const Co
     if (name.empty()) name = ToUtf8(it->path().stem());
     if (name == config.collection) return it->path();
   }
-  return Error{std::format("OBS's active scene collection \"{}\" isn't in {}.", config.collection,
+  return Error{std::format("OBS’s active scene collection “{}” isn’t in {}.", config.collection,
                            ToUtf8(config.scenes_dir))};
 }
 

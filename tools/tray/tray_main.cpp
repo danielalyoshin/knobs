@@ -405,7 +405,7 @@ void Press(wchar_t key) {
     case L'w': {
       const bool running = !session.other_obs;
       session.other_obs = running;
-      Print(running ? "OBS opens in Alex's account\n" : "OBS closes in Alex's account\n");
+      Print(running ? "OBS opens in Alex’s account\n" : "OBS closes in Alex’s account\n");
       break;
     }
     case L'c': {
@@ -421,7 +421,7 @@ void Press(wchar_t key) {
     }
     case L'f':
       session.world->Change(AddFilters);
-      Print("OBS's mics without filters get some (seen at the next import)\n");
+      Print("OBS’s mics without filters get some (seen at the next import)\n");
       break;
     case L'm': {
       bool plugged = false;
@@ -441,7 +441,7 @@ void Press(wchar_t key) {
     }
     case L'e':
       session.world->Change(EditChain);
-      Print("the first mic's chain changes in OBS (seen at the next import)\n");
+      Print("the first mic’s chain changes in OBS (seen at the next import)\n");
       break;
     case L'v':
       session.world->Change(ToggleUnknownFilter);
@@ -449,7 +449,7 @@ void Press(wchar_t key) {
       break;
     case L'g':
       session.world->Change([](FakeWorld& world) { world.file_update = {{L"C:\\sdk"}, true}; });
-      Print("an installer goes for NVIDIA's SDK\n");
+      Print("an installer goes for NVIDIA’s SDK\n");
       break;
     case L'u': {
       std::string version;
@@ -557,7 +557,7 @@ void CALLBACK OnSettled(HWND, UINT, UINT_PTR timer, DWORD) {
       session.screenshot_taken = true;
       const HWND shown = dialog ? dialog : setup;
       const Status saved = shown ? SaveWindowPng(shown, *session.options.screenshot)
-                                 : Status(Error{"The setup window isn't open."});
+                                 : Status(Error{"The setup window isn’t open."});
       Check(saved.ok(), "screenshot", saved ? ToUtf8(*session.options.screenshot) : saved.error());
       session.failed |= !saved;
     } else {
@@ -839,12 +839,12 @@ int Run(const Options& options) {
   tray_options.reopen_after_installer = [](bool on, bool paused) {
     Print(on ? std::format("{} would open again{} if an installer closed it\n", kDisplayName,
                            paused ? ", paused," : "")
-             : std::format("{} wouldn't open again if an installer closed it\n", kDisplayName));
+             : std::format("{} wouldn’t open again if an installer closed it\n", kDisplayName));
     return Status(Ok{});
   };
   tray_options.resume_after_restart = [](bool on) {
     Print(on ? std::format("{} would open again at the next sign-in, to carry on with the first run\n", kDisplayName)
-             : std::format("{} wouldn't open again at the next sign-in\n", kDisplayName));
+             : std::format("{} wouldn’t open again at the next sign-in\n", kDisplayName));
     return Status(Ok{});
   };
   // A made-up GitHub, and installers that are only a few bytes.
@@ -871,16 +871,16 @@ int Run(const Options& options) {
     using Verdict = update::SignatureCheck::Verdict;
     // A download is checked in a folder of its own, then again where it's kept.
     const Verdict verdict = file.parent_path().filename() == L"download" ? download : recheck;
-    Print(std::format("{}'s signature would be checked: {}\n", ToUtf8(file.filename()),
+    Print(std::format("{}’s signature would be checked: {}\n", ToUtf8(file.filename()),
                       verdict == Verdict::kRelease   ? "ok"
-                      : verdict == Verdict::kUnknown ? "Windows couldn't finish the check"
+                      : verdict == Verdict::kUnknown ? "Windows couldn’t finish the check"
                                                      : "rejected"));
     if (verdict == Verdict::kRelease) return update::SignatureCheck{.verdict = verdict};
     return update::SignatureCheck{
         .verdict = verdict,
-        .error = std::format("{} can't be installed, because {}.", ToUtf8(file.filename()),
-                             verdict == Verdict::kUnknown ? "Windows couldn't check whether its certificate was revoked"
-                                                          : "it isn't signed")};
+        .error = std::format("{} can’t be installed, because {}.", ToUtf8(file.filename()),
+                             verdict == Verdict::kUnknown ? "Windows couldn’t check whether its certificate was revoked"
+                                                          : "it isn’t signed")};
   };
   tray_options.updates.install = [](const fs::path& file, bool paused) {
     Print(std::format("{} would run, close {} and start the new one{}\n", ToUtf8(file.filename()), kDisplayName,
@@ -952,7 +952,7 @@ int Run(const Options& options) {
     Print(std::format("[{:8.2f} s] notification: {}\n{:13}{}\n{:13}a click opens {}{}\n", seconds, notice->title,
                       "", notice->text, "",
                       !notice->url.empty() ? notice->url
-                      : notice->page       ? std::format("the first run's {} page", tray::PageName(*notice->page))
+                      : notice->page       ? std::format("the first run’s {} page", tray::PageName(*notice->page))
                                            : std::string("the menu"),
                       notice->sound ? "" : " (no sound)"));
     g_session->notice_shown = Clock::now();
@@ -999,7 +999,7 @@ int wmain(int argc, wchar_t** argv) {
   }
   const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
   if (FAILED(com)) {
-    Print(std::format("Couldn't initialize COM (0x{:08X}).\n", static_cast<uint32_t>(com)));
+    Print(std::format("Couldn’t initialize COM (0x{:08X}).\n", static_cast<uint32_t>(com)));
     return kExitFail;
   }
   const int code = options->icons ? SaveIconSheet(*options->icons) : Run(*options);

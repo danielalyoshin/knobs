@@ -90,7 +90,7 @@ Status StartCopy(const std::filesystem::path& exe, std::wstring_view arguments) 
   // In the exe's folder: libobs has moved this process's working directory
   // into its runtime copy.
   if (const Status started = StartProcess(exe, arguments, exe.parent_path()); !started) {
-    return Error{std::format("Couldn't start {} again: {}", kDisplayName, started.error())};
+    return Error{std::format("Couldn’t start {} again: {}", kDisplayName, started.error())};
   }
   return Ok{};
 }
@@ -122,7 +122,7 @@ Result<HANDLE> StartInstaller(const std::filesystem::path& installer, const std:
       std::format(L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /update=1{} /LOG=\"{}\"", paused ? L" /paused=1" : L"",
                   (logs / L"update.txt").native());
   auto started = StartProcessToWait(installer, arguments, installer.parent_path());
-  if (!started) return Error{std::format("Couldn't start {}: {}", ToUtf8(installer.filename()), started.error())};
+  if (!started) return Error{std::format("Couldn’t start {}: {}", ToUtf8(installer.filename()), started.error())};
   return *started;
 }
 
@@ -175,7 +175,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
                                      restart ? ", to restart" : "", updated ? ", after an update" : "",
                                      reopened ? ", after an installer closed it" : "", paused ? ", paused" : ""));
     if (!handoff_error.empty()) {
-      log->Write(LOG_WARNING, std::format("Couldn't hold the installer until the copy before quit, so it may "
+      log->Write(LOG_WARNING, std::format("Couldn’t hold the installer until the copy before quit, so it may "
                                           "have found the files in use: {}",
                                           handoff_error));
     }
@@ -227,7 +227,7 @@ int Run(HINSTANCE instance, bool startup, bool resume_setup, bool restart, core:
                                                            RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT)
                               : UnregisterApplicationRestart();
     if (FAILED(result)) {
-      return Error{std::format("Couldn't {} Windows to start {} again after an installer closes it (0x{:08X}).",
+      return Error{std::format("Couldn’t {} Windows to start {} again after an installer closes it (0x{:08X}).",
                                on ? "ask" : "stop asking", kDisplayName, static_cast<uint32_t>(result))};
     }
     return Ok{};
@@ -329,7 +329,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   // and ShellExecute need one.
   const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
   if (FAILED(com)) {
-    tray::ShowStartupError(std::format("Couldn't initialize COM (0x{:08X}).", static_cast<uint32_t>(com)));
+    tray::ShowStartupError(std::format("Couldn’t initialize COM (0x{:08X}).", static_cast<uint32_t>(com)));
     return 1;
   }
   // An SDK being installed or updated may still be writing its files. So may

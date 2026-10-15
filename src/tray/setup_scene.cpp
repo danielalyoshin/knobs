@@ -69,13 +69,7 @@ TextStyle Style(float size, float line, DWRITE_FONT_WEIGHT weight = DWRITE_FONT_
 // Unwrapped, each line is cut short with an ellipsis to fit.
 Text MakeText(std::string_view text, const TextStyle& style, float width, bool wrap = true, bool markup = true) {
   Text made;
-  RichText rich = markup ? ParseRichText(text) : RichText{FromUtf8(text), {}};
-  // Code keeps its own quotes: a path or a file name is shown as it is.
-  std::wstring curled = CurlQuotes(std::wstring_view(rich.text));
-  for (const TextSpan& span : rich.spans) {
-    if (span.kind == TextSpan::Kind::kCode) curled.replace(span.start, span.length, rich.text, span.start, span.length);
-  }
-  rich.text = std::move(curled);
+  const RichText rich = markup ? ParseRichText(text) : RichText{FromUtf8(text), {}};
   // The glyph after each link, if Windows has its icon font: the text after
   // it moves on by one.
   std::vector<uint32_t> inserts;
@@ -391,7 +385,7 @@ float LayoutDoors(const PageView& view, Builder& build, Scene& scene, float y) {
     door.enabled = button.enabled;
     door.is_default = button.id == view.default_button;
     door.name = label.name;
-    door.help = CurlQuotes(FromUtf8(note));
+    door.help = FromUtf8(note);
     door.label = t.layout;
     door.note = n.layout;
     const float text_top = y + (height - t.height - 2 - n.height) / 2;
@@ -416,7 +410,7 @@ float LayoutChoices(const PageView& view, int choice, bool more_open, Builder& b
   Element group;
   group.role = Role::kChoiceGroup;
   group.in_panel = true;
-  group.name = CurlQuotes(FromUtf8(view.instruction));
+  group.name = FromUtf8(view.instruction);
   const int group_index = build.Add(std::move(group));
   const float top = y;
   const auto rule = [&] {
@@ -443,8 +437,8 @@ float LayoutChoices(const PageView& view, int choice, bool more_open, Builder& b
       radio.focusable = true;
       radio.enabled = option.enabled;
       radio.selected = option.id == choice;
-      radio.name = CurlQuotes(FromUtf8(title));
-      radio.help = CurlQuotes(FromUtf8(note));
+      radio.name = FromUtf8(title);
+      radio.help = FromUtf8(note);
       radio.label = t.layout;
       radio.label_at = {x + 44, y + 10};
       if (!note.empty()) {
@@ -480,8 +474,8 @@ float LayoutChoices(const PageView& view, int choice, bool more_open, Builder& b
     dropdown.enabled = std::any_of(view.more_choices.begin(), view.more_choices.end(),
                                    [](const PageButton& option) { return option.enabled; });
     dropdown.selected = more_open;
-    dropdown.name = CurlQuotes(FromUtf8(view.more_label));
-    dropdown.help = chosen.empty() ? L"" : CurlQuotes(FromUtf8(chosen));
+    dropdown.name = FromUtf8(view.more_label);
+    dropdown.help = chosen.empty() ? L"" : FromUtf8(chosen);
     dropdown.label = t.layout;
     dropdown.label_at = {x + 16, y + 10};
     if (!chosen.empty()) {
@@ -537,7 +531,7 @@ float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
     image.role = Role::kPicture;
     image.bounds = at;
     image.in_panel = true;
-    image.name = CurlQuotes(FromUtf8(view.walkthrough->alt));
+    image.name = FromUtf8(view.walkthrough->alt);
     build.Add(std::move(image));
     // The whole frame plays and pauses it, as its corner shows.
     Element toggle;
@@ -559,7 +553,7 @@ float LayoutNotes(const PageView& view, Builder& build, float y) {
   Element list;
   list.role = Role::kNoteList;
   list.in_panel = true;
-  list.name = CurlQuotes(FromUtf8(view.instruction));
+  list.name = FromUtf8(view.instruction);
   const int list_index = build.Add(std::move(list));
   const float top = y;
   for (const PageNote& note : view.notes) {

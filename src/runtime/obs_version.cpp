@@ -30,7 +30,7 @@ std::string DescribeSupportedObsVersions() {
 }
 
 std::string UnsupportedObsMessage(std::string_view version_text) {
-  return std::format("OBS {} isn't supported. {} supports {}.", version_text, kDisplayName,
+  return std::format("OBS {} isn’t supported. {} supports {}.", version_text, kDisplayName,
                      DescribeSupportedObsVersions());
 }
 

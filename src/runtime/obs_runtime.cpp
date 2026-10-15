@@ -70,19 +70,19 @@ Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path
 
   runtime->dll_directory_ = AddDllDirectory(bin.c_str());
   if (!runtime->dll_directory_) {
-    return Error{std::format("Couldn't add {} to the DLL search path: {}", ToUtf8(bin),
+    return Error{std::format("Couldn’t add {} to the DLL search path: {}", ToUtf8(bin),
                              DescribeWinError(GetLastError()))};
   }
   WorkingDirectoryGuard working_directory;
   if (!SetCurrentDirectoryW(bin.c_str())) {
-    return Error{std::format("Couldn't switch to {}: {}", ToUtf8(bin),
+    return Error{std::format("Couldn’t switch to {}: {}", ToUtf8(bin),
                              DescribeWinError(GetLastError()))};
   }
 
   HMODULE module = LoadLibraryExW(dll.c_str(), nullptr,
                                   LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
   if (!module) {
-    return Error{std::format("Couldn't load {}: {}", ToUtf8(dll), DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t load {}: {}", ToUtf8(dll), DescribeWinError(GetLastError()))};
   }
   runtime->module_ = module;
 

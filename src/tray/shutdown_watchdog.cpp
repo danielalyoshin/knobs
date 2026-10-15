@@ -74,7 +74,7 @@ ShutdownWatchdog::ShutdownWatchdog(std::shared_ptr<State> state) : state_(std::m
 Result<std::unique_ptr<ShutdownWatchdog>> ShutdownWatchdog::Start(std::function<void()> before_exit) {
   auto state = std::make_shared<State>();
   if (!state->stop || !state->wake || !state->expired) {
-    return Error{std::format("Couldn't prepare the shutdown watchdog: {}", DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t prepare the shutdown watchdog: {}", DescribeWinError(GetLastError()))};
   }
   state->before_exit = std::move(before_exit);
   auto ready = std::make_shared<std::latch>(2);
@@ -86,7 +86,7 @@ Result<std::unique_ptr<ShutdownWatchdog>> ShutdownWatchdog::Start(std::function<
   } catch (const std::system_error& error) {
     state->due = State::kDisarmed;
     SetEvent(state->stop);
-    return Error{std::format("Couldn't start the shutdown watchdog: {}", error.what())};
+    return Error{std::format("Couldn’t start the shutdown watchdog: {}", error.what())};
   }
   ready->wait();
   return std::unique_ptr<ShutdownWatchdog>(new ShutdownWatchdog(std::move(state)));

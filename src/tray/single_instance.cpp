@@ -15,7 +15,7 @@ Result<std::unique_ptr<SingleInstance>> SingleInstance::Acquire(const std::wstri
   const std::wstring full_name = L"Local\\" + name;
   const HANDLE mutex = CreateMutexW(nullptr, FALSE, full_name.c_str());
   if (!mutex) {
-    return Error{std::format("Couldn't check whether another copy is running: {}", DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t check whether another copy is running: {}", DescribeWinError(GetLastError()))};
   }
   const auto milliseconds = std::clamp<long long>(wait.count(), 0, INFINITE - 1);
   const DWORD result = WaitForSingleObject(mutex, static_cast<DWORD>(milliseconds));
@@ -24,7 +24,7 @@ Result<std::unique_ptr<SingleInstance>> SingleInstance::Acquire(const std::wstri
   }
   CloseHandle(mutex);
   if (result == WAIT_TIMEOUT) return std::unique_ptr<SingleInstance>();
-  return Error{std::format("Couldn't check whether another copy is running: {}", DescribeWinError(GetLastError()))};
+  return Error{std::format("Couldn’t check whether another copy is running: {}", DescribeWinError(GetLastError()))};
 }
 
 SingleInstance::~SingleInstance() {

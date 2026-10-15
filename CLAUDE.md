@@ -74,6 +74,7 @@ Don't open the mic without the user's go-ahead.
 - Every source file starts with `// SPDX-License-Identifier: GPL-2.0-or-later` (`;` or `#` comments in scripts). A `.manifest` has it on its second line, after the XML declaration, and JSON, which has no comments, has none.
 - The logo files in `assets/` and in `brand/logo/` and `brand/web/` aren't GPL: they're all rights reserved, apart from what `TRADEMARKS.md` allows. Don't add SPDX lines to them or move them.
 - The UI's colours, shapes, radius, focus ring and motion come from the brand's tokens (`knobs::tokens` in `knobs_tokens.h`), never literals. The app keeps Windows' own type (Segoe UI Variable, Consolas), not the brand's.
+- Text a user can see is written with typographic apostrophes and quotes (’ “ ”) in the source, errors included; the unit tests check the menu, the setup pages and the notifications for straight ones. Code keeps straight ones: command lines, JSON, markup's attributes. Names, paths and errors from elsewhere are shown as they are.
 - The name is "knobs", all lowercase, even at the start of a sentence. Keep it in one constant (`KNOBS_DISPLAY_NAME` in `src/app_info.h`), and don't write it out in user-facing strings; tests shouldn't depend on it either.
 
 ## Git

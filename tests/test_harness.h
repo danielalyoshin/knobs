@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdio>
+#include <string_view>
 #include <vector>
 
 namespace knobs::test {
@@ -25,6 +26,11 @@ struct Registrar {
 };
 
 inline int g_failures = 0;
+
+// Whether `text` has no straight quotes. knobs's own text is written with
+// typographic ones (’ “ ”), and the tests' made-up names have none, so a
+// straight one is text that was written without them.
+inline bool NoStraightQuotes(std::string_view text) { return text.find_first_of("'\"") == std::string_view::npos; }
 
 // Whether this binary was started as the stand-in for OBS that a tray test
 // starts (tray_tests.cpp, OpenObsStartsInItsBinFolder). It has done its part

@@ -204,7 +204,7 @@ Endpoints ListEndpoints() {
   Endpoints endpoints;
   const ComPtr<IMMDeviceEnumerator> enumerator = CreateEnumerator();
   if (!enumerator) {
-    endpoints.error = "Couldn't reach Windows' list of audio devices.";
+    endpoints.error = "Couldn’t reach Windows’ list of audio devices.";
     return endpoints;
   }
   HRESULT hr = Devices(enumerator.Get(), eCapture, DEVICE_STATE_ACTIVE, endpoints.mics);
@@ -212,7 +212,7 @@ Endpoints ListEndpoints() {
   if (SUCCEEDED(hr)) hr = Devices(enumerator.Get(), eRender, DEVICE_STATE_DISABLED, endpoints.disabled_outputs);
   if (FAILED(hr)) {
     // Lists that say nothing would read as every device unplugged.
-    return {.error = std::format("Couldn't read Windows' list of audio devices (0x{:08X}).", static_cast<uint32_t>(hr))};
+    return {.error = std::format("Couldn’t read Windows’ list of audio devices (0x{:08X}).", static_cast<uint32_t>(hr))};
   }
   endpoints.vb_cable_pending = VbCablePending();
   endpoints.default_mic = DefaultDevice(enumerator.Get(), eCapture, eCommunications);
@@ -224,13 +224,13 @@ Endpoints ListEndpoints() {
 Status CheckPlaybackDevice(std::string_view id, std::string_view name) {
   const auto failed = [name](HRESULT hr) {
     return Error{hr == AUDCLNT_E_DEVICE_IN_USE
-                     ? std::format("\"{}\" is in use by another app on its own (exclusive mode), so nothing else can "
+                     ? std::format("“{}” is in use by another app on its own (exclusive mode), so nothing else can "
                                    "play into it. Close that app, then try again.",
                                    name)
-                     : std::format("\"{}\" can't be opened (0x{:08X}).", name, static_cast<uint32_t>(hr))};
+                     : std::format("“{}” can’t be opened (0x{:08X}).", name, static_cast<uint32_t>(hr))};
   };
   const ComPtr<IMMDeviceEnumerator> enumerator = CreateEnumerator();
-  if (!enumerator) return Error{"Couldn't reach Windows' list of audio devices."};
+  if (!enumerator) return Error{"Couldn’t reach Windows’ list of audio devices."};
   ComPtr<IMMDevice> device;
   HRESULT hr = enumerator->GetDevice(FromUtf8(id).c_str(), &device);
   if (FAILED(hr)) return failed(hr);
@@ -250,12 +250,12 @@ Status CheckPlaybackDevice(std::string_view id, std::string_view name) {
 Result<std::unique_ptr<DeviceWatch>> DeviceWatch::Start(std::function<void()> on_change) {
   auto state = std::make_unique<State>();
   state->enumerator = CreateEnumerator();
-  if (!state->enumerator) return Error{"Couldn't reach Windows' list of audio devices."};
+  if (!state->enumerator) return Error{"Couldn’t reach Windows’ list of audio devices."};
   state->client = new NotificationClient(on_change);
   const HRESULT hr = state->enumerator->RegisterEndpointNotificationCallback(state->client);
   if (FAILED(hr)) {
     state->client->Release();
-    return Error{std::format("Couldn't listen for audio devices coming and going (0x{:08X}).", static_cast<uint32_t>(hr))};
+    return Error{std::format("Couldn’t listen for audio devices coming and going (0x{:08X}).", static_cast<uint32_t>(hr))};
   }
   // Without it, VB-Cable installed by hand while knobs runs is only seen
   // with the next change of devices.

@@ -116,7 +116,7 @@ TEST(TrayQuitBoundsAStuckCoreAndCleansUpANormalOne) {
     if (mode == L"clean") {
       CHECK(text.empty() && fs::exists(folder / L"clean"));
     } else {
-      CHECK(text.find("Shutdown didn't finish before its deadline. Ending the process to release its files.") != std::string::npos);
+      CHECK(text.find("Shutdown didn’t finish before its deadline. Ending the process to release its files.") != std::string::npos);
       CHECK(text.find("icon removed") != std::string::npos);
     }
     CHECK(fs::exists(folder / L"closing"));
@@ -240,7 +240,7 @@ TEST(TrayQuitKeepsRespondingAndItsDeadlineSurvivesBlockedUiAndLogging) {
     const std::string log(std::istreambuf_iterator<char>{input}, {});
     input.close();
     if (mode != L"async-icon") {
-      CHECK(log.find("Shutdown didn't finish before its deadline") != std::string::npos);
+      CHECK(log.find("Shutdown didn’t finish before its deadline") != std::string::npos);
       CHECK(log.find("icon removed") != std::string::npos);
     }
     CHECK(fs::exists(folder / L"icon-removed"));

@@ -62,7 +62,7 @@ void MonitorToDefault(FakeWorld& world) {
 // A filter from a third-party OBS plugin, which knobs doesn't load.
 import::ImportNote UnknownFilterWarning() {
   return {.warning = true,
-          .text = std::format("Filter \"Pitch Shift\" (pitch_shift_filter) isn't one {} can run, so it passes "
+          .text = std::format("Filter “Pitch Shift” (pitch_shift_filter) isn’t one {} can run, so it passes "
                               "audio through untouched.",
                               kDisplayName),
           .key = "unknown 6f0c1d2e-pitch-shift"};
@@ -79,7 +79,7 @@ void NoCable(FakeWorld& world) {
 Status StartFakeChain(const SharedWorld& world, const core::ChainPlan& plan, core::Backend& backend,
                       uint64_t& packets) {
   if (const FakeWorld now = world.Get(); now.chain_error) return Error{*now.chain_error};
-  backend.Log(std::format("The chain would run into \"{}\".", plan.cable.name));
+  backend.Log(std::format("The chain would run into “{}”.", plan.cable.name));
   packets = 0;
   return Ok{};
 }
@@ -128,14 +128,14 @@ const std::vector<FakeScenario>& FakeScenarios() {
          world.files_changing = true;
          script.reimport = true;
        }},
-      {"mic-missing", "the mic's recording device isn't connected",
+      {"mic-missing", "the mic’s recording device isn’t connected",
        [](FakeWorld& world, FakeScript&) {
          world.devices.mics.clear();
          world.devices.default_mic.clear();
        }},
-      {"cable-missing", "CABLE In 16ch isn't connected",
+      {"cable-missing", "CABLE In 16ch isn’t connected",
        [](FakeWorld& world, FakeScript&) { RemoveOutput(world, kCable16Id); }},
-      {"setup-obs", "OBS's settings can't be read",
+      {"setup-obs", "OBS’s settings can’t be read",
        [](FakeWorld& world, FakeScript&) {
          world.config_error =
              "OBS has no settings in C:\\Users\\you\\AppData\\Roaming\\obs-studio yet. Open OBS once and close it.";
@@ -173,15 +173,15 @@ const std::vector<FakeScenario>& FakeScenarios() {
          world.config.audio.monitoring_device_id = kHeadphonesId;
          world.config.audio.monitoring_device_name = kHeadphonesName;
        }},
-      {"sound-into-cable", "Windows plays the PC's sound into CABLE Input, as installing VB-Cable can make it",
+      {"sound-into-cable", "Windows plays the PC’s sound into CABLE Input, as installing VB-Cable can make it",
        [](FakeWorld& world, FakeScript&) { world.devices.default_output = kCableInputId; }},
       {"warnings", "Mic/Aux has a third-party filter and push-to-talk",
        [](FakeWorld& world, FakeScript&) {
          world.collection.front().notes = {
              UnknownFilterWarning(),
-             {false, "Filter \"Expander\" is off in OBS, and stays off."},
+             {false, "Filter “Expander” is off in OBS, and stays off."},
              {false,
-              "The mic is on push-to-talk in OBS, which doesn't silence the cable. Set up push-to-talk in each "
+              "The mic is on push-to-talk in OBS, which doesn’t silence the cable. Set up push-to-talk in each "
               "app that uses the cable.",
               true}};
        }},
@@ -192,10 +192,10 @@ const std::vector<FakeScenario>& FakeScenarios() {
          MonitorToDefault(world);
          NoCable(world);
        }},
-      {"obs-missing", "OBS isn't installed",
+      {"obs-missing", "OBS isn’t installed",
        [](FakeWorld& world, FakeScript&) {
          world.obs = {core::ObsFound::kMissing, {},
-                      std::format("OBS Studio isn't where its installer puts it. {} needs {}.", kDisplayName,
+                      std::format("OBS Studio isn’t where its installer puts it. {} needs {}.", kDisplayName,
                                   runtime::DescribeSupportedObsVersions())};
        }},
       {"obs-unsupported", "OBS 34.0.0 is installed",
@@ -216,9 +216,9 @@ const std::vector<FakeScenario>& FakeScenarios() {
        }},
       {"failed", "the chain fails to start",
        [](FakeWorld& world, FakeScript&) {
-         world.chain_error = "libobs couldn't load the mic's source.";
+         world.chain_error = "libobs couldn’t load the mic’s source.";
        }},
-      {"starting", "the core hasn't reported yet", [](FakeWorld&, FakeScript& script) { script.no_core = true; }},
+      {"starting", "the core hasn’t reported yet", [](FakeWorld&, FakeScript& script) { script.no_core = true; }},
   };
   return scenarios;
 }

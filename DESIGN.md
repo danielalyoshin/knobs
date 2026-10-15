@@ -274,7 +274,7 @@ The same in both schemes but for the info disc, and the product's alone.
 ### Named Rules
 **The Names In Text Rule.** A name the user looks for in another UI (a button in OBS, a device, a menu path) is set at 600 and, inside secondary text, in Text. Nothing else in running text is bold.
 
-**The Typographic Quotes Rule.** Apostrophes and quotes render as typographic ones (’ “ ”), whatever the copy's source uses.
+**The Typographic Quotes Rule.** knobs's own text is written with typographic apostrophes and quotes (’ “ ”) in the source. Names, paths and errors from OBS, Windows or the user are shown as they are, straight quotes and all.
 
 ## Layout
 

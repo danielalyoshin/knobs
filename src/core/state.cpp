@@ -61,7 +61,7 @@ std::string DescribeOtherObs(const std::vector<OtherObs>& others) {
     return yours == 1 ? "your other session" : "your other sessions";
   }
   if (accounts != 1) return std::format("{} other Windows accounts", accounts);
-  return named.empty() ? "another Windows account" : std::format("{}'s account", named.front());
+  return named.empty() ? "another Windows account" : std::format("{}’s account", named.front());
 }
 
 std::string FormatChain(const ChainSummary& chain, bool short_form) {
@@ -79,7 +79,7 @@ std::string FormatChain(const ChainSummary& chain, bool short_form) {
 
 std::string DescribeSnapshot(const Snapshot& snapshot) {
   std::string text(snapshot.state == State::kPausedForUpdate && snapshot.nvidia_update
-                       ? "paused for NVIDIA's SDK update"
+                       ? "paused for NVIDIA’s SDK update"
                        : StateName(snapshot.state));
   if (!snapshot.detail.empty()) {
     text += ": " + snapshot.detail;

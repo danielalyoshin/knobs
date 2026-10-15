@@ -180,7 +180,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
     case State::kPausedForObs:
       return with_chain("Paused while OBS is open");
     case State::kPausedForUpdate:
-      return with_chain(snapshot.nvidia_update ? "Paused while NVIDIA's SDK updates" : "Paused while a plugin updates");
+      return with_chain(snapshot.nvidia_update ? "Paused while NVIDIA’s SDK updates" : "Paused while a plugin updates");
     case State::kMicMissing:
       return with_chain("Mic missing");
     case State::kCableMissing:
@@ -188,7 +188,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
     case State::kNeedsSetup:
       switch (snapshot.setup) {
         case SetupNeed::kObsSettings:
-          return "Can't read OBS's settings";
+          return "Can’t read OBS’s settings";
         case SetupNeed::kNoMic:
           return "No mic in OBS yet";
         case SetupNeed::kPickMic:
@@ -200,7 +200,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
       }
       return "Needs setup";
     case State::kObsMissing:
-      return "Can't find OBS Studio";
+      return "Can’t find OBS Studio";
     case State::kObsUnsupported:
       return ObsUnsupportedLine(snapshot.obs.version);
     case State::kRestartNeeded:
@@ -214,7 +214,7 @@ std::string StatusLine(const core::Snapshot& snapshot) {
 std::string ObsUnsupportedLine(const runtime::ObsVersion& version) {
   // Only an OBS newer than knobs supports is "not yet" supported.
   if (runtime::IsNewerThanSupportedObs(version)) {
-    return std::format("{} doesn't support OBS {} yet", kDisplayName, version.ToString());
+    return std::format("{} doesn’t support OBS {} yet", kDisplayName, version.ToString());
   }
   return std::format("OBS {} is too old for {}", version.ToString(), kDisplayName);
 }
@@ -301,7 +301,7 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
   }
   // A click opens Sound settings, where Output is set back.
   if (const std::string cable = DefaultOutputCable(snapshot); !cable.empty()) {
-    items.push_back(Command(kIdSoundIntoCable, Escape(std::format("Windows plays your PC's sound into {}…", cable))));
+    items.push_back(Command(kIdSoundIntoCable, Escape(std::format("Windows plays your PC’s sound into {}…", cable))));
   }
   if (updates.version) {
     menu.update = updates.version;

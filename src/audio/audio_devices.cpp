@@ -62,17 +62,17 @@ Result<AudioDevice> FindDevice(const std::vector<AudioDevice>& devices, std::str
     if (name.find(needle) != std::string::npos) matches.push_back(&device);
   }
   if (matches.size() == 1) return *matches.front();
-  if (matches.empty()) return Error{std::format("No {} matches \"{}\".", kind, query)};
+  if (matches.empty()) return Error{std::format("No {} matches “{}”.", kind, query)};
   std::string names;
   for (const AudioDevice* device : matches) {
-    names += std::format("{}\"{}\"", names.empty() ? "" : ", ", device->name);
+    names += std::format("{}“{}”", names.empty() ? "" : ", ", device->name);
   }
-  return Error{std::format("Several {}s match \"{}\": {}.", kind, query, names)};
+  return Error{std::format("Several {}s match “{}”: {}.", kind, query, names)};
 }
 
 Status SetMonitoringDevice(const runtime::ObsApi& api, const AudioDevice& device) {
   if (!api.obs_set_audio_monitoring_device(device.name.c_str(), device.id.c_str())) {
-    return Error{std::format("OBS's audio monitoring couldn't use \"{}\".", device.name)};
+    return Error{std::format("OBS’s audio monitoring couldn’t use “{}”.", device.name)};
   }
   return Ok{};
 }

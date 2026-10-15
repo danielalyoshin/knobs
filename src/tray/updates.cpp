@@ -16,7 +16,7 @@ Notice Available(const update::Version& version) {
   return {.kind = Kind::kUpdateAvailable,
           .title = std::format("{} {} is out", kDisplayName, version.ToString()),
           // The click opens the release's page.
-          .text = "Click to see what's new and download it.",
+          .text = "Click to see what’s new and download it.",
           .url = update::ReleasePageUrl(version)};
 }
 
@@ -28,7 +28,7 @@ Notice Ready(const update::Version& version) {
 
 Notice NotUpdated(const update::Version& version) {
   return {.kind = Kind::kUpdateFailed,
-          .title = std::format("{} couldn't update to {}", kDisplayName, version.ToString()),
+          .title = std::format("{} couldn’t update to {}", kDisplayName, version.ToString()),
           .text = "Click to download it yourself.",
           .url = update::ReleasePageUrl(version)};
 }
@@ -188,7 +188,7 @@ std::optional<Notice> UpdatedNotice(const UpdateSettings& settings, const update
   if (*settings.installing == current) {
     return Notice{.kind = Kind::kUpdated,
                   .title = std::format("{} was updated to {}", kDisplayName, current.ToString()),
-                  .text = "Click to see what's new.",
+                  .text = "Click to see what’s new.",
                   .url = update::ReleasePageUrl(current)};
   }
   if (*settings.installing > current) return NotUpdated(*settings.installing);

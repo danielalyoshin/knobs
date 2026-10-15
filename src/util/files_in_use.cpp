@@ -137,12 +137,12 @@ struct FileOplock::Request {
     request->file =
         CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
     if (request->file == INVALID_HANDLE_VALUE) {
-      return Error{std::format("Couldn't open {}: {}", ToUtf8(path), DescribeWinError(GetLastError()))};
+      return Error{std::format("Couldn’t open {}: {}", ToUtf8(path), DescribeWinError(GetLastError()))};
     }
     request->event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!request->event) return Error{std::format("Couldn't create an event: {}", DescribeWinError(GetLastError()))};
+    if (!request->event) return Error{std::format("Couldn’t create an event: {}", DescribeWinError(GetLastError()))};
     request->ack.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!request->ack.hEvent) return Error{std::format("Couldn't create an event: {}", DescribeWinError(GetLastError()))};
+    if (!request->ack.hEvent) return Error{std::format("Couldn’t create an event: {}", DescribeWinError(GetLastError()))};
     request->overlapped.hEvent = request->event;
     request->input = {REQUEST_OPLOCK_CURRENT_VERSION, sizeof(request->input),
                       OPLOCK_LEVEL_CACHE_READ | OPLOCK_LEVEL_CACHE_HANDLE, REQUEST_OPLOCK_INPUT_FLAG_REQUEST};
@@ -154,7 +154,7 @@ struct FileOplock::Request {
     const DWORD error = done ? ERROR_SUCCESS : GetLastError();
     request->pending = done || error == ERROR_IO_PENDING;
     if (error != ERROR_IO_PENDING) {
-      return Error{std::format("Windows didn't grant an oplock on {}: {}", ToUtf8(path),
+      return Error{std::format("Windows didn’t grant an oplock on {}: {}", ToUtf8(path),
                                done ? "another program is opening it" : DescribeWinError(error))};
     }
     return request;
@@ -238,7 +238,7 @@ struct FileOplockWatchdog {
           else if (now >= request->since + request->warning) next.waiting = true;
         }
         if (request->expired && !request->ack_pending && request->ack_error != ERROR_SUCCESS) {
-          next.errors.push_back(std::format("Couldn't release the file hold for {}: {}", ToUtf8(request->path),
+          next.errors.push_back(std::format("Couldn’t release the file hold for {}: {}", ToUtf8(request->path),
                                             DescribeWinError(request->ack_error)));
         }
         if (!request->expired) {
@@ -376,21 +376,21 @@ Status FileOplock::PrepareHandoff() {
     const HANDLE probe = CreateFileW(file_.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                      nullptr, OPEN_EXISTING, 0, nullptr);
     if (probe == INVALID_HANDLE_VALUE) {
-      return Error{std::format("Couldn't prepare {} for handoff: {}", ToUtf8(file_), DescribeWinError(GetLastError()))};
+      return Error{std::format("Couldn’t prepare {} for handoff: {}", ToUtf8(file_), DescribeWinError(GetLastError()))};
     }
     OVERLAPPED range = {};  // The first byte, which a loaded DLL always has.
     const BOOL locked = LockFileEx(probe, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &range);
     const DWORD error = locked ? ERROR_SUCCESS : GetLastError();
     CloseHandle(probe);  // Releases the byte-range lock, not the oplock.
     if (!locked) {
-      return Error{std::format("Couldn't prepare {} for handoff: {}", ToUtf8(file_), DescribeWinError(error))};
+      return Error{std::format("Couldn’t prepare {} for handoff: {}", ToUtf8(file_), DescribeWinError(error))};
     }
   }
   // Don't hand off a request that could still be cancelled at exit, or a
   // break that no longer holds an opener. No waiting on the core thread.
   if (!GetOverlappedResult(request_->file, &request_->overlapped, &bytes, FALSE) ||
       !(request_->output.Flags & REQUEST_OPLOCK_OUTPUT_FLAG_ACK_REQUIRED)) {
-    return Error{std::format("Windows didn't preserve the oplock on {} for handoff.", ToUtf8(file_))};
+    return Error{std::format("Windows didn’t preserve the oplock on {} for handoff.", ToUtf8(file_))};
   }
   {
     std::lock_guard lock(request_->mutex);
@@ -409,14 +409,14 @@ Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, co
   HANDLE process = nullptr;
   if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(), &process,
                        SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, 0)) {
-    return Error{std::format("Couldn't pass this process to its replacement: {}", DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t pass this process to its replacement: {}", DescribeWinError(GetLastError()))};
   }
   inherited.values.push_back(process);
   for (const uintptr_t file : files) {
     HANDLE duplicate = nullptr;
     if (!DuplicateHandle(GetCurrentProcess(), reinterpret_cast<HANDLE>(file), GetCurrentProcess(), &duplicate,
                          0, TRUE, DUPLICATE_SAME_ACCESS)) {
-      return Error{std::format("Couldn't pass a waiting file to the new process: {}", DescribeWinError(GetLastError()))};
+      return Error{std::format("Couldn’t pass a waiting file to the new process: {}", DescribeWinError(GetLastError()))};
     }
     inherited.values.push_back(duplicate);
   }
@@ -426,7 +426,7 @@ Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, co
   }
   SECURITY_ATTRIBUTES security = {sizeof(security), nullptr, TRUE};
   const HANDLE ready = CreateEventW(&security, TRUE, FALSE, nullptr);
-  if (!ready) return Error{std::format("Couldn't prepare the replacement's wait: {}", DescribeWinError(GetLastError()))};
+  if (!ready) return Error{std::format("Couldn’t prepare the replacement’s wait: {}", DescribeWinError(GetLastError()))};
   inherited.values.push_back(ready);
   std::wstring command = std::format(L"\"{}\" {} --wait-for-files {:x}:{:x}:{}", exe.native(), arguments,
                                       deadline, reinterpret_cast<uintptr_t>(ready), handoff);
@@ -436,7 +436,7 @@ Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, co
   std::vector<unsigned char> storage(size);
   auto* attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
   if (!InitializeProcThreadAttributeList(attributes, 1, 0, &size)) {
-    return Error{std::format("Couldn't prepare file handoff: {}", DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t prepare file handoff: {}", DescribeWinError(GetLastError()))};
   }
   STARTUPINFOEXW startup = {};
   startup.StartupInfo.cb = sizeof(startup);
@@ -449,7 +449,7 @@ Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, co
                      nullptr, exe.parent_path().c_str(), &startup.StartupInfo, &child);
   const DWORD error = started ? ERROR_SUCCESS : GetLastError();
   DeleteProcThreadAttributeList(attributes);
-  if (!started) return Error{std::format("Couldn't restart with the waiting files: {}", DescribeWinError(error))};
+  if (!started) return Error{std::format("Couldn’t restart with the waiting files: {}", DescribeWinError(error))};
   Handles child_handles{{child.hThread, child.hProcess}};
   const HANDLE events[] = {ready, child.hProcess};
   const uint64_t now = GetTickCount64();
@@ -459,7 +459,7 @@ Status StartWithFileOplocks(const fs::path& exe, std::wstring_view arguments, co
     // duplicate files. Acknowledge before stopping it, even if its exit stalls.
     FileOplockWatchdog::Get().Release(files);
     TerminateProcess(child.hProcess, ERROR_TIMEOUT);
-    return Error{"The replacement didn't start waiting for the files in time."};
+    return Error{"The replacement didn’t start waiting for the files in time."};
   }
   uint64_t previous = handoff_deadline.load();
   while ((!previous || deadline < previous) && !handoff_deadline.compare_exchange_weak(previous, deadline)) {}
@@ -477,7 +477,7 @@ Status WaitForFileOplocks(std::wstring_view handoff) {
   uint64_t deadline = GetTickCount64() + 30000;
   if (const size_t colon = rest.find(':'); colon != std::string_view::npos) {
     const auto parsed = std::from_chars(rest.data(), rest.data() + colon, deadline, 16);
-    if (parsed.ec != std::errc{} || parsed.ptr != rest.data() + colon) invalid = "The restart's file deadline is invalid.";
+    if (parsed.ec != std::errc{} || parsed.ptr != rest.data() + colon) invalid = "The restart’s file deadline is invalid.";
     rest.remove_prefix(colon + 1);
     if (const size_t ready_end = rest.find(':'); ready_end != std::string_view::npos) {
       uintptr_t value = 0;
@@ -486,7 +486,7 @@ Status WaitForFileOplocks(std::wstring_view handoff) {
       DWORD flags = 0;
       if (event.ec != std::errc{} || event.ptr != rest.data() + ready_end ||
           !GetHandleInformation(handle, &flags) || !(flags & HANDLE_FLAG_INHERIT)) {
-        invalid = "The restart's readiness event is invalid.";
+        invalid = "The restart’s readiness event is invalid.";
       } else {
         readiness.values.push_back(handle);
         SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
@@ -504,14 +504,14 @@ Status WaitForFileOplocks(std::wstring_view handoff) {
     if (parsed.ec != std::errc{} || parsed.ptr != part.data() + part.size() ||
         !GetHandleInformation(handle, &flags) || !(flags & HANDLE_FLAG_INHERIT) ||
         std::find(inherited.values.begin(), inherited.values.end(), handle) != inherited.values.end()) {
-      if (!invalid) invalid = "The restart's file handoff is invalid.";
+      if (!invalid) invalid = "The restart’s file handoff is invalid.";
     } else {
       // Only the inherited process and disk files expected by this protocol.
       if (inherited.values.empty()) {
         const DWORD pid = GetProcessId(handle);
-        if ((!pid || pid == GetCurrentProcessId()) && !invalid) invalid = "The restart's old process handle is invalid.";
+        if ((!pid || pid == GetCurrentProcessId()) && !invalid) invalid = "The restart’s old process handle is invalid.";
       } else if (GetFileType(handle) != FILE_TYPE_DISK && !invalid) {
-        invalid = "The restart's waiting file handle is invalid.";
+        invalid = "The restart’s waiting file handle is invalid.";
       }
       inherited.values.push_back(handle);
       SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
@@ -520,9 +520,9 @@ Status WaitForFileOplocks(std::wstring_view handoff) {
     rest.remove_prefix(comma + 1);
   }
   if (invalid) return Error{*invalid};
-  if (inherited.values.size() < 2) return Error{"The restart didn't inherit its waiting files."};
+  if (inherited.values.size() < 2) return Error{"The restart didn’t inherit its waiting files."};
   if (!readiness.values.empty() && !SetEvent(readiness.values.front())) {
-    return Error{"The restart's readiness event is invalid."};
+    return Error{"The restart’s readiness event is invalid."};
   }
   // Windows signals the process only once its mappings are gone. Closing
   // these duplicates then acknowledges the breaks and releases the writers.
@@ -531,7 +531,7 @@ Status WaitForFileOplocks(std::wstring_view handoff) {
   const DWORD waited = WaitForSingleObject(inherited.values.front(), left);
   if (waited == WAIT_TIMEOUT) return Error{"The file hold expired before the old process exited."};
   if (waited != WAIT_OBJECT_0) {
-    return Error{std::format("Couldn't wait for the old process to exit: {}", DescribeWinError(GetLastError()))};
+    return Error{std::format("Couldn’t wait for the old process to exit: {}", DescribeWinError(GetLastError()))};
   }
   return Ok{};
 }
@@ -557,7 +557,7 @@ std::vector<fs::path> LoadedModules(const std::function<void(std::string_view)>&
     modules.resize(needed / sizeof(HMODULE) + 16);
   }
   if (!listed) {
-    if (log) log(std::format("Couldn't list loaded DLLs after four tries: {}", DescribeWinError(error)));
+    if (log) log(std::format("Couldn’t list loaded DLLs after four tries: {}", DescribeWinError(error)));
     return {};
   }
   bool paths_complete = true;
@@ -571,7 +571,7 @@ std::vector<fs::path> LoadedModules(const std::function<void(std::string_view)>&
         // It may have unloaded since enumeration. Callers deciding which
         // watches to release must not treat this as a complete module list.
         if (paths_complete && log) {
-          log(std::format("Couldn't read a loaded DLL's path: {}", DescribeWinError(GetLastError())));
+          log(std::format("Couldn’t read a loaded DLL’s path: {}", DescribeWinError(GetLastError())));
         }
         paths_complete = false;
         break;

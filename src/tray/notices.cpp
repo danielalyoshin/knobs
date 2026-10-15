@@ -86,9 +86,9 @@ Notice MicMissing(const core::Snapshot& snapshot) {
     // watchdog).
     notice.text = std::format("{} stopped sending audio. {} keeps trying to start it again.", mic, kDisplayName);
   } else if (is_default) {
-    notice.text = std::format("There's no recording device. {} starts again when one is connected.", kDisplayName);
+    notice.text = std::format("There’s no recording device. {} starts again when one is connected.", kDisplayName);
   } else {
-    notice.text = std::format("The recording device for {} isn't connected. {} starts again when it's back.", mic,
+    notice.text = std::format("The recording device for {} isn’t connected. {} starts again when it’s back.", mic,
                               kDisplayName);
   }
   return notice;
@@ -99,7 +99,7 @@ Notice CableMissing(const core::Snapshot& snapshot) {
   if (cable.empty()) cable = "The cable";
   return {.kind = Kind::kCableMissing,
           .title = "Cable missing",
-          .text = std::format("{} isn't connected. {} starts again when it's back, or click to choose another "
+          .text = std::format("{} isn’t connected. {} starts again when it’s back, or click to choose another "
                               "cable.",
                               cable, kDisplayName),
           .problem = true,
@@ -121,9 +121,9 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       if (before != runtime::ObsVersion{} && before != snapshot.obs.version) {
         notice.title = before < snapshot.obs.version ? std::format("OBS was updated to {}", version)
                                                      : std::format("OBS changed to {}", version);
-        notice.text = newer ? std::format("{} doesn't support it yet, so it stopped. Click for what you can do.",
+        notice.text = newer ? std::format("{} doesn’t support it yet, so it stopped. Click for what you can do.",
                                           kDisplayName)
-                            : std::format("It's too old for {}, so {} stopped. Click for what you can do.",
+                            : std::format("It’s too old for {}, so {} stopped. Click for what you can do.",
                                           kDisplayName, kDisplayName);
       } else {
         notice.title = ObsUnsupportedLine(snapshot.obs.version);
@@ -134,8 +134,8 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
     case State::kObsMissing:
       notice.kind = Kind::kObsMissing;
       notice.page = FirstRunPage::kFindObs;
-      notice.title = "Can't find OBS Studio";
-      notice.text = std::format("{0} runs your mic through OBS's filters, so it stopped. Click to show {0} where "
+      notice.title = "Can’t find OBS Studio";
+      notice.text = std::format("{0} runs your mic through OBS’s filters, so it stopped. Click to show {0} where "
                                 "OBS is.",
                                 kDisplayName);
       return notice;
@@ -144,14 +144,14 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       switch (snapshot.setup) {
         case SetupNeed::kObsSettings:
           notice.page = FirstRunPage::kObsSettings;
-          notice.title = "Can't read OBS's settings";
-          notice.text = std::format("{} reads your mic from OBS's settings, so it stopped. Click for what to do.",
+          notice.title = "Can’t read OBS’s settings";
+          notice.text = std::format("{} reads your mic from OBS’s settings, so it stopped. Click for what to do.",
                                     kDisplayName);
           return notice;
         case SetupNeed::kNoMic:
           notice.page = FirstRunPage::kFilters;
           notice.title = "No mic in OBS";
-          notice.text = std::format("OBS's scene collection has no mic now, so {} stopped. Click for what to do.",
+          notice.text = std::format("OBS’s scene collection has no mic now, so {} stopped. Click for what to do.",
                                     kDisplayName);
           return notice;
         case SetupNeed::kPickMic:
@@ -189,7 +189,7 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       if (!snapshot.restart_delayed) return std::nullopt;
       notice.kind = Kind::kRestartNeeded;
       notice.page = FirstRunPage::kProblem;
-      notice.title = std::format("{} couldn't restart yet", kDisplayName);
+      notice.title = std::format("{} couldn’t restart yet", kDisplayName);
       // The detail says the title again.
       notice.text = std::format("It let the installer continue. If the installer says a file is in use, quit "
                                 "{}, then retry the installer.",
@@ -213,7 +213,7 @@ Notice RestartWaitsNotice(RestartWait window) {
   return {.kind = Kind::kRestartWaits,
           // The menu's words: the whole chain is off, not just NVIDIA's filter.
           .title = std::format("{} needs to restart", kDisplayName),
-          .text = std::format("NVIDIA's Audio Effects SDK was installed, so {} stopped. It restarts once you close {}.",
+          .text = std::format("NVIDIA’s Audio Effects SDK was installed, so {} stopped. It restarts once you close {}.",
                               kDisplayName, what),
           .problem = true,
           .sound = true};
@@ -224,11 +224,11 @@ Notice RestartWaitsNotice(RestartWait window) {
 // problem: the mic comes back by itself, and the icon has the pause badge.
 Notice PausedForUpdate(const core::Snapshot& snapshot) {
   return {.kind = Kind::kPausedForUpdate,
-          .title = snapshot.nvidia_update ? "Paused while NVIDIA's Audio Effects SDK updates" : "Paused while a plugin updates",
+          .title = snapshot.nvidia_update ? "Paused while NVIDIA’s Audio Effects SDK updates" : "Paused while a plugin updates",
           // Paused by the user, it stays paused after.
           .text = snapshot.paused_by_user
-                      ? std::format("{} waits for the updated files to stop changing. It's still paused.", kDisplayName)
-                      : std::format("{} doesn't send your mic to the cable until the updated files stop changing. Then "
+                      ? std::format("{} waits for the updated files to stop changing. It’s still paused.", kDisplayName)
+                      : std::format("{} doesn’t send your mic to the cable until the updated files stop changing. Then "
                                     "it resumes by itself.",
                                     kDisplayName)};
 }
@@ -240,7 +240,7 @@ Notice ChainChanged(const core::Snapshot& snapshot, std::string_view mic_before)
   if (Length(text) > kShownText) text = std::format("{} now runs: {}", kDisplayName, ChainText(*snapshot.chain, true));
   return {.kind = Kind::kChainChanged,
           .title = mic_before.empty() || mic == mic_before ? std::format("{} changed in OBS", mic)
-                                                           : std::format("OBS's mic is now {}", mic),
+                                                           : std::format("OBS’s mic is now {}", mic),
           .text = std::move(text)};
 }
 
@@ -257,8 +257,8 @@ std::string Shortened(std::string_view text, size_t length) {
 Notice FilterWarnings(const core::Snapshot& snapshot, const std::vector<std::string>& added) {
   Notice notice{.kind = Kind::kFilterWarnings, .sound = true, .page = FirstRunPage::kWarnings};
   const std::string& mic = snapshot.chain->mic;
-  notice.title = added.size() == 1 ? std::format("{} has a filter {} can't run", mic, kDisplayName)
-                                   : std::format("{} has filters {} can't run", mic, kDisplayName);
+  notice.title = added.size() == 1 ? std::format("{} has a filter {} can’t run", mic, kDisplayName)
+                                   : std::format("{} has filters {} can’t run", mic, kDisplayName);
   if (added.size() == 1 && Length(added.front()) <= kShownText) {
     notice.text = added.front();
     return notice;
@@ -316,8 +316,8 @@ Notice OtherObs(const core::Snapshot& snapshot) {
 // Windows plays the PC's sound into `cable` (DefaultOutputCable).
 Notice SoundIntoCable(std::string_view cable) {
   return {.kind = Kind::kSoundIntoCable,
-          .title = std::format("Windows plays your PC's sound into {}", cable),
-          .text = "You can't hear it, and your other apps hear it with your mic. Click to set Output back to your "
+          .title = std::format("Windows plays your PC’s sound into {}", cable),
+          .text = "You can’t hear it, and your other apps hear it with your mic. Click to set Output back to your "
                   "speakers or headphones.",
           .sound = true,
           .url = "ms-settings:sound"};
@@ -325,7 +325,7 @@ Notice SoundIntoCable(std::string_view cable) {
 
 std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& snapshot) {
   // A copy restarted while paused stays paused.
-  const std::string_view paused = snapshot.paused_by_user ? " It's still paused." : "";
+  const std::string_view paused = snapshot.paused_by_user ? " It’s still paused." : "";
   switch (why) {
     case core::RestartNeed::kObsUpdated:
       return Notice{.kind = Kind::kRestarted,
@@ -337,15 +337,15 @@ std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& sna
                     .text = std::format("{} restarted to use it.{}", kDisplayName, paused)};
     case core::RestartNeed::kAudioChanged:
       return Notice{.kind = Kind::kRestarted,
-                    .title = "OBS's sample rate or channels changed",
+                    .title = "OBS’s sample rate or channels changed",
                     .text = std::format("{} restarted to follow them, as OBS does.{}", kDisplayName, paused)};
     case core::RestartNeed::kNvidiaInstalled:
       return Notice{.kind = Kind::kRestarted,
-                    .title = "NVIDIA's Audio Effects SDK was installed",
-                    .text = std::format("{} restarted to run NVIDIA's noise removal with it.{}", kDisplayName, paused)};
+                    .title = "NVIDIA’s Audio Effects SDK was installed",
+                    .text = std::format("{} restarted to run NVIDIA’s noise removal with it.{}", kDisplayName, paused)};
     case core::RestartNeed::kNvidiaUpdating:
       return Notice{.kind = Kind::kRestarted,
-                    .title = "NVIDIA's Audio Effects SDK is being updated",
+                    .title = "NVIDIA’s Audio Effects SDK is being updated",
                     .text = std::format("{} restarted so its installer could replace the files.{}", kDisplayName, paused)};
     case core::RestartNeed::kPluginUpdating:
       return Notice{.kind = Kind::kRestarted,
@@ -353,7 +353,7 @@ std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& sna
                     .text = std::format("{} restarted so its installer could replace the files.{}", kDisplayName, paused)};
     case core::RestartNeed::kNvidiaUnused:
       return Notice{.kind = Kind::kRestarted,
-                    .title = "NVIDIA's noise removal is no longer needed",
+                    .title = "NVIDIA’s noise removal is no longer needed",
                     .text = std::format("{} restarted to free its memory.{}", kDisplayName, paused)};
     case core::RestartNeed::kNone:
       break;
@@ -523,7 +523,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   }
   if (first && options_.updated) {
     Notice notice = *options_.updated;
-    if (snapshot.paused_by_user) notice.text = "It's still paused. " + notice.text;
+    if (snapshot.paused_by_user) notice.text = "It’s still paused. " + notice.text;
     ShowOrHold(std::move(notice), quiet, update);
   }
   // OBS in another session, and the PC's sound, unless something above was
@@ -562,8 +562,8 @@ Notice FileHoldNotice(bool quitting, bool released = false) {
     return Notice{.kind = Notice::Kind::kFileHold,
                   .title = "An installer may need to try again",
                   .text = quitting
-                      ? std::format("{} is closing. Once it has closed, retry the installer if it still can't continue.", kDisplayName)
-                      : std::format("A file may still be in use. If the installer can't continue, quit {}, "
+                      ? std::format("{} is closing. Once it has closed, retry the installer if it still can’t continue.", kDisplayName)
+                      : std::format("A file may still be in use. If the installer can’t continue, quit {}, "
                                     "wait for it to close, then retry the installer.", kDisplayName),
                   .sound = true};
   }
@@ -571,8 +571,8 @@ Notice FileHoldNotice(bool quitting, bool released = false) {
                 .title = "An installer is waiting",
                 .text = quitting
                     ? std::format("{} is taking longer than usual to close. It will close by itself shortly. "
-                                  "Then retry the installer if it still can't continue.", kDisplayName)
-                    : std::format("{0} is taking longer than usual to release a file. If the installer can't continue, "
+                                  "Then retry the installer if it still can’t continue.", kDisplayName)
+                    : std::format("{0} is taking longer than usual to release a file. If the installer can’t continue, "
                                   "quit {0}, wait for it to close, then retry the installer.", kDisplayName),
                 .sound = true};
 }

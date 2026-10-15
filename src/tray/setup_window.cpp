@@ -122,7 +122,7 @@ void SetupWindow::Show() {
   // What the first run starts from, such as a page asked for.
   host_.SaveFirstRun(saved_);
   if (!Create()) {
-    ShowError("The setup window couldn't open, because Windows' graphics (Direct2D or DirectWrite) aren't working on "
+    ShowError("The setup window couldn’t open, because Windows’ graphics (Direct2D or DirectWrite) aren’t working on "
               "this PC. You can still choose the mic and the cable in the tray menu.");
     return;
   }
@@ -725,7 +725,7 @@ void SetupWindow::Click(int id) {
               window_, L"open",
               action.kind == FirstRunAction::Kind::kOpenSoundOutput ? L"ms-settings:sound" : L"ms-settings:sound-devices",
               nullptr, nullptr, SW_SHOWNORMAL)) <= 32) {
-        ShowError("Couldn't open Windows' Sound settings. Open them from Settings › System › Sound.");
+        ShowError("Couldn’t open Windows’ Sound settings. Open them from Settings › System › Sound.");
       }
       break;
     case FirstRunAction::Kind::kRestart:

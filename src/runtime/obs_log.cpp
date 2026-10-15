@@ -20,7 +20,7 @@ Result<std::unique_ptr<ObsLog>> ObsLog::Open(const std::filesystem::path& file) 
   // _wfopen_s default denies them all access.
   log->file_ = _wfsopen(file.c_str(), L"ab", _SH_DENYWR);
   if (!log->file_) {
-    return Error{std::format("Couldn't open the log file {}.", ToUtf8(file))};
+    return Error{std::format("Couldn’t open the log file {}.", ToUtf8(file))};
   }
   return log;
 }
@@ -108,7 +108,7 @@ Result<std::unique_ptr<ObsLog>> OpenNewLog(const std::filesystem::path& dir,
                                         t.wDay, t.wHour, t.wMinute, t.wSecond);
   // Runs started in the same second get " (2)", " (3)" and so on. Open fails
   // on a file another run still has open, so that moves on too.
-  std::string error = std::format("Couldn't find a free log name in {}.", ToUtf8(dir));
+  std::string error = std::format("Couldn’t find a free log name in {}.", ToUtf8(dir));
   for (int n = 1; n <= 100; ++n) {
     const std::filesystem::path file = dir / (n == 1 ? stem + L".txt" : std::format(L"{} ({}).txt", stem, n));
     std::error_code ec;

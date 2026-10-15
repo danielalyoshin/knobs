@@ -80,7 +80,7 @@ void Controller::SetObsRunning(bool running, Clock::time_point now) {
 void Controller::SetOtherObs(std::vector<OtherObs> others, Clock::time_point now) {
   if (stopped_ || others == other_obs_) return;
   other_obs_ = std::move(others);
-  backend_.Log(other_obs_.empty() ? std::string("OBS isn't running in another Windows session any more.")
+  backend_.Log(other_obs_.empty() ? std::string("OBS isn’t running in another Windows session any more.")
                                   : std::format("OBS is running in {} other Windows session(s).", other_obs_.size()));
   Reconcile(now);
 }
@@ -178,8 +178,8 @@ void Controller::PollFiles(Clock::time_point now) {
     if (settled || now - file_wait_since_ >= timing_.file_wait_max) {
       updating_folders_.clear();
       wait_for_nvidia_ = false;
-      backend_.Log(settled ? std::string("The updated files stopped changing. Importing OBS's settings again.")
-                           : std::format("The updated files kept changing for {}. Importing OBS's settings again anyway.",
+      backend_.Log(settled ? std::string("The updated files stopped changing. Importing OBS’s settings again.")
+                           : std::format("The updated files kept changing for {}. Importing OBS’s settings again anyway.",
                                          Minutes(now - file_wait_since_)));
       ClearFailures();
       devices_ = backend_.ListDevices();
@@ -201,7 +201,7 @@ void Controller::PollFiles(Clock::time_point now) {
   }
   if (!nvidia_installed_ && backend_.NvidiaSdkArrived()) {
     nvidia_installed_ = true;
-    backend_.Log("NVIDIA's Audio Effects SDK was installed since OBS's NVIDIA filters loaded without it.");
+    backend_.Log("NVIDIA’s Audio Effects SDK was installed since OBS’s NVIDIA filters loaded without it.");
   }
   changed |= file_restart_ != before || updating_folders_.empty() == waiting_before ||
              nvidia_installed_ != installed_before;
@@ -237,7 +237,7 @@ void Controller::Tick(Clock::time_point now) {
       const Clock::duration delay = timing_.retry_delays[std::min(stalls_, timing_.retry_delays.size() - 1)];
       ++stalls_;
       retry_at_ = now + delay;
-      stall_detail_ = std::format("\"{}\" stopped sending audio. {} tries again in {}.", import_->mic->mic.name,
+      stall_detail_ = std::format("“{}” stopped sending audio. {} tries again in {}.", import_->mic->mic.name,
                                   kDisplayName, Seconds(delay));
       backend_.Log(std::format("No audio from the mic for {}.", Seconds(now - last_audio_)));
       changed = true;
@@ -368,7 +368,7 @@ void Controller::Refresh(Clock::time_point now) {
     if (libobs_spent_) {
       // Only a new process can try again, and the tray starts one by itself.
       return fail(State::kRestartNeeded,
-                  std::format("OBS's core (libobs) failed to start, and can't start again while {0} runs. {0} has "
+                  std::format("OBS’s core (libobs) failed to start, and can’t start again while {0} runs. {0} has "
                               "to restart to try again.",
                               kDisplayName));
     }
@@ -381,7 +381,7 @@ void Controller::Refresh(Clock::time_point now) {
   } else if (audio.sample_rate != libobs_->sample_rate || audio.speakers != libobs_->speakers) {
     // OBS restarts for this too (OBSBasic::GetRestartRequirements).
     return fail(State::kRestartNeeded,
-                std::format("The OBS profile's audio changed from {} Hz {} to {} Hz {}. {} has to restart to follow "
+                std::format("The OBS profile’s audio changed from {} Hz {} to {} Hz {}. {} has to restart to follow "
                             "it, as OBS does.",
                             libobs_->sample_rate, libobs_->channel_setup, audio.sample_rate, audio.channel_setup,
                             kDisplayName),
@@ -411,13 +411,13 @@ void Controller::AcceptImport(MicImport imported, Clock::time_point now) {
   if (import_->restart == RestartNeed::kNvidiaInstalled) {
     // Kept apart from problem_, so that a new cable or another import can't
     // lose it.
-    if (!nvidia_installed_) backend_.Log("NVIDIA's Audio Effects SDK was installed since OBS's NVIDIA filters loaded.");
+    if (!nvidia_installed_) backend_.Log("NVIDIA’s Audio Effects SDK was installed since OBS’s NVIDIA filters loaded.");
     nvidia_installed_ = true;
     return;
   }
   if (import_->restart == RestartNeed::kNvidiaUnused) {
     return fail(State::kRestartNeeded,
-                std::format("NVIDIA's noise removal is no longer needed. {} has to restart to free its memory.",
+                std::format("NVIDIA’s noise removal is no longer needed. {} has to restart to free its memory.",
                             kDisplayName), SetupNeed::kNone, RestartNeed::kNvidiaUnused);
   }
   if (import_->pending) return;
@@ -432,7 +432,7 @@ void Controller::AcceptImport(MicImport imported, Clock::time_point now) {
     ++chain_revision_;
   } else if (mic.plugins_key != plugins_key_) {
     // Not a change in OBS: an installer updated, added or removed a plugin.
-    backend_.Log("A VST plugin's file changed.");
+    backend_.Log("A VST plugin’s file changed.");
   }
   plugins_key_ = mic.plugins_key;
   PlanChain();
@@ -445,7 +445,7 @@ void Controller::PlanChain() {
   const std::string cable = settings_.cable.empty() ? profile_cable_id_ : settings_.cable;
   if (SameId(cable, kDefaultDevice)) {
     problem_ = Problem{State::kNeedsSetup,
-                       "OBS's Monitoring Device is Default, which is usually your speakers. Choose the cable to send "
+                       "OBS’s Monitoring Device is Default, which is usually your speakers. Choose the cable to send "
                        "the mic to.",
                        SetupNeed::kCable};
     return;
@@ -492,7 +492,7 @@ void Controller::Reconcile(Clock::time_point now) {
       backend_.Log(std::format("Loaded the chain: {}", FormatChain(*next.chain, false)));
     } else {
       chain_error_ = started.error();
-      backend_.Log(std::format("The chain didn't start: {}", started.error()));
+      backend_.Log(std::format("The chain didn’t start: {}", started.error()));
       next = Decide(now);
     }
   }
@@ -537,11 +537,11 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.restart_delayed = file_restart_ == FileRestart::kReleased;
     next.files_held = file_restart_ == FileRestart::kHolding;
     if (next.restart_delayed) {
-      next.detail = std::format("{} couldn't restart yet, so it let the installer continue. "
+      next.detail = std::format("{} couldn’t restart yet, so it let the installer continue. "
                                 "If the installer says a file is in use, quit {}, then retry the installer.",
                                 kDisplayName, kDisplayName);
     } else if (file_restart_nvidia_) {
-      next.detail = std::format("An installer is updating NVIDIA's Audio Effects SDK. {} has to restart to let it finish.",
+      next.detail = std::format("An installer is updating NVIDIA’s Audio Effects SDK. {} has to restart to let it finish.",
                                 kDisplayName);
     } else {
       next.detail = std::format("An installer is updating a plugin {0} is using. {0} has to restart to let it finish.",
@@ -553,7 +553,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.nvidia_update = updating_nvidia_;
   } else if (nvidia_installed_) {
     set(State::kRestartNeeded,
-        std::format("NVIDIA's Audio Effects SDK was installed after {0} loaded OBS's NVIDIA filters. {0} has to "
+        std::format("NVIDIA’s Audio Effects SDK was installed after {0} loaded OBS’s NVIDIA filters. {0} has to "
                     "restart to use it.",
                     kDisplayName));
     next.restart = RestartNeed::kNvidiaInstalled;
@@ -562,7 +562,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     next.setup = problem_->setup;
     next.restart = problem_->restart;
   } else if (import_pending_ && !loaded_) {
-    set(paused_by_user_ ? State::kPausedByUser : State::kStarting, "Checking your mic's VST plugins…");
+    set(paused_by_user_ ? State::kPausedByUser : State::kStarting, "Checking your mic’s VST plugins…");
   } else if (chain_error_) {
     set(State::kFailed, *chain_error_);
   } else if (!devices_.error.empty()) {
@@ -573,10 +573,10 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   } else if (obs_running_ && settings_.pause_for_obs) {
     set(State::kPausedForObs);
   } else if (!CablePresent()) {
-    set(State::kCableMissing, std::format("\"{}\" isn't connected.", CableName()));
+    set(State::kCableMissing, std::format("“{}” isn’t connected.", CableName()));
   } else if (!MicPresent()) {
-    set(State::kMicMissing, MicIsDefault() ? std::string("There's no recording device.")
-                                           : std::format("The recording device for \"{}\" isn't connected.",
+    set(State::kMicMissing, MicIsDefault() ? std::string("There’s no recording device.")
+                                           : std::format("The recording device for “{}” isn’t connected.",
                                                          import_->mic->mic.name));
   } else if (retry_at_ && now < *retry_at_) {
     set(State::kMicMissing, stall_detail_);

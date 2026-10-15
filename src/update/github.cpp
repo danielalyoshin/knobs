@@ -39,7 +39,7 @@ std::string DescribeHttpError(DWORD code) {
 
 Error Failed(std::string_view what, DWORD code, const Cancel& cancel) {
   if (cancel.stopped()) return Error{"The request was stopped."};
-  return Error{std::format("Couldn't {}: {}", what, DescribeHttpError(code))};
+  return Error{std::format("Couldn’t {}: {}", what, DescribeHttpError(code))};
 }
 
 // A WinHTTP handle that the Cancel can close.
@@ -76,7 +76,7 @@ Status Exchange(const wchar_t* verb, std::string_view url, bool follow_redirects
   parts.dwUrlPathLength = static_cast<DWORD>(-1);
   parts.dwExtraInfoLength = static_cast<DWORD>(-1);
   if (!WinHttpCrackUrl(wide.c_str(), 0, 0, &parts) || parts.nScheme != INTERNET_SCHEME_HTTPS) {
-    return Error{std::format("{} isn't an HTTPS address.", url)};
+    return Error{std::format("{} isn’t an HTTPS address.", url)};
   }
   const std::wstring host(parts.lpszHostName, parts.dwHostNameLength);
   const std::wstring path = std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength) +
@@ -106,7 +106,7 @@ Status Exchange(const wchar_t* verb, std::string_view url, bool follow_redirects
   DWORD size = sizeof(status);
   if (!WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                            WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX)) {
-    return Failed(std::format("read {}'s answer", ToUtf8(host)), GetLastError(), cancel);
+    return Failed(std::format("read {}’s answer", ToUtf8(host)), GetLastError(), cancel);
   }
   return read(request.get(), status);
 }
@@ -157,12 +157,12 @@ Result<Version> FindLatestRelease(Cancel& cancel) {
     std::wstring location(size / sizeof(wchar_t), L'\0');
     if (location.empty() || !WinHttpQueryHeaders(request, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX,
                                                  location.data(), &size, WINHTTP_NO_HEADER_INDEX)) {
-      return Status(Error{"GitHub didn't say where the latest release is."});
+      return Status(Error{"GitHub didn’t say where the latest release is."});
     }
     location.resize(size / sizeof(wchar_t));
     latest = VersionFromReleaseUrl(ToUtf8(location));
     if (!latest) {
-      return Status(Error{std::format("GitHub's latest release is at {}, which names no version.", ToUtf8(location))});
+      return Status(Error{std::format("GitHub’s latest release is at {}, which names no version.", ToUtf8(location))});
     }
     return Status(Ok{});
   });
@@ -181,7 +181,7 @@ DownloadResult Download(std::string_view url, const std::filesystem::path& file,
     const HANDLE out = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
                                    nullptr);
     if (out == INVALID_HANDLE_VALUE) {
-      return Status(Error{std::format("Couldn't create {}: {}", ToUtf8(file), DescribeWinError(GetLastError()))});
+      return Status(Error{std::format("Couldn’t create {}: {}", ToUtf8(file), DescribeWinError(GetLastError()))});
     }
     std::string buffer(kChunk, '\0');
     uint64_t total = 0;
@@ -202,7 +202,7 @@ DownloadResult Download(std::string_view url, const std::filesystem::path& file,
       }
       DWORD written = 0;
       if (!WriteFile(out, buffer.data(), read, &written, nullptr) || written != read) {
-        error = Error{std::format("Couldn't write {}: {}", ToUtf8(file), DescribeWinError(GetLastError()))};
+        error = Error{std::format("Couldn’t write {}: {}", ToUtf8(file), DescribeWinError(GetLastError()))};
         break;
       }
     }

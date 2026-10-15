@@ -37,24 +37,24 @@ std::string DescribeTrust(LONG status) {
     case TRUST_E_NOSIGNATURE:
     case TRUST_E_SUBJECT_FORM_UNKNOWN:
     case TRUST_E_PROVIDER_UNKNOWN:
-      return "it isn't signed";
+      return "it isn’t signed";
     case TRUST_E_BAD_DIGEST:
       return "it was changed after it was signed";
     case CERT_E_REVOKED:
       return "its certificate was revoked";
     case CERT_E_REVOCATION_FAILURE:
     case CRYPT_E_REVOCATION_OFFLINE:
-      return "Windows couldn't check whether its certificate was revoked";
+      return "Windows couldn’t check whether its certificate was revoked";
     case HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION):
     case HRESULT_FROM_WIN32(ERROR_LOCK_VIOLATION):
       return "another program is using it";
     case CERT_E_UNTRUSTEDROOT:
     case CERT_E_CHAINING:
-      return "its certificate doesn't come from an authority Windows trusts";
+      return "its certificate doesn’t come from an authority Windows trusts";
     case CERT_E_EXPIRED:
       return "its certificate expired, and it has no time stamp from when it was signed";
     default:
-      return std::format("Windows doesn't trust its signature: {}", DescribeWinError(static_cast<unsigned long>(status)));
+      return std::format("Windows doesn’t trust its signature: {}", DescribeWinError(static_cast<unsigned long>(status)));
   }
 }
 
@@ -131,21 +131,21 @@ SignatureCheck CheckReleaseSignature(const std::filesystem::path& file, Revocati
   };
   if (trust != ERROR_SUCCESS) {
     checked = {.verdict = MayPassLater(trust) ? Verdict::kUnknown : Verdict::kRejected,
-               .error = std::format("{} can't be installed, because {}.", name, DescribeTrust(trust))};
+               .error = std::format("{} can’t be installed, because {}.", name, DescribeTrust(trust))};
   } else {
     CRYPT_PROVIDER_DATA* provider = WTHelperProvDataFromStateData(data.hWVTStateData);
     CRYPT_PROVIDER_SGNR* signer = provider ? WTHelperGetProvSignerFromChain(provider, 0, FALSE, 0) : nullptr;
     if (!signer || signer->csCertChain == 0 || !signer->pasCertChain) {
-      reject(std::format("{} can't be installed, because its signer couldn't be read.", name));
+      reject(std::format("{} can’t be installed, because its signer couldn’t be read.", name));
     } else {
       PCCERT_CONTEXT leaf = signer->pasCertChain[0].pCert;
       PCCERT_CONTEXT root = signer->pasCertChain[signer->csCertChain - 1].pCert;
       if (CommonName(leaf) != kSignerName) {
-        reject(std::format("{} can't be installed, because it was signed by {}, not {}.", name,
+        reject(std::format("{} can’t be installed, because it was signed by {}, not {}.", name,
                            ToUtf8(CommonName(leaf)), ToUtf8(kSignerName)));
       } else if (!HasUsage(leaf, kSignerUsage) || !IsRoot(root)) {
         // The certificate profile's usage and root (kSignerUsage, IsRoot).
-        reject(std::format("{} can't be installed, because it isn't signed the way {}'s releases are.", name,
+        reject(std::format("{} can’t be installed, because it isn’t signed the way {}’s releases are.", name,
                            kDisplayName));
       }
     }

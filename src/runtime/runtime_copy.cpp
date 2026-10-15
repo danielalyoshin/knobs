@@ -161,7 +161,7 @@ std::optional<ManifestSummary> ReadIntactManifest(const fs::path& copy_root, con
       std::error_code ec;
       if (fs::file_size(dll, ec) != size || ec) return std::nullopt;
       if (WriteTime(dll, ec) != write_time || ec) return std::nullopt;
-      summary.skipped.push_back(std::format("{}: its files couldn't be read when the copy was made", rest));
+      summary.skipped.push_back(std::format("{}: its files couldn’t be read when the copy was made", rest));
     } else if (rest.starts_with("file ")) {
       rest.remove_prefix(5);
       uint64_t size = 0;
@@ -201,7 +201,7 @@ Status WriteManifest(const fs::path& copy_root, const ObsInstall& install, const
     const uint64_t size = fs::file_size(dll, size_error);
     const int64_t write_time = WriteTime(dll, time_error);
     if (size_error || time_error) {
-      return Error{std::format("Couldn't read {}: {}", ToUtf8(dll), Describe(size_error ? size_error : time_error))};
+      return Error{std::format("Couldn’t read {}: {}", ToUtf8(dll), Describe(size_error ? size_error : time_error))};
     }
     out << "skipped " << size << ' ' << write_time << ' ' << module << '\n';
   }
@@ -211,14 +211,14 @@ Status WriteManifest(const fs::path& copy_root, const ObsInstall& install, const
     const uint64_t size = fs::file_size(install.root / file, size_error);
     const int64_t write_time = WriteTime(install.root / file, time_error);
     if (size_error || time_error) {
-      return Error{std::format("Couldn't read {}: {}", ToUtf8(install.root / file),
+      return Error{std::format("Couldn’t read {}: {}", ToUtf8(install.root / file),
                                Describe(size_error ? size_error : time_error))};
     }
     out << "file " << size << ' ' << write_time << ' ' << ToObsPath(file) << '\n';
   }
   out.close();
   if (!out || !FlushToDisk(manifest)) {
-    return Error{std::format("Couldn't write {}.", ToUtf8(manifest))};
+    return Error{std::format("Couldn’t write {}.", ToUtf8(manifest))};
   }
   return Ok{};
 }
@@ -339,7 +339,7 @@ FolderCheck CheckFolder(const fs::path& folder, const std::function<bool()>& sto
     }
     CloseHandle(handle);
   }
-  if (ec) check.in_use = std::format("couldn't look through it: {}", Describe(ec));
+  if (ec) check.in_use = std::format("couldn’t look through it: {}", Describe(ec));
   return check;
 }
 
@@ -389,11 +389,11 @@ std::optional<PrunedCopies::Left> RemoveCopyFolder(const fs::path& runtime_base,
   }
   if (ec) {
     return PrunedCopies::Left{
-        folder.path, std::format("couldn't set it aside, so a program may be using it: {}", Describe(ec))};
+        folder.path, std::format("couldn’t set it aside, so a program may be using it: {}", Describe(ec))};
   }
   // What doesn't go now is a <version>.old-<n> folder, for next time.
   if (!RemoveAll(retired, stop_requested, ec)) {
-    return PrunedCopies::Left{retired, ec ? std::format("couldn't delete it: {}", Describe(ec))
+    return PrunedCopies::Left{retired, ec ? std::format("couldn’t delete it: {}", Describe(ec))
                                           : std::string("pruning stopped while it was being deleted")};
   }
   bytes = check.bytes;
@@ -414,13 +414,13 @@ Status CopyWhole(const fs::path& from, const fs::path& to) {
   part += L".partial";
   std::error_code ec;
   fs::copy_file(from, part, fs::copy_options::overwrite_existing, ec);
-  if (ec) return Error{std::format("Couldn't copy {} to {}: {}", ToUtf8(from), ToUtf8(part), Describe(ec))};
+  if (ec) return Error{std::format("Couldn’t copy {} to {}: {}", ToUtf8(from), ToUtf8(part), Describe(ec))};
   ClearReadOnly(part);
   std::string error;
   if (!FlushToDisk(part)) {
-    error = std::format("Couldn't write {}: {}", ToUtf8(part), DescribeWinError(GetLastError()));
+    error = std::format("Couldn’t write {}: {}", ToUtf8(part), DescribeWinError(GetLastError()));
   } else if (!MoveFileExW(part.c_str(), to.c_str(), MOVEFILE_WRITE_THROUGH)) {
-    error = std::format("Couldn't move {} to {}: {}", ToUtf8(part), ToUtf8(to), DescribeWinError(GetLastError()));
+    error = std::format("Couldn’t move {} to {}: {}", ToUtf8(part), ToUtf8(to), DescribeWinError(GetLastError()));
   }
   if (error.empty()) return Ok{};
   fs::remove(part, ec);
@@ -504,7 +504,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
     std::error_code ec;
     const auto add = [&](const fs::path& file) -> Status {
       const uint64_t size = fs::file_size(file, ec);
-      if (ec) return Error{std::format("Couldn't read {}: {}", ToUtf8(file), Describe(ec))};
+      if (ec) return Error{std::format("Couldn’t read {}: {}", ToUtf8(file), Describe(ec))};
       part.files.push_back(file.lexically_relative(install_root));
       part.bytes += size;
       return Ok{};
@@ -525,7 +525,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
         if (optional && !KnobsReadsOptionalData(it->path())) continue;
         if (auto added = add(it->path()); !added) return Error{added.error()};
       }
-      if (ec) return Error{std::format("Couldn't read {}: {}", ToUtf8(dir), Describe(ec))};
+      if (ec) return Error{std::format("Couldn’t read {}: {}", ToUtf8(dir), Describe(ec))};
     }
     return part;
   };
@@ -590,7 +590,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   const fs::path staging = runtime_base / FromUtf8(version + ".partial");
   std::error_code ec;
   fs::remove_all(staging, ec);
-  if (ec) return Error{std::format("Couldn't clear {}: {}", ToUtf8(staging), Describe(ec))};
+  if (ec) return Error{std::format("Couldn’t clear {}: {}", ToUtf8(staging), Describe(ec))};
 
   // An optional module's file that won't copy leaves that module out, as
   // one that can't be read does, so a chain that doesn't need it still runs.
@@ -609,10 +609,10 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
     fs::create_directories(to.parent_path(), ec);
     if (!ec) fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
     if (ec) {
-      error = std::format("Couldn't copy {} to {}: {}", ToUtf8(from), ToUtf8(to), Describe(ec));
+      error = std::format("Couldn’t copy {} to {}: {}", ToUtf8(from), ToUtf8(to), Describe(ec));
     } else {
       ClearReadOnly(to);
-      if (!FlushToDisk(to)) error = std::format("Couldn't write {}: {}", ToUtf8(to), DescribeWinError(GetLastError()));
+      if (!FlushToDisk(to)) error = std::format("Couldn’t write {}: {}", ToUtf8(to), DescribeWinError(GetLastError()));
     }
     if (error.empty()) continue;
     if (module == module_of.end()) return Error{error};
@@ -647,7 +647,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
     fs::rename(target, retired, ec);
     if (ec) {
       return Error{std::format(
-          "Couldn't replace the OBS runtime copy in {}. If {} is running, close it and try again. ({})",
+          "Couldn’t replace the OBS runtime copy in {}. If {} is running, close it and try again. ({})",
           ToUtf8(target), kDisplayName, Describe(ec))};
     }
   }
@@ -661,7 +661,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   if (ec) {
     std::error_code ignored;
     if (replacing) fs::rename(retired, target, ignored);
-    return Error{std::format("Couldn't move {} into place: {}", ToUtf8(staging), Describe(ec))};
+    return Error{std::format("Couldn’t move {} into place: {}", ToUtf8(staging), Describe(ec))};
   }
   RemoveRetiredCopies(runtime_base, version);
   return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes, std::move(skipped)};

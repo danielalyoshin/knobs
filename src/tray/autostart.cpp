@@ -59,7 +59,7 @@ Status SetStartWithWindows(const RunEntry& entry, bool on) {
     if (status == ERROR_SUCCESS) status = DeleteValue(entry.approved_key, entry.name);
   }
   if (status != ERROR_SUCCESS) {
-    return Error{std::format("Couldn't change Start with Windows: {}", DescribeWinError(status))};
+    return Error{std::format("Couldn’t change Start with Windows: {}", DescribeWinError(status))};
   }
   return Ok{};
 }
@@ -73,7 +73,7 @@ Status RunOnceAtNextSignIn(const RunEntry& entry, bool on) {
     status = DeleteValue(entry.run_key, entry.name);
   }
   if (status != ERROR_SUCCESS) {
-    return Error{std::format("Couldn't change the entry for the next sign-in in the registry: {}",
+    return Error{std::format("Couldn’t change the entry for the next sign-in in the registry: {}",
                              DescribeWinError(status))};
   }
   return Ok{};

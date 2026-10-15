@@ -22,7 +22,7 @@ Result<ObsVersion> ReadFileVersion(const fs::path& file) {
   DWORD ignored = 0;
   const DWORD size = GetFileVersionInfoSizeW(file.c_str(), &ignored);
   if (size == 0) {
-    return Error{std::format("Couldn't read the version of {}: {}", ToUtf8(file),
+    return Error{std::format("Couldn’t read the version of {}: {}", ToUtf8(file),
                              DescribeWinError(GetLastError()))};
   }
   std::vector<std::byte> data(size);
@@ -73,7 +73,7 @@ Result<ObsInstall> InspectObsInstall(const fs::path& folder) {
   }
 
   auto missing = [&](const fs::path& path) {
-    return Error{std::format("{} isn't a complete OBS Studio install: {} is missing.", ToUtf8(root),
+    return Error{std::format("{} isn’t a complete OBS Studio install: {} is missing.", ToUtf8(root),
                              ToUtf8(path.lexically_relative(root)))};
   };
   if (!fs::exists(ObsDll(root), ec)) return missing(ObsDll(root));
@@ -144,10 +144,10 @@ Result<ObsInstall> FindObsInstall(const std::vector<fs::path>& candidates) {
   // What was found, and why it can't be used, says more than advice: the
   // first run's page gives that.
   if (failures.empty()) {
-    return Error{std::format("OBS Studio isn't where its installer puts it. {} needs {}.", kDisplayName,
+    return Error{std::format("OBS Studio isn’t where its installer puts it. {} needs {}.", kDisplayName,
                              DescribeSupportedObsVersions())};
   }
-  return Error{"The OBS Studio where its installer puts it can't be used:" + failures};
+  return Error{"The OBS Studio where its installer puts it can’t be used:" + failures};
 }
 
 std::optional<fs::path> PickObsInstallFolder(void* owner) {

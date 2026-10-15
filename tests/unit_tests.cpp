@@ -958,7 +958,7 @@ TEST(FileOplockHandoffThatDoesntCheckOutStillClosesItsFiles) {
   CHECK(held != INVALID_HANDLE_VALUE);
   if (held == INVALID_HANDLE_VALUE) return;
   const Status waited = WaitForFileOplocks(std::format(L"zz,{:x}", reinterpret_cast<uintptr_t>(held)));
-  CHECK(!waited.ok() && waited.error() == "The restart's file handoff is invalid.");
+  CHECK(!waited.ok() && waited.error() == "The restart’s file handoff is invalid.");
   DWORD flags = 0;
   CHECK(!GetHandleInformation(held, &flags));
   // Closed, so a writer gets in.
@@ -1292,7 +1292,7 @@ TEST(EnsureLeavesOutAnOptionalModuleItCantCopy) {
   auto first = EnsureRuntimeCopy(install, base, false);
   if (lock != INVALID_HANDLE_VALUE) CloseHandle(lock);
   CHECK(first.ok() && !first->reused && first->file_count == 9);
-  CHECK(first.ok() && first->skipped.size() == 1 && first->skipped[0].starts_with("obs-vst: Couldn't copy"));
+  CHECK(first.ok() && first->skipped.size() == 1 && first->skipped[0].starts_with("obs-vst: Couldn’t copy"));
   CHECK(!fs::exists(base / L"32.2.2" / L"obs-plugins" / L"64bit" / L"obs-vst.dll"));
   CHECK(fs::exists(base / L"32.2.2" / L"obs-plugins" / L"64bit" / L"obs-filters.dll"));
   auto again = EnsureRuntimeCopy(install, base, false);
@@ -1323,7 +1323,7 @@ TEST(EnsureRefusesUnsupportedVersions) {
     const ObsInstall install{MakeFakeInstall(dir.path / FromUtf8(version.ToString())), version};
     auto copy = EnsureRuntimeCopy(install, base, false);
     CHECK(!copy.ok());
-    CHECK(!copy.ok() && copy.error().find("isn't supported") != std::string::npos);
+    CHECK(!copy.ok() && copy.error().find("isn’t supported") != std::string::npos);
   }
   CHECK(!fs::exists(base) || fs::is_empty(base));
 }
@@ -1557,7 +1557,7 @@ TEST(PruneStopsWaitingForACopyInUse) {
   CHECK(took < std::chrono::milliseconds(600));
   CHECK(pruned.removed.empty() && pruned.left.size() == 1);
   if (pruned.left.size() == 1) {
-    CHECK(pruned.left[0].folder == open && pruned.left[0].why.starts_with("couldn't set it aside"));
+    CHECK(pruned.left[0].folder == open && pruned.left[0].why.starts_with("couldn’t set it aside"));
   }
   CHECK(IsWhole(open) && IsWhole(keep));
 }
@@ -2121,7 +2121,7 @@ TEST(ConfigReportsWhatsMissing) {
   CHECK(!none.ok() && none.error().ends_with("obs-studio.") && none.error().find("Open OBS") == std::string::npos);
   WriteObsConfig(dir.path, {{"global.ini", ""}, {"user.ini", "[Basic]\nProfile=Gone\nSceneCollection=C\n"}});
   auto gone = import::FindActiveObsConfig({dir.path, false});
-  CHECK(!gone.ok() && gone.error().find("\"Gone\"") != std::string::npos);
+  CHECK(!gone.ok() && gone.error().find("“Gone”") != std::string::npos);
   WriteObsConfig(dir.path, {{"basic/profiles/Gone/basic.ini", "[Audio]\nSampleRate=fast\n"}});
   auto bad_rate = import::FindActiveObsConfig({dir.path, false});
   CHECK(!bad_rate.ok() && bad_rate.error().find("sample rate") != std::string::npos);
@@ -2160,7 +2160,7 @@ TEST(PickMicByNumberOrName) {
   mics[1].location = "sources[2]";
   mics[2].name = "podcast mic";
   mics[2].location = "sources[5]";
-  CHECK(import::DescribeMic(mics[0], 1) == "1. \"Mic/Aux\" (AuxAudioDevice1, monitored)");
+  CHECK(import::DescribeMic(mics[0], 1) == "1. “Mic/Aux” (AuxAudioDevice1, monitored)");
   CHECK(import::PickMic(mics, "2").ok() && *import::PickMic(mics, "2") == 1);
   CHECK(import::PickMic(mics, "MIC/AUX").ok() && *import::PickMic(mics, "MIC/AUX") == 0);
   const auto ambiguous = import::PickMic(mics, "Podcast Mic");
@@ -2168,7 +2168,7 @@ TEST(PickMicByNumberOrName) {
   CHECK(!import::PickMic(mics, "4").ok());
   CHECK(!import::PickMic(mics, "0").ok());
   const auto unpicked = import::PickMic(mics, "");
-  CHECK(!unpicked.ok() && unpicked.error().find("3. \"podcast mic\" (sources[5])") != std::string::npos);
+  CHECK(!unpicked.ok() && unpicked.error().find("3. “podcast mic” (sources[5])") != std::string::npos);
   CHECK(import::PickMic({mics[1]}, "").ok());
   CHECK(!import::PickMic({}, "").ok());
 }
@@ -2181,7 +2181,7 @@ TEST(SavedMicPickIsAName) {
   CHECK(pick("1").ok() && *pick("1") == 2);
   CHECK(pick("7").ok() && *pick("7") == 3);
   const auto numbered = pick("2");
-  CHECK(!numbered.ok() && numbered.error().starts_with("There's no mic named \"2\". Choose one:"));
+  CHECK(!numbered.ok() && numbered.error().starts_with("There’s no mic named “2”. Choose one:"));
   // The exact name first, then one that differs only in case.
   CHECK(pick("Podcast Mic").ok() && *pick("Podcast Mic") == 1);
   CHECK(pick("podcast mic").ok() && *pick("podcast mic") == 4);

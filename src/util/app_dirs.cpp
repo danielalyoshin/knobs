@@ -20,7 +20,7 @@ Result<std::filesystem::path> KnownFolder(const KNOWNFOLDERID& id, const char* n
   std::filesystem::path path = SUCCEEDED(hr) ? std::filesystem::path(raw) : std::filesystem::path();
   CoTaskMemFree(raw);
   if (FAILED(hr)) {
-    return Error{std::format("Couldn't find the {} folder: {}", name,
+    return Error{std::format("Couldn’t find the {} folder: {}", name,
                              DescribeWinError(static_cast<unsigned long>(hr)))};
   }
   return path;

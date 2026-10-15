@@ -111,7 +111,7 @@ TEST(StatusLineFollowsTheState) {
   snapshot.state = State::kPausedForUpdate;
   CHECK(StatusLine(snapshot) == "Paused while a plugin updates: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.nvidia_update = true;
-  CHECK(StatusLine(snapshot) == "Paused while NVIDIA's SDK updates: Mic/Aux › 4 filters › CABLE In 16ch");
+  CHECK(StatusLine(snapshot) == "Paused while NVIDIA’s SDK updates: Mic/Aux › 4 filters › CABLE In 16ch");
   snapshot.nvidia_update = false;
   snapshot.state = State::kMicMissing;
   CHECK(StatusLine(snapshot) == "Mic missing: Mic/Aux › 4 filters › CABLE In 16ch");
@@ -131,13 +131,13 @@ TEST(StatusLineFollowsTheState) {
   snapshot.setup = SetupNeed::kNoMic;
   CHECK(StatusLine(snapshot) == "No mic in OBS yet");
   snapshot.setup = SetupNeed::kObsSettings;
-  CHECK(StatusLine(snapshot) == "Can't read OBS's settings");
+  CHECK(StatusLine(snapshot) == "Can’t read OBS’s settings");
   snapshot.state = State::kObsMissing;
-  CHECK(StatusLine(snapshot) == "Can't find OBS Studio");
+  CHECK(StatusLine(snapshot) == "Can’t find OBS Studio");
   snapshot.state = State::kObsUnsupported;
   // Only a newer OBS is "not yet" supported.
   snapshot.obs.version = {34, 0, 0};
-  CHECK(StatusLine(snapshot) == std::format("{} doesn't support OBS 34.0.0 yet", kDisplayName));
+  CHECK(StatusLine(snapshot) == std::format("{} doesn’t support OBS 34.0.0 yet", kDisplayName));
   snapshot.obs.version = {31, 1, 4};
   CHECK(StatusLine(snapshot) == std::format("OBS 31.1.4 is too old for {}", kDisplayName));
   snapshot.state = State::kRestartNeeded;
@@ -203,13 +203,13 @@ TEST(MenuListsTheDesignedItems) {
   other.other_obs = {{.session = 2, .account = "Alex"}};
   const Menu other_menu = BuildMenu(other, {}, false);
   CHECK(other_menu.items[1].id == kIdOtherObs && !other_menu.items[1].enabled);
-  CHECK(other_menu.items[1].text == "OBS in Alex's account may also send audio to CABLE In 16ch");
+  CHECK(other_menu.items[1].text == "OBS in Alex’s account may also send audio to CABLE In 16ch");
   // Before a cable is chosen.
   other.state = State::kNeedsSetup;
   other.setup = SetupNeed::kCable;
   other.chain->cable.clear();
   CHECK(FindItem(BuildMenu(other, {}, false).items, kIdOtherObs)->text ==
-        "OBS in Alex's account may also send audio to your cable");
+        "OBS in Alex’s account may also send audio to your cable");
 
   // Windows plays the PC's sound into a cable: a line that opens Sound
   // settings.
@@ -217,7 +217,7 @@ TEST(MenuListsTheDesignedItems) {
   sound.default_output = kCableInputId;
   const Menu sound_menu = BuildMenu(sound, {}, false);
   CHECK(sound_menu.items[1].id == kIdSoundIntoCable && sound_menu.items[1].enabled && !sound_menu.items[1].bold);
-  CHECK(sound_menu.items[1].text == "Windows plays your PC's sound into CABLE Input…");
+  CHECK(sound_menu.items[1].text == "Windows plays your PC’s sound into CABLE Input…");
   sound.default_output = kSpeakersId;
   CHECK(!FindItem(BuildMenu(sound, {}, false).items, kIdSoundIntoCable));
 }
@@ -439,6 +439,52 @@ TEST(MenuEscapesAmpersands) {
   core::Snapshot snapshot = Running();
   snapshot.chain->mic = "Ben & Jo";
   CHECK(BuildMenu(snapshot, {}, false).items[0].text == "Ben && Jo › 4 filters › CABLE In 16ch");
+}
+
+// Each item's text in `items` and their submenus.
+void AllTexts(const std::vector<MenuItem>& items, std::vector<std::string>& texts) {
+  for (const MenuItem& item : items) {
+    texts.push_back(item.text);
+    AllTexts(item.items, texts);
+  }
+}
+
+TEST(MenuUsesTypographicQuotes) {
+  // The status line and the menu in each state, with an update to offer.
+  std::vector<core::Snapshot> snapshots;
+  for (const State state : {State::kStarting, State::kRunning, State::kPausedByUser, State::kPausedForObs,
+                            State::kPausedForUpdate, State::kMicMissing, State::kCableMissing, State::kObsMissing,
+                            State::kObsUnsupported, State::kRestartNeeded, State::kFailed}) {
+    core::Snapshot snapshot = Running();
+    snapshot.state = state;
+    snapshots.push_back(snapshot);
+  }
+  for (const SetupNeed need : {SetupNeed::kObsSettings, SetupNeed::kNoMic, SetupNeed::kPickMic, SetupNeed::kCable}) {
+    core::Snapshot snapshot = Running();
+    snapshot.state = State::kNeedsSetup;
+    snapshot.setup = need;
+    snapshots.push_back(snapshot);
+  }
+  core::Snapshot newer = Running();
+  newer.state = State::kObsUnsupported;
+  newer.obs.version = {34, 0, 0};
+  core::Snapshot nvidia = Running();
+  nvidia.state = State::kPausedForUpdate;
+  nvidia.nvidia_update = true;
+  core::Snapshot other = Running();
+  other.other_obs = {{.session = 2, .account = "Alex"}};
+  core::Snapshot sound = Running();
+  sound.default_output = kCableInputId;
+  snapshots.insert(snapshots.end(), {newer, nvidia, other, sound});
+  for (const bool install_now : {false, true}) {
+    const UpdateMenu updates{
+        .offered = true, .can_install = true, .version = update::Version{0, 3, 0}, .install_now = install_now};
+    for (const core::Snapshot& snapshot : snapshots) {
+      std::vector<std::string> texts = {StatusLine(snapshot)};
+      AllTexts(BuildMenu(snapshot, {}, false, updates).items, texts);
+      for (const std::string& text : texts) CHECK(test::NoStraightQuotes(text));
+    }
+  }
 }
 
 // --- Settings file ------------------------------------------------------------------

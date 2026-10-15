@@ -20,9 +20,9 @@ constexpr char kLocale[] = "en-US";
 std::string_view DescribeModuleError(int code) {
   switch (code) {
     case MODULE_FAILED_TO_OPEN:
-      return "its DLL couldn't be loaded";
+      return "its DLL couldn’t be loaded";
     case MODULE_MISSING_EXPORTS:
-      return "it doesn't export the OBS module functions";
+      return "it doesn’t export the OBS module functions";
     case MODULE_INCOMPATIBLE_VER:
       return "it was built for a newer libobs";
     case MODULE_HARDCODED_SKIP:
@@ -40,7 +40,7 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
   std::error_code ec;
   std::filesystem::create_directories(options.module_config_dir, ec);
   if (ec) {
-    return Error{std::format("Couldn't create {}.", ToUtf8(options.module_config_dir))};
+    return Error{std::format("Couldn’t create {}.", ToUtf8(options.module_config_dir))};
   }
 
   std::unique_ptr<ObsSession> session(new ObsSession(runtime, options));
@@ -71,7 +71,7 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
     video.scale_type = OBS_SCALE_BICUBIC;
     const int result = api.obs_reset_video(&video);
     if (result != OBS_VIDEO_SUCCESS) {
-      return Error{std::format("Couldn't start the dummy video canvas (obs_reset_video error {}).",
+      return Error{std::format("Couldn’t start the dummy video canvas (obs_reset_video error {}).",
                                result)};
     }
     session->video_running_ = true;
@@ -97,7 +97,7 @@ Result<obs_module_t*> ObsSession::OpenModule(std::string_view name) {
   obs_module_t* module = nullptr;
   const int code = runtime_.api().obs_open_module(&module, binary.c_str(), data.c_str());
   if (code != MODULE_SUCCESS) {
-    return Error{std::format("Couldn't open the OBS module {}: {}.", name, DescribeModuleError(code))};
+    return Error{std::format("Couldn’t open the OBS module {}: {}.", name, DescribeModuleError(code))};
   }
   return module;
 }
@@ -123,11 +123,11 @@ Status ObsSession::LoadOptionalModule(std::string_view name) {
   assert(GetCurrentThreadId() == thread_id_ && "modules load on the obs_startup() thread");
   if (module(name)) return Ok{};
   if (const auto failed = module_errors_.find(name); failed != module_errors_.end()) return Error{failed->second};
-  if (!running_) return Error{"libobs isn't running."};
+  if (!running_) return Error{"libobs isn’t running."};
   const auto known = std::find_if(kOptionalObsModules.begin(), kOptionalObsModules.end(),
                                   [&](const OptionalObsModule& module) { return module.name == name; });
   if (known == kOptionalObsModules.end()) {
-    return Error{std::format("{} doesn't load the OBS module {}.", kDisplayName, name)};
+    return Error{std::format("{} doesn’t load the OBS module {}.", kDisplayName, name)};
   }
 
   const auto open = [&]() -> Status {
@@ -135,7 +135,7 @@ Status ObsSession::LoadOptionalModule(std::string_view name) {
     if (!std::filesystem::is_regular_file(PluginDll(runtime_.root(), name, runtime_.install_version()), ec)) {
       // The install lacks it, or its files couldn't be read when the copy
       // was made (RuntimeFileSet::skipped), which the log says.
-      return Error{std::format("{}'s copy of OBS has no {} module.", kDisplayName, name)};
+      return Error{std::format("{}’s copy of OBS has no {} module.", kDisplayName, name)};
     }
     auto module = OpenModule(name);
     if (!module) return Error{module.error()};
@@ -143,7 +143,7 @@ Status ObsSession::LoadOptionalModule(std::string_view name) {
     // thread's application.
     if (name == kVstModule && !qt_) {
       auto qt = QtApp::Start();
-      if (!qt) return Error{std::format("Couldn't start the Qt application obs-vst needs: {}", qt.error())};
+      if (!qt) return Error{std::format("Couldn’t start the Qt application obs-vst needs: {}", qt.error())};
       qt_ = std::move(*qt);
     }
     // Neither module has a post_load callback, which obs_post_load_modules()
@@ -153,7 +153,7 @@ Status ObsSession::LoadOptionalModule(std::string_view name) {
   Status opened = open();
   if (!opened) {
     module_errors_.emplace(name, opened.error());
-    runtime_.api().blog(LOG_WARNING, "Couldn't load the OBS module %s: %s", std::string(name).c_str(),
+    runtime_.api().blog(LOG_WARNING, "Couldn’t load the OBS module %s: %s", std::string(name).c_str(),
                         opened.error().c_str());
   }
   return opened;

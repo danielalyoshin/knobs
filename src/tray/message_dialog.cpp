@@ -5,7 +5,6 @@
 
 #include "app_info.h"
 #include "tray/resource.h"
-#include "tray/rich_text.h"
 
 namespace knobs::tray {
 
@@ -32,12 +31,9 @@ void ShowMessageDialog(HINSTANCE instance, const MessageDialog& dialog) {
   } else {
     config.pszMainIcon = dialog.icon;
   }
-  const std::wstring instruction = CurlQuotes(dialog.instruction);
-  const std::wstring content = CurlQuotes(dialog.content);
-  const std::wstring footer = CurlQuotes(dialog.footer);
-  if (!instruction.empty()) config.pszMainInstruction = instruction.c_str();
-  if (!content.empty()) config.pszContent = content.c_str();
-  if (!footer.empty()) config.pszFooter = footer.c_str();
+  if (!dialog.instruction.empty()) config.pszMainInstruction = dialog.instruction.c_str();
+  if (!dialog.content.empty()) config.pszContent = dialog.content.c_str();
+  if (!dialog.footer.empty()) config.pszFooter = dialog.footer.c_str();
   TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
 }
 

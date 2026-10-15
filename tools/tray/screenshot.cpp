@@ -18,7 +18,7 @@ namespace {
 using Microsoft::WRL::ComPtr;
 
 Status Failed(std::string_view step, HRESULT result) {
-  return Error{std::format("Couldn't save the picture ({} failed, 0x{:08X}).", step, static_cast<uint32_t>(result))};
+  return Error{std::format("Couldn’t save the picture ({} failed, 0x{:08X}).", step, static_cast<uint32_t>(result))};
 }
 
 Status SavePng(HBITMAP bitmap, const std::filesystem::path& file) {
@@ -103,7 +103,7 @@ std::optional<RECT> BoundsOf(const std::vector<HWND>& windows) {
 Status SaveScreenPng(const RECT& rect, const std::filesystem::path& file) {
   const int width = rect.right - rect.left;
   const int height = rect.bottom - rect.top;
-  if (width <= 0 || height <= 0) return Error{"There's nothing to take a picture of."};
+  if (width <= 0 || height <= 0) return Error{"There’s nothing to take a picture of."};
   const HDC screen = GetDC(nullptr);
   const HDC memory = CreateCompatibleDC(screen);
   const HBITMAP bitmap = CreateCompatibleBitmap(screen, width, height);
@@ -114,14 +114,14 @@ Status SaveScreenPng(const RECT& rect, const std::filesystem::path& file) {
   DeleteDC(memory);
   ReleaseDC(nullptr, screen);
   Status saved = copied ? SavePng(bitmap, file)
-                        : Status(Error{std::format("Couldn't copy the screen: {}", DescribeWinError(GetLastError()))});
+                        : Status(Error{std::format("Couldn’t copy the screen: {}", DescribeWinError(GetLastError()))});
   DeleteObject(bitmap);
   return saved;
 }
 
 Status SavePixelsPng(int width, int height, const std::vector<uint32_t>& bgra, const std::filesystem::path& file) {
   if (width <= 0 || height <= 0 || bgra.size() != static_cast<size_t>(width) * height) {
-    return Error{"There's nothing to take a picture of."};
+    return Error{"There’s nothing to take a picture of."};
   }
   BITMAPINFO format = {};
   format.bmiHeader.biSize = sizeof(format.bmiHeader);
@@ -132,7 +132,7 @@ Status SavePixelsPng(int width, int height, const std::vector<uint32_t>& bgra, c
   format.bmiHeader.biCompression = BI_RGB;
   void* bits = nullptr;
   const HBITMAP bitmap = CreateDIBSection(nullptr, &format, DIB_RGB_COLORS, &bits, nullptr, 0);
-  if (!bitmap) return Error{"Couldn't make a bitmap for the picture."};
+  if (!bitmap) return Error{"Couldn’t make a bitmap for the picture."};
   std::copy(bgra.begin(), bgra.end(), static_cast<uint32_t*>(bits));
   Status saved = SavePng(bitmap, file);
   DeleteObject(bitmap);
@@ -173,7 +173,7 @@ Status SaveWindowPng(HWND window, const std::filesystem::path& file) {
   DeleteDC(whole);
   ReleaseDC(nullptr, screen);
   DeleteObject(whole_bitmap);
-  Status saved = printed ? SavePng(cropped_bitmap, file) : Status(Error{"The window didn't draw itself."});
+  Status saved = printed ? SavePng(cropped_bitmap, file) : Status(Error{"The window didn’t draw itself."});
   DeleteObject(cropped_bitmap);
   return saved;
 }

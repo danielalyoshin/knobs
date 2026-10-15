@@ -201,7 +201,7 @@ class VstPluginFiles {
                                              ToUtf8(dll.from), ToUtf8(dll.to), path));
           }
           for (const auto& error : copied.errors) {
-            plugin.log.push_back(std::format("Couldn't add a DLL the VST plugin {} needs to the runtime copy: {}",
+            plugin.log.push_back(std::format("Couldn’t add a DLL the VST plugin {} needs to the runtime copy: {}",
                                              path, error));
           }
           if (!copied.added.empty()) plugin.missing = runtime::UnresolvedDllImports(file, *imports, folders);
@@ -233,7 +233,7 @@ class VstPluginFiles {
       plugin = **result;
     } else {
       plugin.unavailable = true;
-      api_.blog(LOG_WARNING, "Couldn't check VST plugin %s: %s", path.c_str(), result->error().c_str());
+      api_.blog(LOG_WARNING, "Couldn’t check VST plugin %s: %s", path.c_str(), result->error().c_str());
     }
     for (const auto& line : plugin.log) api_.blog(LOG_INFO, "%s", line.c_str());
     return files_.emplace(path, std::move(plugin)).first->second;
@@ -321,22 +321,22 @@ FilterNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::
   if (id == kVstFilterId) {
     // The module's own error is in the log (ObsSession::LoadOptionalModule).
     const std::string why = error.empty()
-                                ? std::string("OBS's VST support (obs-vst) loaded, but it has no VST filter")
-                                : std::format("{} couldn't load OBS's VST support (obs-vst). The log says why", kDisplayName);
-    return {{true, std::format("Filter \"{}\" is a VST plugin ({}), and it passes audio through untouched. {}.", name,
+                                ? std::string("OBS’s VST support (obs-vst) loaded, but it has no VST filter")
+                                : std::format("{} couldn’t load OBS’s VST support (obs-vst). The log says why", kDisplayName);
+    return {{true, std::format("Filter “{}” is a VST plugin ({}), and it passes audio through untouched. {}.", name,
                                plugin.empty() ? "none chosen" : plugin, why)},
             "vst-module"};
   }
   if (!error.empty()) {
-    return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal. {} couldn't load OBS's NVIDIA filters "
+    return {{true, std::format("Filter “{}” is NVIDIA’s noise removal. {} couldn’t load OBS’s NVIDIA filters "
                                "(nv-filters), so the filter passes audio through untouched. The log says why.",
                                name, kDisplayName)},
             "nvidia-module"};
   }
   if (nvidia_sdk_arrived) {
     // Nothing to do: knobs restarts by itself.
-    return {{.text = std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK was installed "
-                                 "after {} loaded OBS's NVIDIA filters, so the filter passes audio through untouched "
+    return {{.text = std::format("Filter “{}” is NVIDIA’s noise removal. NVIDIA’s Audio Effects SDK was installed "
+                                 "after {} loaded OBS’s NVIDIA filters, so the filter passes audio through untouched "
                                  "until {} restarts.",
                                  name, kDisplayName, kDisplayName),
              .changes_expectations = true},
@@ -345,15 +345,15 @@ FilterNote WhyNotLoaded(const runtime::ObsApi& api, std::string_view name, std::
   if (FindNvidiaAudioEffects(runtime::ObsVersion::FromLibobs(api.obs_get_version())).empty()) {
     // Installed while a chain needs it, knobs restarts by itself to run it
     // (RestartNeed::kNvidiaInstalled).
-    return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal, which needs NVIDIA's Audio Effects SDK. It "
-                               "isn't installed, so the filter passes audio through untouched, as it does in OBS "
-                               "without it. Once it's installed, {} restarts by itself to run it.",
+    return {{true, std::format("Filter “{}” is NVIDIA’s noise removal, which needs NVIDIA’s Audio Effects SDK. It "
+                               "isn’t installed, so the filter passes audio through untouched, as it does in OBS "
+                               "without it. Once it’s installed, {} restarts by itself to run it.",
                                name, kDisplayName)},
             "nvidia-sdk"};
   }
-  return {{true, std::format("Filter \"{}\" is NVIDIA's noise removal. NVIDIA's Audio Effects SDK is installed but "
-                             "didn't start, so the filter passes audio through untouched. It needs an NVIDIA RTX "
-                             "GPU, and the log says why it didn't start.",
+  return {{true, std::format("Filter “{}” is NVIDIA’s noise removal. NVIDIA’s Audio Effects SDK is installed but "
+                             "didn’t start, so the filter passes audio through untouched. It needs an NVIDIA RTX "
+                             "GPU, and the log says why it didn’t start.",
                              name)},
           "nvidia-module"};
 }
@@ -422,10 +422,10 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
 
   if (!known && !optional) {
     // libobs knows no such type, so it loads a placeholder that does nothing.
-    notes.push_back(enabled ? ImportNote{true, std::format("Filter \"{}\" ({}) isn't one {} can run, so it passes "
+    notes.push_back(enabled ? ImportNote{true, std::format("Filter “{}” ({}) isn’t one {} can run, so it passes "
                                                            "audio through untouched.",
                                                            name, type, kDisplayName)}
-                            : ImportNote{false, std::format("Filter \"{}\" ({}) isn't one {} can run, but it's off "
+                            : ImportNote{false, std::format("Filter “{}” ({}) isn’t one {} can run, but it’s off "
                                                             "in OBS anyway.",
                                                             name, type, kDisplayName)});
     key("unknown");
@@ -434,7 +434,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   if (!enabled) {
     // Whether libobs has its type or not: knobs loads an optional module
     // only for a filter that's on.
-    notes.push_back({false, std::format("Filter \"{}\" is off in OBS, and stays off.", name)});
+    notes.push_back({false, std::format("Filter “{}” is off in OBS, and stays off.", name)});
     key("off");
     return true;
   }
@@ -455,14 +455,14 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
     const std::string path = VstPluginPath(api, filter);
     const VstPlugin plugin = plugins.Check(path);
     if (path.empty()) {
-      notes.push_back({true, std::format("Filter \"{}\" is a VST filter with no plugin chosen, so it passes audio "
+      notes.push_back({true, std::format("Filter “{}” is a VST filter with no plugin chosen, so it passes audio "
                                          "through untouched, in OBS too. To use it, choose a plugin in its settings "
                                          "in OBS.",
                                          name)});
       key("vst-none");
     } else if (plugin.unavailable) {
       notes.push_back({.warning = true,
-                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that {} couldn't read at {}, so it "
+                       .text = std::format("Filter “{}” is a VST plugin ({}) that {} couldn’t read at {}, so it "
                                            "passes audio through untouched. Check that its drive is connected, then "
                                            "choose Re-import from OBS in the tray menu.",
                                            name, FileName(path), kDisplayName, path),
@@ -472,7 +472,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
       // No chain is loaded until the selected mic's checks finish.
     } else if (!plugin.found) {
       notes.push_back({.warning = true,
-                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't at {} any more, so it "
+                       .text = std::format("Filter “{}” is a VST plugin ({}) that isn’t at {} any more, so it "
                                            "passes audio through untouched, in OBS too. To use it, install the "
                                            "plugin again, or choose it again in OBS.",
                                            name, FileName(path), path),
@@ -480,7 +480,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
       key("vst-gone");
     } else if (!plugin.is64) {
       notes.push_back({.warning = true,
-                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that isn't a 64-bit plugin, so it "
+                       .text = std::format("Filter “{}” is a VST plugin ({}) that isn’t a 64-bit plugin, so it "
                                            "passes audio through untouched, in OBS too. If the plugin has a 64-bit "
                                            "version, choose that in OBS.",
                                            name, FileName(path)),
@@ -490,7 +490,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
       // DLLs the loader wouldn't find. Those OBS's bin\64bit has, with what
       // they import, are in the copy by now (VstPluginFiles::Check).
       notes.push_back({.warning = true,
-                       .text = std::format("Filter \"{}\" is a VST plugin ({}) that needs {}, which {} can't find "
+                       .text = std::format("Filter “{}” is a VST plugin ({}) that needs {}, which {} can’t find "
                                            "in Windows or in OBS, so it passes audio through untouched.",
                                            name, FileName(path), JoinWithAnd(plugin.missing), kDisplayName),
                        .file = FileName(path)});
@@ -499,7 +499,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
     // audio::LoadSourceJson turns the window off, and the chain key leaves
     // the setting out.
     if (settings && api.obs_data_get_bool(settings.get(), kVstOpenWhenActive)) {
-      notes.push_back({false, std::format("Filter \"{}\" opens its VST plugin's window in OBS. {} shows no windows, "
+      notes.push_back({false, std::format("Filter “{}” opens its VST plugin’s window in OBS. {} shows no windows, "
                                           "so it runs the plugin without it.",
                                           name, kDisplayName)});
       key("window");
@@ -511,9 +511,9 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
     // what it heard before and on where its 10 ms frames fall, which is when
     // the mic started (nvidia_audio_filter_audio). It also passes audio
     // through untouched until its model has loaded (nvidia_audio_initialize).
-    notes.push_back({.text = std::format("Filter \"{}\" is NVIDIA's noise removal, which runs on the GPU. As in OBS, "
+    notes.push_back({.text = std::format("Filter “{}” is NVIDIA’s noise removal, which runs on the GPU. As in OBS, "
                                          "it lets the first moment after the mic starts through untouched, and its "
-                                         "output is close to OBS's but not identical, since it depends on what it "
+                                         "output is close to OBS’s but not identical, since it depends on what it "
                                          "heard before.",
                                          name),
                      .changes_expectations = true});
@@ -523,13 +523,13 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, const ModuleErr
   if (const auto ducking = AsDucking(api, filter)) {
     // As OBS while nothing plays on the sidechain (GainInsteadOf). At 0 dB
     // that's no change at all.
-    const std::string what = std::format("Compressor \"{}\" turns the mic down while \"{}\" plays, in OBS.", name,
+    const std::string what = std::format("Compressor “{}” turns the mic down while “{}” plays, in OBS.", name,
                                          ducking->sidechain);
-    const std::string then = std::format("and the mic sounds as it does in OBS while \"{}\" is silent.",
+    const std::string then = std::format("and the mic sounds as it does in OBS while “{}” is silent.",
                                          ducking->sidechain);
     if (ducking->output_gain != 0) instead = GainInsteadOf(api, filter, ducking->output_gain);
     if (instead) {
-      notes.push_back({true, std::format("{} {} loads only the mic, so it keeps only this compressor's output gain "
+      notes.push_back({true, std::format("{} {} loads only the mic, so it keeps only this compressor’s output gain "
                                          "({:+.1f} dB), {}",
                                          what, kDisplayName, ducking->output_gain, then)});
       key("ducking");
@@ -566,18 +566,18 @@ void CheckSourceState(const runtime::ObsApi& api, obs_data_t* source, const MicC
     const std::string instead =
         keys.empty() ? "Mute it in each app that uses the cable instead."
                      : std::format("Set up {} in each app that uses the cable.", JoinWithAnd(keys));
-    notes.push_back({.text = std::format("The mic is {} in OBS, which doesn't silence the cable. {}",
+    notes.push_back({.text = std::format("The mic is {} in OBS, which doesn’t silence the cable. {}",
                                          JoinWithAnd(silencers), instead),
                      .changes_expectations = true});
   }
   if (const int64_t sync = api.obs_data_get_int(source, "sync"); sync != 0) {
-    notes.push_back({false, std::format("The mic has a sync offset of {} ms. libobs's monitor ignores it for "
+    notes.push_back({false, std::format("The mic has a sync offset of {} ms. libobs’s monitor ignores it for "
                                         "audio-only sources, in OBS too.",
                                         sync / 1'000'000)});
   }
   if (!mic.monitored) {
     notes.push_back(
-        {false, std::format("OBS doesn't monitor this mic, so it doesn't send it to a cable. {} will.", kDisplayName)});
+        {false, std::format("OBS doesn’t monitor this mic, so it doesn’t send it to a cable. {} will.", kDisplayName)});
   }
 }
 
@@ -632,12 +632,12 @@ Result<size_t> PickMic(const std::vector<MicCandidate>& mics, std::string_view q
   const auto [end, ec] = std::from_chars(query.data(), query.data() + query.size(), number);
   if (ec == std::errc() && end == query.data() + query.size()) {
     if (number >= 1 && number <= mics.size()) return number - 1;
-    return Error{std::format("There's no mic {}. Choose one:{}", number, MicList(mics))};
+    return Error{std::format("There’s no mic {}. Choose one:{}", number, MicList(mics))};
   }
   const std::vector<size_t> matches = MicsNamed(mics, query);
   if (matches.size() == 1) return matches.front();
-  return Error{std::format("{} named \"{}\". Choose by number:{}",
-                           matches.empty() ? "There's no mic" : "Several mics are", query, MicList(mics))};
+  return Error{std::format("{} named “{}”. Choose by number:{}",
+                           matches.empty() ? "There’s no mic" : "Several mics are", query, MicList(mics))};
 }
 
 Result<size_t> PickMicByName(const std::vector<MicCandidate>& mics, std::string_view name) {
@@ -647,12 +647,12 @@ Result<size_t> PickMicByName(const std::vector<MicCandidate>& mics, std::string_
   }
   const std::vector<size_t> matches = MicsNamed(mics, name);
   if (matches.size() == 1) return matches.front();
-  return Error{std::format("{} named \"{}\". Choose one:{}", matches.empty() ? "There's no mic" : "Several mics are",
+  return Error{std::format("{} named “{}”. Choose one:{}", matches.empty() ? "There’s no mic" : "Several mics are",
                            name, MicList(mics))};
 }
 
 std::string DescribeMic(const MicCandidate& mic, size_t number) {
-  return std::format("{}. \"{}\" ({}{})", number, mic.name, mic.location, mic.monitored ? ", monitored" : "");
+  return std::format("{}. “{}” ({}{})", number, mic.name, mic.location, mic.monitored ? ", monitored" : "");
 }
 
 size_t ImportedMic::warning_count() const {
@@ -662,7 +662,7 @@ size_t ImportedMic::warning_count() const {
 Result<std::unique_ptr<SceneCollection>> SceneCollection::Read(const runtime::ObsApi& api, const fs::path& file) {
   bool from_backup = false;
   obs_data_t* data = ParseCollection(api, file, &from_backup);
-  if (!data) return Error{std::format("Couldn't read the scene collection {}, or its backup.", ToUtf8(file))};
+  if (!data) return Error{std::format("Couldn’t read the scene collection {}, or its backup.", ToUtf8(file))};
   std::unique_ptr<SceneCollection> collection(new SceneCollection(api, data));
   collection->file_ = from_backup ? fs::path(file) += L".bak" : file;
   collection->from_backup_ = from_backup;
@@ -725,7 +725,7 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
   // A copy, so the collection stays as read.
   const char* saved_json = api_.obs_data_get_json(saved.get());
   DataPtr source = Own(api_, saved_json ? api_.obs_data_create_from_json(saved_json) : nullptr);
-  if (!source) return Error{std::format("libobs couldn't copy the mic at {}.", mic.location)};
+  if (!source) return Error{std::format("libobs couldn’t copy the mic at {}.", mic.location)};
 
   ImportedMic imported;
   imported.mic = mic;
@@ -748,7 +748,7 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
   }
   CheckSourceState(api_, source.get(), mic, imported.notes);
   const char* json = api_.obs_data_get_json(source.get());
-  if (!json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
+  if (!json) return Error{std::format("libobs couldn’t save the mic at {}.", mic.location)};
   imported.source_json = json;
   for (const char* key : kKeysTheCableIgnores) api_.obs_data_erase(source.get(), key);
   ArrayPtr key_filters = Own(api_, api_.obs_data_get_array(source.get(), "filters"));
@@ -766,7 +766,7 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic, const Modul
     }
   }
   const char* key_json = api_.obs_data_get_json(source.get());
-  if (!key_json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
+  if (!key_json) return Error{std::format("libobs couldn’t save the mic at {}.", mic.location)};
   imported.chain_key = key_json;
   DataPtr load = Own(api_, api_.obs_data_create_from_json(imported.source_json.c_str()));
   ArrayPtr load_filters = Own(api_, api_.obs_data_get_array(load.get(), "filters"));

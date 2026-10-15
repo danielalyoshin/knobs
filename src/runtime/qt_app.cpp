@@ -50,7 +50,7 @@ struct QtApp::Exports {
 
 Result<std::unique_ptr<QtApp>> QtApp::Start() {
   const HMODULE qt = GetModuleHandleW(kQtCore);
-  if (!qt) return Error{"Qt6Core.dll isn't loaded."};
+  if (!qt) return Error{"Qt6Core.dll isn’t loaded."};
   auto exports = std::make_unique<Exports>();
   std::string missing;
   const auto resolve = [&](auto& function, const char* name) {

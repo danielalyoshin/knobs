@@ -34,7 +34,7 @@ class FileReader {
     HANDLE raw = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (raw == INVALID_HANDLE_VALUE) {
-      return Error{std::format("Couldn't open {}: {}", name, DescribeWinError(GetLastError()))};
+      return Error{std::format("Couldn’t open {}: {}", name, DescribeWinError(GetLastError()))};
     }
     reader.file_.reset(raw);
     LARGE_INTEGER size{};
@@ -176,7 +176,7 @@ Result<std::vector<std::string>> ReadDllImports(const std::filesystem::path& fil
   auto reader = FileReader::Open(file);
   if (!reader) return Error{reader.error()};
   PeFile pe(*reader);
-  if (!pe.Parse()) return Error{std::format("{} isn't a 64-bit Windows binary.", name)};
+  if (!pe.Parse()) return Error{std::format("{} isn’t a 64-bit Windows binary.", name)};
 
   std::vector<std::string> names;
   const bool ok =

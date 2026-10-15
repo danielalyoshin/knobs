@@ -350,14 +350,14 @@ TEST(CoreStartsTheImportedChain) {
 TEST(CoreReportsAMissingOrUnsupportedObs) {
   {
     Fixture f;
-    f.backend.obs = {ObsFound::kMissing, {}, "OBS Studio isn't installed."};
+    f.backend.obs = {ObsFound::kMissing, {}, "OBS Studio isn’t installed."};
     f.controller.Start(false, f.now);
-    CHECK(f.state() == State::kObsMissing && f.last().detail == "OBS Studio isn't installed.");
+    CHECK(f.state() == State::kObsMissing && f.last().detail == "OBS Studio isn’t installed.");
     CHECK(f.backend.libobs_starts == 0 && f.backend.chain_starts == 0);
   }
   {
     Fixture f;
-    f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {34, 0, 0}}, "OBS 34.0.0 isn't supported."};
+    f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {34, 0, 0}}, "OBS 34.0.0 isn’t supported."};
     f.controller.Start(false, f.now);
     CHECK(f.state() == State::kObsUnsupported && f.backend.libobs_starts == 0);
   }
@@ -409,10 +409,10 @@ TEST(CoreSaysWhetherOpeningObsFillsItsSettingsFolder) {
   CHECK(f.last().setup == SetupNeed::kObsSettings && !f.last().obs_writes_config);
   // No settings folder at all: OBS's settings can't be read either.
   f.backend.config_error.reset();
-  f.backend.obs.config = Error{"Couldn't find the %AppData% folder."};
+  f.backend.obs.config = Error{"Couldn’t find the %AppData% folder."};
   f.controller.Reimport(f.now);
   CHECK(f.state() == State::kNeedsSetup && f.last().setup == SetupNeed::kObsSettings);
-  CHECK(f.last().detail == "Couldn't find the %AppData% folder." && f.backend.libobs_starts == 0);
+  CHECK(f.last().detail == "Couldn’t find the %AppData% folder." && f.backend.libobs_starts == 0);
 }
 
 TEST(CorePausesWhileObsRunsAndReimportsWhenItExits) {
@@ -497,7 +497,7 @@ TEST(CoreSnapshotHasWhatTheTrayOffers) {
   // under.
   f.controller.Apply({.cable = kOtherCableId, .cable_name = "CABLE-A Input (VB-Audio Cable A)"}, f.now);
   CHECK(f.state() == State::kCableMissing && f.last().chain->cable == "CABLE-A Input (VB-Audio Cable A)");
-  CHECK(f.last().detail == "\"CABLE-A Input (VB-Audio Cable A)\" isn't connected.");
+  CHECK(f.last().detail == "“CABLE-A Input (VB-Audio Cable A)” isn’t connected.");
 
   // Paused shows through states that come before it.
   f.controller.Apply({}, f.now);
@@ -592,7 +592,7 @@ TEST(CoreAsksForARestartToFollowObs) {
   CHECK(f.state() == State::kRestartNeeded && f.last().detail.find("from 32.2.2 to 32.2.3") != std::string::npos);
   CHECK(f.last().restart == RestartNeed::kObsUpdated);
 
-  f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {34, 0, 0}}, "OBS 34.0.0 isn't supported."};
+  f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {34, 0, 0}}, "OBS 34.0.0 isn’t supported."};
   f.controller.SetObsRunning(true, f.now);
   f.controller.SetObsRunning(false, f.now);
   CHECK(f.state() == State::kObsUnsupported && !f.backend.chain_running && f.last().restart == RestartNeed::kNone);
@@ -621,7 +621,7 @@ TEST(CoreRestartsWhenNvidiasSdkArrives) {
   f.controller.Reimport(f.now);
   CHECK(f.state() == State::kRestartNeeded && !f.backend.chain_running);
   CHECK(f.last().restart == RestartNeed::kNvidiaInstalled);
-  CHECK(f.last().detail.find("NVIDIA's Audio Effects SDK was installed") != std::string::npos);
+  CHECK(f.last().detail.find("NVIDIA’s Audio Effects SDK was installed") != std::string::npos);
   // Choosing a cable plans the chain again, but can't lose the restart.
   f.controller.Apply({.cable = kCableId, .cable_name = kCableName}, f.now);
   CHECK(f.state() == State::kRestartNeeded && f.last().restart == RestartNeed::kNvidiaInstalled);
@@ -726,7 +726,7 @@ TEST(CoreReportsAFailedImportAfterAPluginUpdate) {
   f.controller.Start(false, f.now);
   f.backend.file_update.folders = {L"C:\\plugins"};
   f.Advance(1s);
-  f.backend.import_error = "The updated plugin couldn't be imported.";
+  f.backend.import_error = "The updated plugin couldn’t be imported.";
   f.Advance(5s);
   CHECK(f.state() == State::kFailed && !f.backend.chain_running && f.backend.imports == 2);
   f.backend.import_error.reset();
@@ -970,10 +970,10 @@ TEST(CoreReleasesSdkWatchesImmediatelyAfterAFailedRestart) {
   f.Advance(1s);
   const auto fail = [](const auto& files) -> Status {
     CHECK(files.handles == std::vector<uintptr_t>({11, 12}));
-    return Error{"Couldn't start the new process."};
+    return Error{"Couldn’t start the new process."};
   };
   const Status failed = f.controller.Restart(fail, f.now);
-  CHECK(!failed && failed.error() == "Couldn't start the new process.");
+  CHECK(!failed && failed.error() == "Couldn’t start the new process.");
   CHECK(f.backend.sdk_releases == 1 && f.last().restart_delayed);
   CHECK(f.state() == State::kRestartNeeded && f.last().restart == RestartNeed::kNvidiaUpdating);
   f.Advance(30s);
@@ -1017,9 +1017,9 @@ TEST(CoreSaysWhenWindowsCantListTheDevices) {
   // Lists that couldn't be read would read as every device unplugged: it's
   // an error instead, tried again as the devices are.
   Fixture f;
-  f.backend.devices = {.error = "Couldn't reach Windows' list of audio devices."};
+  f.backend.devices = {.error = "Couldn’t reach Windows’ list of audio devices."};
   f.controller.Start(false, f.now);
-  CHECK(f.state() == State::kFailed && f.last().detail == "Couldn't reach Windows' list of audio devices.");
+  CHECK(f.state() == State::kFailed && f.last().detail == "Couldn’t reach Windows’ list of audio devices.");
   CHECK(!f.backend.chain_running);
   f.DevicesChange(DefaultDevices());
   CHECK(f.state() == State::kRunning);
@@ -1063,7 +1063,7 @@ TEST(CoreRebuildsTheChainWhenALostMicComesBack) {
   CHECK(f.state() == State::kRunning && f.backend.device_lists == 1);  // Still settling.
   f.Advance(100ms);
   CHECK(f.state() == State::kMicMissing && !f.backend.chain_running && f.backend.device_lists == 2);
-  CHECK(f.last().detail == "The recording device for \"Mic/Aux\" isn't connected.");
+  CHECK(f.last().detail == "The recording device for “Mic/Aux” isn’t connected.");
 
   // libobs's loader runs again: a source whose device went away never
   // recovers by itself without video.
@@ -1097,7 +1097,7 @@ TEST(CoreWaitsForTheCable) {
   f.controller.Start(false, f.now);
   // Before the mic: a missing cable needs the user more.
   CHECK(f.state() == State::kCableMissing && f.backend.chain_starts == 0);
-  CHECK(f.last().detail == std::string("\"") + kCableName + "\" isn't connected.");
+  CHECK(f.last().detail == std::string("“") + kCableName + "” isn’t connected.");
   f.DevicesChange(DefaultDevices());
   CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1);
 }
@@ -1116,7 +1116,7 @@ TEST(CoreRebuildsADefaultMicWhenTheDefaultChanges) {
   CHECK(f.state() == State::kRunning && f.backend.chain_starts == 2 && f.backend.chain_stops == 1);
 
   f.DevicesChange(NoMics());
-  CHECK(f.state() == State::kMicMissing && f.last().detail == "There's no recording device.");
+  CHECK(f.state() == State::kMicMissing && f.last().detail == "There’s no recording device.");
 }
 
 TEST(CoreRebuildsAChainThatStopsGettingAudio) {
@@ -1130,7 +1130,7 @@ TEST(CoreRebuildsAChainThatStopsGettingAudio) {
   CHECK(f.state() == State::kRunning);
   f.Advance(1s);
   CHECK(f.state() == State::kMicMissing && !f.backend.chain_running);
-  CHECK(f.last().detail.find("\"Mic/Aux\" stopped sending audio.") == 0 &&
+  CHECK(f.last().detail.find("“Mic/Aux” stopped sending audio.") == 0 &&
         f.last().detail.find(" 2 s.") != std::string::npos);
 
   // Rebuilt after 2 s; still no audio, so the next wait is longer.
@@ -1344,7 +1344,7 @@ TEST(CoreStaysPausedUntilResumed) {
 
 TEST(CoreTriesAFailedChainAgain) {
   Fixture f;
-  f.backend.chain_error = "libobs couldn't monitor to \"CABLE In 16ch\".";
+  f.backend.chain_error = "libobs couldn’t monitor to “CABLE In 16ch”.";
   f.controller.Start(false, f.now);
   CHECK(f.state() == State::kFailed && f.last().detail == *f.backend.chain_error && !f.backend.chain_running);
   f.Advance(10s);
@@ -1382,7 +1382,7 @@ TEST(CoreReportsWhatStopsLibobsOrTheImport) {
   }
   {
     Fixture f;
-    f.backend.import_error = "Couldn't read the scene collection.";
+    f.backend.import_error = "Couldn’t read the scene collection.";
     f.controller.Start(false, f.now);
     CHECK(f.state() == State::kFailed && !f.last().chain && f.backend.chain_starts == 0);
   }
@@ -1434,7 +1434,7 @@ TEST(ObsBackendKeepsToAPickedInstallFolder) {
   ObsBackend backend({});
   const ObsCheck picked = backend.CheckObs({.obs_dir = dir.path});
   CHECK(picked.found == ObsFound::kMissing);
-  CHECK(picked.message.find("isn't a complete OBS Studio install") != std::string::npos);
+  CHECK(picked.message.find("isn’t a complete OBS Studio install") != std::string::npos);
 }
 
 TEST(ObsBackendKeepsToAPickedInstallOfAnUnsupportedObs) {
@@ -1454,7 +1454,7 @@ TEST(ObsBackendKeepsToAPickedInstallOfAnUnsupportedObs) {
   ObsBackend backend({});
   ObsCheck check = backend.CheckObs({.obs_dir = root});
   CHECK(check.found == ObsFound::kUnsupported && check.install.root == root);
-  CHECK(check.message.find("isn't supported") != std::string::npos);
+  CHECK(check.message.find("isn’t supported") != std::string::npos);
   CHECK(check.config.ok() && check.config->path == root / L"config" && check.config->obs_writes_here);
   // Its settings folder picked, however it's spelled, is OBS's own; another
   // isn't, so the errors don't suggest opening OBS for it.
@@ -1625,12 +1625,12 @@ TEST(OtherObsIsDescribedByAccount) {
   const OtherObs alex{.session = 2, .account = "Alex"};
   const OtherObs sam{.session = 3, .account = "Sam"};
   const OtherObs yours{.session = 4, .account = "Daniel", .yours = true};
-  CHECK(DescribeOtherObs({alex}) == "Alex's account");
+  CHECK(DescribeOtherObs({alex}) == "Alex’s account");
   CHECK(DescribeOtherObs({{.session = 2}}) == "another Windows account");
   CHECK(DescribeOtherObs({alex, sam}) == "2 other Windows accounts");
   CHECK(DescribeOtherObs({{.session = 2}, {.session = 3}}) == "2 other Windows accounts");
   // An account signed in twice counts once.
-  CHECK(DescribeOtherObs({alex, {.session = 5, .account = "Alex"}}) == "Alex's account");
+  CHECK(DescribeOtherObs({alex, {.session = 5, .account = "Alex"}}) == "Alex’s account");
   CHECK(DescribeOtherObs({yours}) == "your other session");
   CHECK(DescribeOtherObs({yours, {.session = 5, .account = "Daniel", .yours = true}}) == "your other sessions");
   CHECK(DescribeOtherObs({alex, yours}) == "2 other Windows sessions");

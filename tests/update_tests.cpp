@@ -85,7 +85,7 @@ TEST(OnlyKnobsReleasesAreInstalled) {
   wchar_t self[MAX_PATH * 2] = {};
   GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
   const update::SignatureCheck unsigned_file = update::CheckReleaseSignature(self, kOffline);
-  CHECK(unsigned_file.verdict == Verdict::kRejected && Contains(unsigned_file.error, "isn't signed"));
+  CHECK(unsigned_file.verdict == Verdict::kRejected && Contains(unsigned_file.error, "isn’t signed"));
   // Nor is a file that isn't there.
   const std::filesystem::path missing = std::filesystem::path(self).parent_path() / L"no-such-installer.exe";
   CHECK(update::CheckReleaseSignature(missing, kOffline).verdict == Verdict::kRejected);
@@ -161,7 +161,7 @@ TEST(UpdatesSayANewVersionOnce) {
   Updater updater = Make({.check = true});
   std::optional<Notice> notice = updater.Checked(kStart + 1min, Version{0, 3, 0});
   CHECK(notice && notice->kind == Notice::Kind::kUpdateAvailable);
-  CHECK(notice->title == std::format("{} 0.3.0 is out", kDisplayName) && notice->text == "Click to see what's new and download it.");
+  CHECK(notice->title == std::format("{} 0.3.0 is out", kDisplayName) && notice->text == "Click to see what’s new and download it.");
   CHECK(notice->url == "https://github.com/danielalyoshin/knobs/releases/tag/v0.3.0" && !notice->problem);
   CHECK(updater.offer() == (Updater::Offer{{0, 3, 0}, false}));
   // Updating by itself is off: nothing to download.
@@ -211,7 +211,7 @@ TEST(UpdatesInstallWhenKnobsCanRestart) {
   // downloaded again: the user hears, and can get it from its page.
   std::optional<Notice> notice = updater.DownloadDone(kStart + 63min, Downloaded::kRejected);
   CHECK(notice && notice->kind == Notice::Kind::kUpdateFailed &&
-        notice->title == std::format("{} couldn't update to 0.3.0", kDisplayName));
+        notice->title == std::format("{} couldn’t update to 0.3.0", kDisplayName));
   CHECK(notice->url == update::ReleasePageUrl({0, 3, 0}));
   CHECK(updater.Due(kStart + 5h, true) == Job::kNone);
   CHECK(updater.offer() == (Updater::Offer{{0, 3, 0}, false}));
@@ -389,7 +389,7 @@ TEST(UpdatedCopySaysHowItWent) {
   const std::optional<Notice> updated = UpdatedNotice({.installing = Version{0, 2, 0}}, kCurrent);
   CHECK(updated && updated->kind == Notice::Kind::kUpdated);
   CHECK(updated->title == std::format("{} was updated to 0.2.0", kDisplayName));
-  CHECK(updated->text == "Click to see what's new." && updated->url == update::ReleasePageUrl(kCurrent));
+  CHECK(updated->text == "Click to see what’s new." && updated->url == update::ReleasePageUrl(kCurrent));
   const std::optional<Notice> failed = UpdatedNotice({.installing = Version{0, 3, 0}}, kCurrent);
   CHECK(failed && failed->kind == Notice::Kind::kUpdateFailed);
   CHECK(!UpdatedNotice({}, kCurrent) && !UpdatedNotice({.installing = Version{0, 1, 1}}, kCurrent));
@@ -423,7 +423,7 @@ TEST(UpdatedCopySaysHowItWent) {
   paused.state = core::State::kPausedByUser;
   paused.paused_by_user = true;
   Notifier still({.updated = updated});
-  CHECK(still.Changed(paused, false, at).show->text == "It's still paused. Click to see what's new.");
+  CHECK(still.Changed(paused, false, at).show->text == "It’s still paused. Click to see what’s new.");
   // A new version is said as it's found. While the first run is open, it
   // waits for it to close.
   CHECK(Notifier().Say(*failed, false).show == failed);
