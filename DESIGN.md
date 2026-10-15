@@ -171,20 +171,20 @@ components:
 
 knobs's own UI is one window, the setup window, and it is about one thing: where the mic goes. Every page sits under a band that draws the path (your mic › OBS's filters › virtual cable › your other apps), and the panel below answers the one question for the stage its caret points at. The look is getknobs.app's graphite carried into a Windows window: the site's greys, its ink as the only action colour, its hairlines and its stroked icons, set in Windows' own type with Windows' own control shapes, so the window reads as a native app that belongs to the site.
 
-It is calm and dense in the way a settings window is: a fixed 760 × 520 DIP client area, one panel, one heading per page, plain sentences in the product's voice, and nothing decorative. Colour other than graphite appears only as state marks, and those are the tray icon's badges, drawn the same way. Light and dark follow Windows' app mode; high contrast drops the palette entirely and uses the user's colours.
+It is calm and dense in the way a settings window is: a fixed 760 × 520 DIP client area, one panel, one heading per page, plain sentences in the product's voice, and nothing decorative. Colour other than graphite appears only as state marks, with the tray badge's proportions and clear ring. Light and dark follow Windows' app mode; high contrast drops the palette entirely and uses the user's colours.
 
 Motion is structural and short: the wire inks and the caret slides as the signal reaches a stage, a page fades in, and a waiting page's dot breathes. The one long motion is a guide's walkthrough, which shows rather than decorates, and pauses at a click. With Windows' animations off, nothing moves until the user plays a walkthrough.
 
 **Key Characteristics:**
 - The path is always on screen: a band of four stages, each an icon on a 1px wire, with its name and what knobs knows of it.
 - Ink is the only action colour; everything else is graphite and hairline.
-- State is shown as marks only: the tray icon's green check, amber triangle and red "!" disc.
+- State is shown as marks only: the setup window's green check, amber triangle and red "!" disc. The tray's badges are a red "!" disc and white pause bars on a graphite disc.
 - Segoe UI Variable with Consolas for file names, 4px controls and one 8px panel.
 - Hairlines on whole device pixels, flat surfaces, one 1-pixel lift under the panel.
 
 ## Colors
 
-A cool graphite ramp in two schemes, one ink for action, and the tray's badge colours for state.
+A cool graphite ramp in two schemes, one ink for action, and the tray's red and graphite plus green and amber for setup's state marks.
 
 ### Primary
 - **Graphite Ink** (#17181b light, #e8eaee dark): the one action colour. The default button's fill, the selected radio, the checked box, the step discs, the caret, the stage the page is about, the wire as far as the signal has got, and names inside secondary text. It is also the logo's ink.
@@ -210,7 +210,7 @@ A cool graphite ramp in two schemes, one ink for action, and the tray's badge co
 ### Named Rules
 **The One Ink Rule.** Ink is the only colour that means "act" or "here". No accent hue exists; the default button, the current stage and the live wire all use the same ink.
 
-**The Marks Only Rule.** Green, amber and red appear only as the tray icon's badges. They never colour text, borders, fills or the wire.
+**The Marks Only Rule.** Green, amber and red appear only in state marks. They never colour text, borders, fills or the wire.
 
 **The User's Colours Rule.** In high contrast every ground is the system's window colour and every line, text and badge is its window-text colour; links take the hot-light colour, disabled text gray-text, and the current stage the highlight colour. Shapes and words carry the meaning, and the panel has no lift.
 
@@ -274,7 +274,7 @@ Icons are the site's stroked glyphs (mic, sliders, plug, app grid), drawn from p
 ### Named Rules
 **The Two Radii Rule.** 4 DIPs for anything you click or that holds a value, 8 for the panel. No other corner radius on a surface or control.
 
-**The Badge Rule.** A stage's mark is the tray icon's badge: 7/16 of the icon (9 DIPs on a 21 DIP icon), flush with its bottom-right corner, with a 1 DIP clear ring of the band's ground around it. Beside a note the same mark stands alone at 14.5 DIPs, with no ring.
+**The Badge Rule.** A stage's mark uses the tray badge's proportions: 7/16 of the icon (9 DIPs on a 21 DIP icon), flush with its bottom-right corner, with a 1 DIP clear ring of the band's ground around it. Beside a note the same mark stands alone at 14.5 DIPs, with no ring.
 
 ## Components
 

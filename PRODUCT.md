@@ -19,11 +19,11 @@ The job for both: tune the mic once, get that sound in every app, and stop think
 
 knobs runs the mic filter chain from the user's OBS settings and sends the result to a virtual audio cable, with no OBS process. The audio goes through the user's own installed OBS filter code.
 
-Success (measured in docs/design.md, Evidence): with OBS closed and knobs in the tray, the mic sounds identical to OBS in every app. A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
+Success (measured in docs/design.md, Evidence): with OBS closed and knobs in the tray, the mic matches OBS's output wherever that output is repeatable (Evidence on Hand). A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
 
 ## Positioning
 
-knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from the user's own OBS install and recreates the mic with OBS's own loader, so its output is bit-identical to OBS's, on test signals and on real voice. Equalizer APO, VoiceMeeter, NVIDIA Broadcast and NoiseTorch use different DSP. OBS plugins such as atkAudio still need OBS open.
+knobs gives OBS's mic sound without OBS. It loads the filter binaries from the user's own OBS install and recreates the mic with OBS's own loader. On test signals and real voice, its output is bit-identical to OBS's, apart from NVIDIA's noise removal and stereo VST plugins on a mono profile, which vary in OBS too. Equalizer APO, VoiceMeeter, NVIDIA Broadcast and NoiseTorch use different DSP. OBS plugins such as atkAudio still need OBS open.
 
 ## Operating Context
 
@@ -56,7 +56,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 
 ## Evidence on Hand
 
-- knobs's output is bit-identical to OBS's on test signals, on VST plugins and on a recording of real voice (docs/design.md, Same output as OBS), apart from a stereo VST plugin on a mono profile, which isn't repeatable in OBS either. NVIDIA's noise removal is close to OBS's, but no two starts of it match, in OBS either (docs/design.md, NVIDIA's noise removal).
+- knobs's output is bit-identical to OBS's on test signals, on VST plugins and on a recording of real voice (docs/design.md, Same output as OBS), apart from a stereo VST plugin on a mono profile, which isn't repeatable in OBS either. NVIDIA's noise removal is close to OBS's, but its output depends on when the mic started, in OBS too (docs/design.md, NVIDIA's noise removal).
 - Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (Audient iD4; docs/design.md, Mic-to-cable latency).
 - On real hardware (docs/design.md, On real hardware): running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB. After a cold boot, the filtered mic was on the cable 9.5 s after signing in, with nothing clicked.
 - [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
@@ -66,7 +66,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 
 ## Product Principles
 
-1. **Fidelity is the product.** The sound is OBS's, bit for bit. Nothing in knobs changes the audio, and the app never offers to "enhance" it.
+1. **Fidelity is the product.** Audio passes through OBS's own code, including the VST plugins and NVIDIA runtime it hosts. Nothing in knobs changes the audio, and the app never offers to "enhance" it.
 2. **Invisible while it works.** Tray only, starts with Windows, nothing to look at once it's set up.
 3. **Loud when it breaks.** When the mic, the cable or OBS goes missing, say so in a notification that says what to do. Never fail silently.
 4. **OBS is the editor.** Tuning happens in OBS. knobs imports the chain, and for people new to OBS it explains how to set one up there rather than building one itself.
