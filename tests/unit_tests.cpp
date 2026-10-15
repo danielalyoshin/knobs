@@ -699,11 +699,19 @@ fs::path MakeFakeInstall(const fs::path& root) {
 TEST(PlanCoversImportClosureAndData) {
   TempDir dir(L"plan");
   const fs::path root = MakeFakeInstall(dir.path / L"obs");
+  // An optional module's other locales and its effects stay behind; the base
+  // modules' data is copied whole, as before.
+  WriteFile(root / L"data" / L"obs-plugins" / L"obs-vst" / L"locale" / L"de-DE.ini", "e=f");
+  WriteFile(root / L"data" / L"obs-plugins" / L"obs-vst" / L"blur.effect", "effect");
+  WriteFile(root / L"data" / L"obs-plugins" / L"obs-filters" / L"locale" / L"de-DE.ini", "c=d");
   auto plan = PlanRuntimeCopy(root, {32, 2, 2});
   CHECK(plan.ok());
   if (!plan) return;
 
   const std::vector<fs::path>& files = plan->files;
+  CHECK(!ContainsPath(files, L"data/obs-plugins/obs-vst/locale/de-DE.ini"));
+  CHECK(!ContainsPath(files, L"data/obs-plugins/obs-vst/blur.effect"));
+  CHECK(ContainsPath(files, L"data/obs-plugins/obs-filters/locale/de-DE.ini"));
   CHECK(ContainsPath(files, L"bin/64bit/obs.dll"));
   CHECK(ContainsPath(files, L"bin/64bit/obs.pdb"));
   CHECK(ContainsPath(files, L"bin/64bit/libobs-d3d11.dll"));
@@ -718,7 +726,7 @@ TEST(PlanCoversImportClosureAndData) {
   CHECK(!ContainsPath(files, L"bin/64bit/unrelated.dll"));
   CHECK(!ContainsPath(files, L"obs-plugins/64bit/obs-browser.dll"));
   CHECK(!ContainsPath(files, L"data/obs-plugins/obs-browser/locale/en-US.ini"));
-  CHECK(files.size() == 11);
+  CHECK(files.size() == 12);
 
   CHECK(ContainsName(plan->system_dlls, "kernel32.dll"));
   CHECK(!ContainsName(plan->system_dlls, "version.dll"));

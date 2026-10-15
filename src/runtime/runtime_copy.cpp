@@ -101,6 +101,17 @@ std::map<std::string, fs::path> ListDlls(const fs::path& dir) {
   return dlls;
 }
 
+// Whether knobs reads an optional module's data file. It starts libobs in
+// en-US (ObsSession) and runs only audio filters, so a module's other
+// locales, and the effects only its video filters draw with, stay behind.
+bool KnobsReadsOptionalData(const fs::path& file) {
+  const auto is = [](const fs::path& part, std::wstring_view name) {
+    return CompareStringOrdinal(part.c_str(), -1, name.data(), static_cast<int>(name.size()), TRUE) == CSTR_EQUAL;
+  };
+  if (is(file.extension(), L".effect")) return false;
+  return !is(file.parent_path().filename(), L"locale") || is(file.filename(), L"en-US.ini");
+}
+
 // Splits "<number> <rest>". Returns false if there's no valid number.
 template <typename Number>
 bool SplitNumber(std::string_view& text, Number& number) {
@@ -460,7 +471,8 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
   };
 
   // What one set of roots adds: the DLLs in their import closure that aren't
-  // in `known` yet, the PDBs next to them, and the files in `data_dirs`.
+  // in `known` yet, the PDBs next to them, and the files in `data_dirs`, for
+  // an optional module only those knobs reads.
   struct Part {
     std::set<fs::path> binaries;
     std::vector<fs::path> files;
@@ -468,7 +480,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
     std::map<std::string, std::string> system_dlls;  // Lowercase name -> as spelled.
   };
   const auto plan_part = [&](std::vector<fs::path> pending, const std::vector<fs::path>& data_dirs,
-                             const std::set<fs::path>& known) -> Result<Part> {
+                             const std::set<fs::path>& known, bool optional) -> Result<Part> {
     Part part;
     while (!pending.empty()) {
       const fs::path binary = std::move(pending.back());
@@ -510,6 +522,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
       for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
            it.increment(ec)) {
         if (!it->is_regular_file(ec)) continue;
+        if (optional && !KnobsReadsOptionalData(it->path())) continue;
         if (auto added = add(it->path()); !added) return Error{added.error()};
       }
       if (ec) return Error{std::format("Couldn't read {}: {}", ToUtf8(dir), Describe(ec))};
@@ -533,7 +546,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
     roots.push_back(PluginDll(install_root, module, version));
     data_dirs.push_back(PluginDataDir(install_root, module, version));
   }
-  auto base = plan_part(std::move(roots), data_dirs, known);
+  auto base = plan_part(std::move(roots), data_dirs, known, false);
   if (!base) return Error{base.error()};
   take(*base);
 
@@ -544,7 +557,7 @@ Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root, const ObsVe
     std::error_code data_ec;
     std::vector<fs::path> module_data;
     if (fs::is_directory(data, data_ec)) module_data.push_back(data);
-    auto part = plan_part({PluginDll(install_root, module, version)}, module_data, known);
+    auto part = plan_part({PluginDll(install_root, module, version)}, module_data, known, true);
     if (!part) {
       file_set.skipped.push_back(std::format("{}: {}", module, part.error()));
       continue;
