@@ -27,6 +27,10 @@
 #ifndef WizardGround
   #error Run packaging\package.ps1, which passes WizardGround, the color the wizard image was rendered on.
 #endif
+; This script is UTF-8 with no BOM, which Inno Setup reads as UTF-8 from 6.3.
+#if Ver < EncodeVer(6, 3, 0)
+  #error Inno Setup 6.3 or later is needed: this script is UTF-8 with no BOM.
+#endif
 #define VbCablePackName ExtractFileName(VbCablePack)
 
 ; Windows knows an install by its AppId. package.ps1 passes KnobsAppId for
@@ -156,6 +160,8 @@ var
   // VB-CABLE's driver was installed, but its devices wait for Windows to
   // restart.
   VbCableNeedsRestart: Boolean;
+  // The RunOnce entry that opens knobs after that restart couldn't be written.
+  NoResume: Boolean;
 
 function RegOpenKeyEx(Key: Cardinal; SubKey: String; Options, Sam: Cardinal; var Handle: Cardinal): Integer;
   external 'RegOpenKeyExW@advapi32.dll stdcall';
@@ -286,6 +292,7 @@ begin
                              '"' + ExpandConstant('{app}\{#AppName}.exe') + '" --resume-setup') then
   begin
     Log('Couldn''t write the RunOnce entry that opens {#AppName} after the restart.');
+    NoResume := True;
     SuppressibleMsgBox('{#AppName} can’t open by itself after the restart, so open it once Windows has ' +
                        'restarted, to finish setting up VB-CABLE.', mbInformation, MB_OK, IDOK);
   end;
@@ -375,6 +382,15 @@ begin
   if (CurStep = ssDone) and VbCableNeedsRestart and not WizardForm.YesRadio.Checked then
     ExecAsOriginalUser(ExpandConstant('{app}\{#AppName}.exe'), '--resume-setup', ExpandConstant('{app}'),
                        SW_SHOWNORMAL, ewNoWait, Code);
+end;
+
+// The finish page says knobs opens again after the restart (FinishedRestartLabel),
+// unless its RunOnce entry couldn't be written.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and NoResume then
+    WizardForm.FinishedLabel.Caption := 'To finish installing VB-CABLE, Windows has to restart. Open {#AppName} ' +
+                                       'after the restart, to carry on setting up. Would you like to restart now?';
 end;
 
 // After an update, knobs starts again: the new copy, or this one if the

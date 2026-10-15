@@ -129,7 +129,7 @@ if (-not $NoInstaller) {
         "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
     }
   }
-  if (-not $Iscc -or -not (Test-Path $Iscc)) { throw "Couldn't find Inno Setup 6's ISCC.exe. Install it, or pass -Iscc." }
+  if (-not $Iscc -or -not (Test-Path $Iscc)) { throw "Couldn't find ISCC.exe from Inno Setup 6.3 or later. Install it, or pass -Iscc." }
   # The ground the wizard image was rendered on, which Setup fills the rest of
   # its area with (tools\render-brand-assets.ps1).
   $sources = Get-Content "$root\assets\brand-sources.txt"
