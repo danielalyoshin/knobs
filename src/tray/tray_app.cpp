@@ -191,7 +191,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
     data.hWnd = window;
     data.uID = kIconId;
     Shell_NotifyIconW(NIM_DELETE, &data);
-    constexpr char reason[] = "Shutdown did not finish before its deadline. Ending the process to release its files.";
+    constexpr char reason[] = "Shutdown didn't finish before its deadline. Ending the process to release its files.";
     if (log) log(reason);
     else OutputDebugStringA(reason);
   });
@@ -561,7 +561,7 @@ void TrayApp::ModifyIcon(NOTIFYICONDATAW& data) {
   // icons' flyout, for screen readers, from the change it got last, and a
   // change without one leaves the icon nameless.
   data.uFlags |= NIF_TIP | NIF_SHOWTIP;
-  std::wstring tip = std::format(L"{}\n{}", kDisplayNameW, quitting_ ? L"Closing" : FromUtf8(StatusLine(snapshot_)));
+  std::wstring tip = std::format(L"{}\n{}", kDisplayNameW, quitting_ ? L"Closing…" : FromUtf8(StatusLine(snapshot_)));
   if (tip.size() >= std::size(data.szTip)) {
     tip.resize(std::size(data.szTip) - 2);
     tip += L'…';
@@ -628,7 +628,8 @@ void TrayApp::FollowFileHolds() {
   Notify(notifier_.FileHold(holds.waiting, !holds.released.empty()));
   for (const auto& file : holds.released) {
     if (std::find(file_holds_.released.begin(), file_holds_.released.end(), file) == file_holds_.released.end()) {
-      Log(std::format("The file hold expired for {}. The installer may need to retry after the app closes.", ToUtf8(file)));
+      Log(std::format("The file hold expired for {}. The installer may need to retry after {} closes.", ToUtf8(file),
+                      kDisplayName));
     }
   }
   for (const auto& error : holds.errors) {
@@ -720,7 +721,7 @@ void TrayApp::ShowMenu(POINT point) {
   if (in_menu_) return;
   in_menu_ = true;
   const bool starts = !quitting_ && options_.starts_with_windows && options_.starts_with_windows();
-  const Menu menu = quitting_ ? Menu{.items = {{.id = kIdStatus, .text = "Closing", .enabled = false}}}
+  const Menu menu = quitting_ ? Menu{.items = {{.id = kIdStatus, .text = "Closing…", .enabled = false}}}
                              : BuildMenu(snapshot_, settings_, starts, MenuUpdates());
   const HMENU native = CreateNativeMenu(menu.items);
   // Without this, the menu wouldn't close when the user clicks elsewhere.
@@ -874,7 +875,7 @@ void TrayApp::Reimport() {
 }
 
 Status TrayApp::StartObs(const std::filesystem::path& install_root) {
-  if (quitting_) return Error{"The app is closing."};
+  if (quitting_) return Error{std::format("{} is closing.", kDisplayName)};
   return options_.open_obs ? options_.open_obs(install_root) : OpenObs(install_root);
 }
 
