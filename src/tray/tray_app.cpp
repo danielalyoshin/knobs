@@ -604,6 +604,8 @@ void TrayApp::Notify(const Notifier::Update& update) {
   }
   if ((update.show || update.hide) && options_.on_notice) options_.on_notice(update.show);
   UpdateBadge();
+  // A notice shown on a tick, once quiet ends, can be one that's said once.
+  if (!quitting_) SaveWarned();
   KillTimer(window_, kNoticeTimer);
   if (const auto next = notifier_.NextDeadline()) {
     const auto wait = std::chrono::ceil<std::chrono::milliseconds>(*next - Clock::now()).count();

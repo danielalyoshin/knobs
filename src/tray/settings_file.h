@@ -41,7 +41,7 @@
 //   Warned=vst {…}\nunknown {…}
 //
 // WhileOpen is pause or run, once the user has chosen whether knobs pauses
-// while OBS is open (core::Settings::pause_for_obs). Before 1.0.1 that was
+// while OBS is open (core::Settings::pause_for_obs). Up to 1.0.0 that was
 // PauseWhileOpen, true or false, always saved: true was the default, and is
 // read as no choice. Checked, Seen and Failed are times in seconds since 1970
 // (UTC): when a check last got an answer, when it first found Latest, and

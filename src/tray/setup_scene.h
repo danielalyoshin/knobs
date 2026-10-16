@@ -83,7 +83,9 @@ struct Element {
   bool warning = false;   // A note's.
   // A link: the boxes of its words and its glyph, one per line, and its
   // underlines, as lines from left to right at top, and the paragraph it's
-  // in (an index into the scene's items) with its words' range there.
+  // in (an index into the scene's items) with its words' range there. Another
+  // control: boxes a click on also clicks it, besides its bounds, as the
+  // walkthrough's picture is for its play and pause.
   std::vector<D2D1_RECT_F> rects;
   std::vector<D2D1_RECT_F> underlines;
   int item = -1;

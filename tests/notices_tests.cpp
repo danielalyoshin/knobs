@@ -179,6 +179,14 @@ TEST(NoticesSayOnceThatKnobsPausesWhileObsPlaysTheMicIntoTheCable) {
   CHECK(f.state() == State::kRunning && (f.events == std::vector<std::string>{"Paused while OBS is open", "-"}));
   f.ObsOpens();
   CHECK(f.state() == State::kPausedForObs && f.events.size() == 2);
+  // Nor when the user's own clicks keep knobs running, then go back to the
+  // default, which pauses.
+  f.controller.Apply({.pause_for_obs = false}, f.now);
+  f.Feed();
+  CHECK(f.state() == State::kRunning);
+  f.controller.Apply({}, f.now);
+  f.Feed();
+  CHECK(f.state() == State::kPausedForObs && f.events.size() == 2);
 
   // Nor by the next copy, which the settings tell.
   Fixture next(tools::DefaultWorld(), {}, {.warned = f.notifier.warnings()});

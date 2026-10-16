@@ -57,9 +57,10 @@ std::string Usage() {
 
 Runs {0}'s always-on core with no tray and prints its state each time it
 changes. The core finds OBS, imports the mic from OBS's active profile and
-scene collection, and follows OBS (pausing while obs64.exe runs and importing
-again when it exits) and audio devices coming and going (rebuilding the chain
-when the mic or the cable comes back).
+scene collection, and follows OBS (importing again when obs64.exe exits, and
+pausing while it runs if OBS plays the mic into the cable too) and audio
+devices coming and going (rebuilding the chain when the mic or the cable comes
+back).
 
 No audio device is opened unless --live is given: the chain loads through OBS's
 loader as a stand-in source with no device, and isn't monitored. The stand-in

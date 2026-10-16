@@ -1247,7 +1247,9 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         break;
       case Item::Kind::kTag:
         p.Border(item.rect, palette.line_strong, kRadius);
-        target->DrawTextLayout({item.rect.left + 7, item.rect.top + 2}, item.text.Get(), p.Brush(palette.text2));
+        if (item.text) {
+          target->DrawTextLayout({item.rect.left + 7, item.rect.top + 2}, item.text.Get(), p.Brush(palette.text2));
+        }
         break;
       case Item::Kind::kDot:
         target->FillEllipse(D2D1::Ellipse({(item.rect.left + item.rect.right) / 2, (item.rect.top + item.rect.bottom) / 2},

@@ -186,6 +186,8 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(Contains(done.content, "It keeps running while OBS is open"));
   CHECK(done.checks.size() == 2 && done.checks[0].id == kCheckStartWithWindows &&
         done.checks[0].text == "Start with &Windows" && done.checks[0].checked);
+  // Start with Windows and the update check are tagged Recommended.
+  CHECK(done.checks[0].recommended && done.checks[1].id == kCheckForUpdates && done.checks[1].recommended);
   CHECK(done.default_button == kButtonDone);
   CHECK(!first_run.View(Running(), 0, {{kCheckStartWithWindows, false}}).checks[0].checked);
 
@@ -508,6 +510,7 @@ TEST(LastPageAsksAboutUpdates) {
   CHECK(view.checks.size() == 3);
   CHECK(view.checks[1].id == kCheckForUpdates && view.checks[1].text == "Automatically &check for new versions" &&
         !view.checks[1].checked);
+  CHECK(!view.checks[2].recommended);
   CHECK(view.checks[2].id == kCheckInstallUpdates &&
         view.checks[2].text == "Automatically &update when a new version is available" && !view.checks[2].checked);
   // Updating by itself needs the check: disabled without it.

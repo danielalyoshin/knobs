@@ -127,7 +127,7 @@ SavedSettings ParseSettings(std::string_view text) {
   if (while_open == "pause" || while_open == "run") {
     settings.pause_for_obs = while_open == "pause";
   } else if (!ReadBool(ini, "OBS", "PauseWhileOpen", true)) {
-    // Before 1.0.1, Pause while OBS is open was on unless it was turned off,
+    // Up to 1.0.0, Pause while OBS is open was on unless it was turned off,
     // and always saved: on was the default, off a choice.
     settings.pause_for_obs = false;
   }

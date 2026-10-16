@@ -189,8 +189,9 @@ struct Snapshot {
   audio::AudioDevice obs_cable;
   // OBS, as its settings were last read, plays the mic into the cable too
   // while it's open: a mic in the scene collection that records from the
-  // same device is monitored, and OBS's Monitoring Device is the cable, or
-  // another input of it. Then, by default, knobs pauses while OBS is open.
+  // same device is monitored, and OBS's Monitoring Device is the cable,
+  // another input of it, or Default while Windows plays the PC's sound into
+  // it. Then, by default, knobs pauses while OBS is open.
   bool obs_plays_mic = false;
   // The playback devices that are connected, to pick a cable from, and
   // Windows' default one, which plays the PC's sound (audio::Endpoints).

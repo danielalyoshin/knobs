@@ -528,7 +528,7 @@ TEST(SettingsRoundTrip) {
   CHECK(ParseSettings("[OBS]\nWhileOpen=pause\n").core.pause_for_obs == true);
   CHECK(ParseSettings("[OBS]\nWhileOpen=Run\n").core.pause_for_obs == false);
   CHECK(!ParseSettings("[OBS]\nWhileOpen=maybe\n").core.pause_for_obs);
-  // Before 1.0.1, on was the default and always saved, and off a choice.
+  // Up to 1.0.0, on was the default and always saved, and off a choice.
   CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=true\n").core.pause_for_obs);
   CHECK(ParseSettings("[OBS]\nPauseWhileOpen=0\n").core.pause_for_obs == false);
   CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=maybe\n").core.pause_for_obs);

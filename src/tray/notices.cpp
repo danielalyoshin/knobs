@@ -505,8 +505,10 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
 
   // A pause for OBS that knobs makes by itself, as OBS plays the mic into the
   // cable too, once while that lasts. A pause the user chose isn't news.
+  // It's news again only once OBS has stopped playing the mic into the
+  // cable: not when the user's own click goes back to the default.
   const bool obs_plays = snapshot.obs_plays_mic && !snapshot.settings.pause_for_obs;
-  if (snapshot.chain && !obs_plays) obs_said_ = false;
+  if (snapshot.chain && !snapshot.obs_plays_mic) obs_said_ = false;
   if (snapshot.state != State::kPausedForObs || !obs_plays) {
     Hide(Kind::kObsPlaysMic, update);
     obs_waiting_.reset();
