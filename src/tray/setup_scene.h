@@ -110,6 +110,7 @@ struct Item {
     kShownDisc,  // The number of the step the walkthrough shows, on a disc.
     kWalkthrough,  // The scene's walkthrough, framed.
     kDot,      // The waiting dot.
+    kTag,      // `text` on a square with a control's edge, in Text 2, as Recommended.
   };
   Kind kind = Kind::kText;
   D2D1_RECT_F rect{};

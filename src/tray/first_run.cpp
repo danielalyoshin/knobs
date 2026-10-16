@@ -814,10 +814,14 @@ PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool 
     default:
       break;
   }
-  view.checks.push_back(
-      {.id = kCheckStartWithWindows, .text = "Start with &Windows", .checked = finish.start_with_windows});
-  view.checks.push_back({.id = kCheckForUpdates, .text = "Automatically &check for new versions",
-                         .checked = finish.check_for_updates});
+  view.checks.push_back({.id = kCheckStartWithWindows,
+                         .text = "Start with &Windows",
+                         .checked = finish.start_with_windows,
+                         .recommended = true});
+  view.checks.push_back({.id = kCheckForUpdates,
+                         .text = "Automatically &check for new versions",
+                         .checked = finish.check_for_updates,
+                         .recommended = true});
   if (can_install_updates) {
     view.checks.push_back({.id = kCheckInstallUpdates,
                            .text = "Automatically &update when a new version is available",

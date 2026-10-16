@@ -92,6 +92,11 @@ typography:
     fontSize: "12px"
     fontWeight: 600
     lineHeight: "20px"
+  tag:
+    fontFamily: "Segoe UI Variable Text, Segoe UI, sans-serif"
+    fontSize: "12px"
+    fontWeight: 600
+    lineHeight: "16px"
   mono:
     fontFamily: "Consolas, monospace"
     fontSize: "1em"
@@ -277,6 +282,7 @@ The same in both schemes but for the info disc, and the product's alone.
 - **Chain** (13/20): the chain in its well; the mic and the cable at 600 in Text, the filters at 400 in Text 2.
 - **Label** (400, 12/17): a stage's value in the band, and the foot's note.
 - **Numeral** (600, 14/21): step numbers, in Text 3. **Disc numeral** (600, 12/20) on a step disc, the glyphs centred on it.
+- **Tag** (600, 12/16): a tag's word.
 - **Mono** (Consolas, the surrounding size): file names, URLs and other literal text the user types or looks for.
 
 ### Named Rules
@@ -308,7 +314,7 @@ Flat. Depth comes from tone and hairlines: Ground Deep for the band, Ground for 
 
 ## Shapes
 
-Square corners and true circles, from the brand's geometry (corner radius 0). The panel, buttons, doors, the box of choices, the chain's well, the check box, a walkthrough's frame and every focus ring are square-cornered. Radios, step discs, the waiting dot, the walkthrough's toggle and the marks' discs are true circles. Borders are single hairlines drawn inside the shape's edge; the default door's is 2 DIPs.
+Square corners and true circles, from the brand's geometry (corner radius 0). The panel, buttons, doors, the box of choices, the chain's well, the check box, tags, a walkthrough's frame and its play and pause, and every focus ring are square-cornered. Radios, step discs, the waiting dot and the marks' discs are true circles. Borders are single hairlines drawn inside the shape's edge; the default door's is 2 DIPs.
 
 Angles are 45°: the caret, the wire's arrowheads, the chevrons and the checks. The caret is the panel's top edge rising to a point under the current stage: two strokes in Text at 45°, each 6 DIPs across and 6 up, the panel's Raised filled behind them so the edge opens.
 
@@ -346,6 +352,7 @@ The first page's two ways in, full panel width.
 
 ### Check box
 - **Style:** an 18 DIP square box; unchecked is Raised with a Text 3 edge (Cap Red under the pointer), checked is a Cap Red fill with an On Action check at 45°.
+- **Recommended:** a tag 8 DIPs after the label: the word in Tag type and Text 2 on a 20 DIP square with a Line Strong edge and 7 DIPs each side, as the brand's tags are. It stays grey, since a red outline with red words is a button here. Clicking it clicks the check box, and screen readers hear it as the check box's help text.
 
 ### Links
 - **Style:** the words keep the colour of the text round them, on a hairline Link Underline 3 DIPs below the baseline, under the words only. Under the pointer the words turn Link Hover. Each word box takes its own focus ring. In high contrast they take the system's link colour. A link ends in Windows' open-in-new-window glyph (Segoe Fluent Icons E8A7) at 0.8 of its text size, which belongs to the link but isn't underlined.

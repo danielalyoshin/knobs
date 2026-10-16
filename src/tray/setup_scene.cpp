@@ -641,11 +641,25 @@ float LayoutChecks(const PageView& view, Builder& build, float y) {
     const PageCheck& page_check = view.checks[i];
     const float x = kContent.left + (page_check.needs_previous ? 28 : 0);
     if (i > 0) y += 8;
-    const Label label = MakeLabel(page_check.text, Style(14, 20), kContent.right - x - 28);
+    // Recommended, as the brand's tags are: grey, since red is for what can
+    // be pressed. A click on it is one on the label.
+    std::optional<Text> tag;
+    float tag_width = 0;
+    if (page_check.recommended) {
+      tag = MakeText("Recommended", Style(12, 16, DWRITE_FONT_WEIGHT_SEMI_BOLD), 200, false, false);
+      tag_width = 8 + std::ceil(tag->width) + 14;
+    }
+    const Label label = MakeLabel(page_check.text, Style(14, 20), kContent.right - x - 28 - tag_width);
+    if (tag) {
+      const float left = x + 28 + std::ceil(label.text.width) + 8;
+      build.AddItem({.kind = Item::Kind::kTag, .rect = Rect(left, y, tag_width - 8, 20), .text = tag->layout,
+                     .in_panel = true});
+    }
     Element check;
     check.role = Role::kCheckBox;
     check.id = page_check.id;
-    check.bounds = Rect(x, y, 28 + label.text.width, std::max(20.0f, label.text.height));
+    if (tag) check.help = L"Recommended";
+    check.bounds = Rect(x, y, 28 + std::ceil(label.text.width) + tag_width, std::max(20.0f, label.text.height));
     check.in_panel = true;
     check.focusable = true;
     check.enabled = page_check.enabled;
@@ -1230,6 +1244,10 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
       case Item::Kind::kWalkthrough:
         if (walk) p.Walkthrough(*scene.walkthrough, *walk, item.rect, picture, walk_layer_.Get(), walk_clip_.Get());
         p.Border(item.rect, palette.line_strong, kRadius);
+        break;
+      case Item::Kind::kTag:
+        p.Border(item.rect, palette.line_strong, kRadius);
+        target->DrawTextLayout({item.rect.left + 7, item.rect.top + 2}, item.text.Get(), p.Brush(palette.text2));
         break;
       case Item::Kind::kDot:
         target->FillEllipse(D2D1::Ellipse({(item.rect.left + item.rect.right) / 2, (item.rect.top + item.rect.bottom) / 2},

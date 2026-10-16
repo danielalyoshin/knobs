@@ -155,6 +155,8 @@ struct PageCheck {
   // Under the one before it, which it needs: off and disabled while that
   // one is off.
   bool needs_previous = false;
+  // Tagged Recommended after its label.
+  bool recommended = false;
 
   friend bool operator==(const PageCheck&, const PageCheck&) = default;
 };
