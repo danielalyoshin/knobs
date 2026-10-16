@@ -9,6 +9,6 @@ You need 64-bit Windows 10 (version 1803 or later) or 11, OBS Studio 32.2 to 33.
 
 @SIGNING@
 
-@NAME@ is an independent project. It isn’t affiliated with or endorsed by the OBS Project.
+@NAME@ is an independent project, not affiliated with the OBS Project.
 
 ## Checksums (SHA-256)

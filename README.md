@@ -20,7 +20,7 @@ Your other apps get the same processed mic while OBS stays closed.
 
 [Download](https://github.com/danielalyoshin/knobs/releases/latest) · [Setup](#setup) · [How it works](#how-it-works) · [Known limits](#known-limits) · [Design](docs/design.md) · [Issues](https://github.com/danielalyoshin/knobs/issues)
 
-<sub>knobs is an independent project. It isn’t affiliated with or endorsed by the OBS Project.</sub>
+<sub>knobs is an independent project, not affiliated with the OBS Project.</sub>
 
 </div>
 
@@ -290,4 +290,4 @@ The installer can install VB-CABLE, VB-Audio’s virtual cable, from [www.vb-cab
 
 The knobs name and logo are trademarks of Daniel Alyoshin. The logo files, the masters in [knobs-brand](https://github.com/danielalyoshin/knobs-brand) and the icons rendered from them in [`assets/`](assets/), aren’t under the GPL: you can share them unmodified and use them to refer to knobs, and a fork that you distribute needs its own name and icon. [TRADEMARKS.md](TRADEMARKS.md) has the details.
 
-knobs is an independent project. It isn’t affiliated with or endorsed by the OBS Project.
+knobs is an independent project, not affiliated with the OBS Project.

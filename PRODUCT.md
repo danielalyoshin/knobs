@@ -52,7 +52,7 @@ The brand's rules (logo, colours, state marks, type, geometry, motion and voice)
 - **Look:** the app's UI is drawn from the brand's tokens, and its icons and installer images are rendered from the brand's logo files (`assets/`), so a change in knobs-brand reaches the app in its next release. The app keeps Windows' own type rather than the brand's. Cap red marks what can be pressed and what is knobs, never an error.
 - **Logo:** the knob mark, the wordmark with its red "obs", and their lockups, used only as BRAND.md says. The Windows icon is the mark alone, with no tile, and the tray icon is the one-colour mark following the taskbar.
 - **Logo licence:** the logo files in knobs-brand's `logo/` and `web/`, and the icons and images rendered from them in `assets/`, are all rights reserved, outside the GPL that covers the code. `TRADEMARKS.md` says how the name and logo may be used; forks need their own.
-- **Independence:** wherever knobs is presented, say: "knobs is an independent project. It isn't affiliated with or endorsed by the OBS Project."
+- **Independence:** wherever knobs is presented, say: "knobs is an independent project, not affiliated with the OBS Project."
 
 ## Evidence on Hand
 

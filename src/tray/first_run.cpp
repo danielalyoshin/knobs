@@ -390,8 +390,7 @@ PageView Welcome(const core::Snapshot& snapshot) {
                              "sends the result to a virtual cable, a sound device that exists only in software, "
                              "which your other apps choose as their mic.",
                              kDisplayName);
-  view.footer = std::format("{} is an independent project. It isn’t affiliated with or endorsed by the OBS Project.",
-                            kDisplayName);
+  view.footer = std::format("{} is an independent project, not affiliated with the OBS Project.", kDisplayName);
   view.command_links = true;
   view.buttons = {Button(kButtonObsUser, "I &set up my mic in OBS\n" + ObsUserNote(snapshot)),
                   Button(kButtonNewToObs, "I’m &new to OBS\n" + NewToObsNote(snapshot))};

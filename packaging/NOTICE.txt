@@ -27,5 +27,4 @@ The @NAME@ name and logo are trademarks of Daniel Alyoshin. The logo, which is
 also the app’s icon, isn’t covered by the GPL: TRADEMARKS.md in the source
 says how you can use the name and the logo.
 
-@NAME@ is an independent project. It isn’t affiliated with or endorsed by the
-OBS Project.
+@NAME@ is an independent project, not affiliated with the OBS Project.

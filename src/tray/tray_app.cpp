@@ -1005,8 +1005,7 @@ void TrayApp::ShowAbout() {
                      .instruction = std::format(L"{} {}", kDisplayNameW, L"" KNOBS_VERSION),
                      .content = std::format(L"Your OBS mic chain, in every app. {0} runs the filters from your own "
                                             L"OBS Studio install and sends your mic to a virtual cable.\n\n{0} is "
-                                            L"an independent project. It isn’t affiliated with or endorsed by the "
-                                            L"OBS Project.",
+                                            L"an independent project, not affiliated with the OBS Project.",
                                             kDisplayNameW),
                      .footer = L"Free software under the GNU General Public License, version 2 or later."});
   if (icon) DestroyIcon(icon);

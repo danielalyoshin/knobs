@@ -154,7 +154,7 @@ TEST(WelcomeSaysWhatWasFound) {
 
   const PageView view = FirstRun({}).View(Running());
   CHECK(view.stage == Stage::kFilters);
-  CHECK(view.footer == std::format("{} is an independent project. It isn’t affiliated with or endorsed by the OBS Project.", kDisplayName));
+  CHECK(view.footer == std::format("{} is an independent project, not affiliated with the OBS Project.", kDisplayName));
 }
 
 // --- The first door -----------------------------------------------------------------

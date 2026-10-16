@@ -22,4 +22,4 @@ To ask, [open an issue](https://github.com/danielalyoshin/knobs/issues).
 
 ## OBS
 
-knobs is an independent project. It isn't affiliated with or endorsed by the OBS Project, and nothing on this page covers OBS's own names or logo.
+knobs is an independent project, not affiliated with the OBS Project. Nothing on this page covers OBS's own names or logo.
