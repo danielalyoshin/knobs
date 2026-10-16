@@ -625,6 +625,36 @@ TEST(TheDropdownShowsTheOtherDevices) {
   CHECK(headphones->selected && headphones->parent == dropdown(open).parent);
 }
 
+TEST(TheWalkthroughPlaysAndPausesFromItsCornerOrItsPicture) {
+  core::Snapshot snapshot = Running();
+  snapshot.chain->filters.clear();
+  snapshot.mics[0].filters.clear();
+  FirstRun first_run({});
+  first_run.Click(kButtonNewToObs, 0, {}, snapshot);
+  const PageView view = first_run.View(snapshot);
+  CHECK(view.walkthrough);
+  const Scene scene = LayoutScene(view, view.default_choice, false);
+  CHECK(scene.walkthrough && scene.walk_toggle >= 0);
+  const Element& toggle = scene.elements[static_cast<size_t>(scene.walk_toggle)];
+  // An icon alone on a square in the picture's bottom-right corner, named
+  // for what a click does, with Alt+P.
+  CHECK(toggle.role == Role::kToggle && toggle.focusable && toggle.access_key == L'P' && !toggle.label);
+  CHECK(toggle.bounds.right == scene.walk.right - 6 && toggle.bounds.bottom == scene.walk.bottom - 6);
+  CHECK(toggle.bounds.right - toggle.bounds.left == kWalkToggle && toggle.bounds.bottom - toggle.bounds.top == kWalkToggle);
+  CHECK(toggle.name == WalkToggleName(false) && WalkToggleName(false) == L"Play the walkthrough" &&
+        WalkToggleName(true) == L"Pause the walkthrough");
+  // A click on it, or anywhere on the picture, is a click on it; outside the
+  // picture it isn't.
+  const auto centre = [](const D2D1_RECT_F& r) { return D2D1_POINT_2F{(r.left + r.right) / 2, (r.top + r.bottom) / 2}; };
+  CHECK(scene.HitTest(centre(toggle.bounds), 0) == scene.walk_toggle);
+  CHECK(scene.HitTest(centre(scene.walk), 0) == scene.walk_toggle);
+  CHECK(scene.HitTest({scene.walk.left + 1, scene.walk.top + 30}, 0) == scene.walk_toggle);
+  CHECK(scene.HitTest({scene.walk.left - 2, scene.walk.top + 30}, 0) != scene.walk_toggle);
+  CHECK(scene.HitTest({scene.walk.right - 2, scene.walk.bottom + 2}, 0) != scene.walk_toggle);
+  // The page doesn't grow under the picture for it.
+  CHECK(scene.content_height <= scene.walk.bottom - scene.content.top + 1);
+}
+
 TEST(SoundIntoACableIsNoted) {
   // Installing a cable can make it Windows' Output: the user hears nothing,
   // and the cable's apps hear the PC with the mic.

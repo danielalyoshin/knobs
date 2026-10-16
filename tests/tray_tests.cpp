@@ -178,6 +178,23 @@ TEST(CablesHaveARecordingSide) {
   CHECK(CableRecordingSide("CABLE Input").empty());
 }
 
+TEST(SameCableIsOneDeviceOrTwoInputsOfOneCable) {
+  using audio::SameCable;
+  CHECK(SameCable({kCable16, kCable16Id}, {kCable16, kCable16Id}));
+  // The same device, its ID in another case, whatever names they carry.
+  CHECK(SameCable({"", AsciiLower(kCable16Id)}, {kCable16, kCable16Id}));
+  // CABLE Input and CABLE In 16ch both play into CABLE Output.
+  CHECK(SameCable({kCableInput, kCableInputId}, {kCable16, kCable16Id}));
+  CHECK(SameCable({"CABLE-A Input (VB-Audio Cable A)", "a"}, {"CABLE-A In 16ch (VB-Audio Cable A)", "b"}));
+  // Two cables, or devices that aren't cables, aren't.
+  CHECK(!SameCable({kCableInput, kCableInputId}, {"CABLE-A Input (VB-Audio Cable A)", "a"}));
+  CHECK(!SameCable({kSpeakers, kSpeakersId}, {"Headphones (Audient iD4)", "h"}));
+  CHECK(!SameCable({"Line 1 (Virtual Audio Cable)", "1"}, {"Line 2 (Virtual Audio Cable)", "2"}));
+  // Unknown IDs match nothing, not each other.
+  CHECK(!SameCable({kCableInput, ""}, {kCableInput, ""}));
+  CHECK(!SameCable({kCableInput, ""}, {kCable16, kCable16Id}));
+}
+
 // --- Menu ---------------------------------------------------------------------------
 
 TEST(MenuListsTheDesignedItems) {
