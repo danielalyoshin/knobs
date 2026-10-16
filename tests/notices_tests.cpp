@@ -220,6 +220,30 @@ TEST(NoticesSayOnceThatKnobsPausesWhileObsPlaysTheMicIntoTheCable) {
   CHECK(quiet.events == std::vector<std::string>{"Paused while OBS is open"});
 }
 
+TEST(NoticesWaitBehindAnotherAndShowAfterIt) {
+  // A copy whose restart couldn't hand every file over starts while OBS
+  // plays the mic into the cable, and the tray takes only the core's last
+  // snapshot: both are news at once. The pause shows after the other, as a
+  // held notice does, with nothing else to wake the tray.
+  Fixture f(tools::DefaultWorld(), {}, {.handoff_failed = true, .warned = std::vector<std::string>{}});
+  f.controller.Start(true, f.now);
+  f.FeedLast();
+  CHECK(f.state() == State::kPausedForObs);
+  CHECK(f.events == std::vector<std::string>{"An installer may need to try again"});
+  CHECK(f.notifier.NextDeadline().has_value());
+  f.Advance(10s);
+  CHECK((f.events == std::vector<std::string>{"An installer may need to try again", "Paused while OBS is open"}));
+
+  // Once what it says has ended, it doesn't show.
+  Fixture ended(tools::DefaultWorld(), {}, {.handoff_failed = true, .warned = std::vector<std::string>{}});
+  ended.controller.Start(true, ended.now);
+  ended.FeedLast();
+  ended.ObsCloses();
+  ended.Advance(10s);
+  CHECK(ended.state() == State::kRunning);
+  CHECK(ended.events == std::vector<std::string>{"An installer may need to try again"});
+}
+
 TEST(NoticesStayQuietWhenObsOpensAndClosesUnchanged) {
   Fixture f;
   f.Start();

@@ -516,6 +516,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
     obs_waiting_ = ObsPlaysMic(snapshot);
   }
   ShowObsPlaysMic(quiet, update);
+  WaitBehind(quiet, now, update);
 
   // Changes in OBS, after the first import, and warnings not said before. A
   // problem says more.
@@ -653,9 +654,13 @@ Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   }
   Due(mic_, Kind::kMicMissing, quiet, now, update);
   Due(cable_, Kind::kCableMissing, quiet, now, update);
-  ShowWaiting(problem_waiting_, quiet, update);
-  ShowWaiting(pause_waiting_, quiet, update);
-  ShowObsPlaysMic(quiet, update);
+  if (waiting_due_ && now >= *waiting_due_) waiting_due_.reset();
+  if (!waiting_due_) {
+    ShowWaiting(problem_waiting_, quiet, update);
+    ShowWaiting(pause_waiting_, quiet, update);
+    ShowObsPlaysMic(quiet, update);
+  }
+  WaitBehind(quiet, now, update);
   ShowHeld(quiet, now, update);
   return update;
 }
@@ -671,6 +676,7 @@ std::optional<Notifier::Clock::time_point> Notifier::NextDeadline() const {
     consider(cable_->since + options_.device_grace);
   }
   if (hold_due_) consider(*hold_due_);
+  if (waiting_due_) consider(*waiting_due_);
   if (!held_.empty() && held_after_) consider(*held_after_);
   return next;
 }
@@ -733,6 +739,14 @@ void Notifier::ShowObsPlaysMic(bool quiet, Update& update) {
   obs_said_ = true;
   if (warned_ && !Has(*warned_, kObsPlaysMicKey)) warned_->emplace_back(kObsPlaysMicKey);
   ShowWaiting(obs_waiting_, quiet, update);
+}
+
+void Notifier::WaitBehind(bool quiet, Clock::time_point now, const Update& update) {
+  if (quiet || (!problem_waiting_ && !pause_waiting_ && !obs_waiting_)) {
+    waiting_due_.reset();
+  } else if (update.show && !waiting_due_) {
+    waiting_due_ = now + options_.held_apart;
+  }
 }
 
 void Notifier::ShowOrHold(Notice notice, bool quiet, Update& update) {

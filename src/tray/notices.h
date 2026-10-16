@@ -198,6 +198,9 @@ class Notifier {
   // Shows the pause for OBS playing the mic into the cable, if it waits and
   // it isn't quiet, and keeps that it was said.
   void ShowObsPlaysMic(bool quiet, Update& update);
+  // A notice that waits for quiet to end, but another took its place: it
+  // shows after it, as a held one does, unless what it says has ended.
+  void WaitBehind(bool quiet, Clock::time_point now, const Update& update);
   void Show(Notice notice, bool quiet, Update& update);
   // Takes down the notification showing if it's a `kind`.
   void Hide(Notice::Kind kind, Update& update);
@@ -230,6 +233,8 @@ class Notifier {
   // lasts, and its notification while it waits for quiet to end.
   bool obs_said_ = false;
   std::optional<Notice> obs_waiting_;
+  // When a waiting notice another notice took the place of is due.
+  std::optional<Clock::time_point> waiting_due_;
   // What the last import that found the mic found.
   uint32_t chain_revision_ = 0;
   // Its warnings, by what each is about (WarningKey), once known.
