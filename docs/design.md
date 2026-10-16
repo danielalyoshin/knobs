@@ -407,6 +407,8 @@ The cost, measured over 15 s while `knobs-live --measure-output` pushed audio th
 
 `nv-filters` loaded, with no NVIDIA filter running, costs 572 MB and 9 threads.
 
+With the test plugin and NVIDIA's noise removal on the real mic into the cable, `knobs-core --live` ran a minute without a stall, at 16% of a core and 494 MB at most. Without a device, it kept running while OBS, through `knobs-compare`, loaded the same plugin file and SDK, and started while OBS had them loaded: neither time did it take them for an update.
+
 ### Mic-to-cable latency
 
 `knobs-live --measure-mic` compares the mic with what arrives on the cable's recording device. With the same mic, an Audient iD4, and the same four-filter chain into the same cable input, the mic reaches the cable in 90.0 ms in knobs and 91.3 ms in OBS, each the average of three runs. The runs alternate between the two, and OBS starts afresh for each of its runs.
