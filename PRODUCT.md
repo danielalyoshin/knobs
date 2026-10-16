@@ -57,7 +57,7 @@ The brand's rules (logo, colours, state marks, type, geometry, motion and voice)
 ## Evidence on Hand
 
 - knobs's output is bit-identical to OBS's on test signals, on VST plugins and on a recording of real voice (docs/design.md, Same output as OBS), apart from a stereo VST plugin on a mono profile, which isn't repeatable in OBS either. NVIDIA's noise removal is close to OBS's, but its output depends on when the mic started, in OBS too (docs/design.md, NVIDIA's noise removal).
-- Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (Audient iD4; docs/design.md, Mic-to-cable latency).
+- Mic to cable: 90.0 ms in knobs, 91.3 ms in OBS, each the average of three runs on the same cable input (Audient iD4; docs/design.md, Mic-to-cable latency).
 - On real hardware (docs/design.md, On real hardware): running, knobs used 0.92–0.96% of a core and 27 MB, against OBS minimized at 7.06–7.10% and 443–448 MB. After a cold boot, the filtered mic was on the cable 9.5 s after signing in, with nothing clicked.
 - [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
 - The logo, its lockups and the brand's rules in `brand/` (knobs-brand), and the icons rendered from them in `assets/`.

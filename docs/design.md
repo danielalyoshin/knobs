@@ -405,9 +405,16 @@ The cost, measured over 15 s while `knobs-live --measure-output` pushed audio th
 
 ### Mic-to-cable latency
 
-`knobs-live --measure-mic` compares the mic with what arrives on the cable's recording device. With the same mic, an Audient iD4, into the same cable input, the mic reaches the cable in 88.1 ms in knobs and 87.7 ms in OBS.
+`knobs-live --measure-mic` compares the mic with what arrives on the cable's recording device. With the same mic, an Audient iD4, and the same four-filter chain into the same cable input, the mic reaches the cable in 90.0 ms in knobs and 91.3 ms in OBS, each the average of three runs. The runs alternate between the two, and OBS starts afresh for each of its runs.
 
-The cable sets most of that, and libobs's monitor adds nothing measurable. From a packet's timestamp to the cable's recording device takes 84–94 ms through libobs's monitor and 81–98 ms through a bare WASAPI stream set up like it. Each run holds within ±0.2 ms, but runs vary with how the cable's buffers line up at the start, so only runs into the same cable input are compared.
+| | Runs | Average |
+|---|---|---|
+| knobs | 101.0, 88.6, 80.5 ms | 90.0 ms |
+| OBS | 94.0, 88.0, 91.9 ms | 91.3 ms |
+
+Each run holds within ±0.1 ms. Runs vary with how the cable's buffers line up at the start, in knobs and OBS alike, which is more than the two averages differ, so only runs into the same cable input are compared.
+
+The cable sets most of the delay, and libobs's monitor adds nothing measurable. From a packet's timestamp to the cable's recording device takes 82–95 ms at the start of a run through libobs's monitor, and 78–103 ms through a bare WASAPI stream set up like it. In three of ten such runs the delay stepped up by 10–21 ms partway through, through the bare stream as well as the monitor, so those steps come from Windows' audio engine or the cable (Keeping the delay down).
 
 ### On real hardware
 

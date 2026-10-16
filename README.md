@@ -41,7 +41,7 @@ knobs runs OBS’s own filter code, from your OBS install, with your OBS setting
 
 **Same sound.** For the same input, knobs’s output is bit-identical to OBS’s: on test signals, on a chain of every audio filter in OBS’s `obs-filters`, on VST plugins, and on a recording of real voice. `knobs-compare` checks this against OBS itself. Two cases vary in OBS too: NVIDIA’s noise removal, whose output depends on when the mic started, and a stereo VST plugin on a mono profile ([Known limits](#known-limits)). NVIDIA’s output is close to OBS’s, but not exactly the same.
 
-**Same delay.** From the mic to the cable takes 88.1 ms in knobs and 87.7 ms in OBS, on the same cable input.
+**Same delay.** From the mic to the cable takes about 90 ms in knobs and in OBS, on the same cable input: 90.0 ms and 91.3 ms on average over three runs each.
 
 **A fraction of the footprint.** knobs running a four-filter chain (3-Band Equalizer, Expander, Compressor, Limiter), against OBS minimized on the same PC:
 
