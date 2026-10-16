@@ -120,8 +120,13 @@ const std::vector<FakeScenario>& FakeScenarios() {
   static const std::vector<FakeScenario> scenarios = {
       {"running", "Mic/Aux with 4 filters into CABLE In 16ch", [](FakeWorld&, FakeScript&) {}},
       {"paused", "running, then paused from the menu", [](FakeWorld&, FakeScript& script) { script.pause = true; }},
-      {"obs-open", std::format("OBS is open, so {} pauses", kDisplayName),
+      {"obs-open", std::format("OBS is open, and plays the mic into CABLE In 16ch too, so {} pauses", kDisplayName),
        [](FakeWorld&, FakeScript& script) { script.obs_running = true; }},
+      {"obs-open-unmonitored", std::format("OBS is open, but doesn’t monitor the mic, so {} keeps running", kDisplayName),
+       [](FakeWorld& world, FakeScript& script) {
+         world.collection.front().mic.monitored = false;
+         script.obs_running = true;
+       }},
       {"plugin-update", "paused while an installer updates a plugin",
        [](FakeWorld& world, FakeScript& script) {
          world.file_update.folders = {L"C:\\VSTPlugins"};

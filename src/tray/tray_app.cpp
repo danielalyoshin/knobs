@@ -791,12 +791,9 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
     case kIdTryAgain:
       Reimport();
       break;
-    case kIdPauseForObs: {
-      core::Settings settings = settings_;
-      settings.pause_for_obs = !settings.pause_for_obs;
-      ApplySettings(settings);
+    case kIdPauseForObs:
+      ApplySettings(SettingsForPauseForObs(snapshot_, settings_));
       break;
-    }
     case kIdStartWithWindows:
       ToggleStartWithWindows();
       break;

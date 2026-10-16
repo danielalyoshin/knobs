@@ -70,7 +70,9 @@ std::string FormatSettings(const SavedSettings& saved) {
   std::string text = "[OBS]\n";
   if (settings.obs_dir) Line(text, "Install", ToUtf8(*settings.obs_dir));
   if (settings.obs_config) Line(text, "Settings", ToUtf8(*settings.obs_config));
-  Line(text, "PauseWhileOpen", settings.pause_for_obs ? "true" : "false");
+  // Only a choice: unset, knobs pauses only while OBS plays the mic into the
+  // cable too.
+  if (settings.pause_for_obs) Line(text, "WhileOpen", *settings.pause_for_obs ? "pause" : "run");
   text += "\n[Audio]\n";
   if (!settings.mic.empty()) Line(text, "Mic", settings.mic);
   if (!settings.cable.empty()) {
@@ -121,7 +123,14 @@ SavedSettings ParseSettings(std::string_view text) {
   };
   settings.obs_dir = path("Install");
   settings.obs_config = path("Settings");
-  settings.pause_for_obs = ReadBool(ini, "OBS", "PauseWhileOpen", settings.pause_for_obs);
+  const std::string while_open = AsciiLower(ini.Get("OBS", "WhileOpen").value_or(""));
+  if (while_open == "pause" || while_open == "run") {
+    settings.pause_for_obs = while_open == "pause";
+  } else if (!ReadBool(ini, "OBS", "PauseWhileOpen", true)) {
+    // Before 1.0.1, Pause while OBS is open was on unless it was turned off,
+    // and always saved: on was the default, off a choice.
+    settings.pause_for_obs = false;
+  }
   settings.mic = ini.Get("Audio", "Mic").value_or("");
   settings.cable = ini.Get("Audio", "Cable").value_or("");
   if (!settings.cable.empty()) settings.cable_name = ini.Get("Audio", "CableName").value_or("");

@@ -60,6 +60,14 @@ bool OtherProblem(State state) {
   return Stopped(state) && state != State::kMicMissing && state != State::kCableMissing;
 }
 
+// What Options::warned keeps for the pause for OBS playing the mic into the
+// cable, once it's been said.
+constexpr std::string_view kObsPlaysMicKey = "obs-plays-mic";
+
+bool Has(const std::vector<std::string>& keys, std::string_view key) {
+  return std::find(keys.begin(), keys.end(), key) != keys.end();
+}
+
 // What a warning is about, so renaming its filter in OBS isn't a new warning.
 const std::string& WarningKey(const import::ImportNote& note) {
   return note.key.empty() ? note.text : note.key;
@@ -233,6 +241,20 @@ Notice PausedForUpdate(const core::Snapshot& snapshot) {
                                     kDisplayName)};
 }
 
+// Paused while OBS is open, since OBS plays the mic into the cable too
+// (Snapshot::obs_plays_mic). No problem: the cable gets the mic from OBS.
+Notice ObsPlaysMic(const core::Snapshot& snapshot) {
+  const auto text = [](std::string_view cable) {
+    return std::format("OBS’s Audio Monitoring also plays your mic into {}, so {} pauses until OBS closes, and "
+                       "your mic doesn’t reach it twice.",
+                       cable, kDisplayName);
+  };
+  const std::string cable = ShortCableName(snapshot);
+  Notice notice{.kind = Kind::kObsPlaysMic, .title = "Paused while OBS is open", .text = text(cable)};
+  if (cable.empty() || Length(notice.text) > kShownText) notice.text = text("your cable");
+  return notice;
+}
+
 Notice ChainChanged(const core::Snapshot& snapshot, std::string_view mic_before) {
   const std::string& mic = snapshot.chain->mic;
   std::string text = std::format("{} now runs: {}", kDisplayName, ChainText(*snapshot.chain, false));
@@ -395,7 +417,10 @@ std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name) {
   return std::nullopt;
 }
 
-Notifier::Notifier(Options options) : options_(std::move(options)), warned_(options_.warned) {}
+Notifier::Notifier(Options options)
+    : options_(std::move(options)),
+      obs_said_(!options_.warned || Has(*options_.warned, kObsPlaysMicKey)),
+      warned_(options_.warned) {}
 
 Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, Clock::time_point now) {
   Update update;
@@ -478,6 +503,18 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   }
   ShowWaiting(pause_waiting_, quiet, update);
 
+  // A pause for OBS that knobs makes by itself, as OBS plays the mic into the
+  // cable too, once while that lasts. A pause the user chose isn't news.
+  const bool obs_plays = snapshot.obs_plays_mic && !snapshot.settings.pause_for_obs;
+  if (snapshot.chain && !obs_plays) obs_said_ = false;
+  if (snapshot.state != State::kPausedForObs || !obs_plays) {
+    Hide(Kind::kObsPlaysMic, update);
+    obs_waiting_.reset();
+  } else if (!obs_said_ && !obs_waiting_) {
+    obs_waiting_ = ObsPlaysMic(snapshot);
+  }
+  ShowObsPlaysMic(quiet, update);
+
   // Changes in OBS, after the first import, and warnings not said before. A
   // problem says more.
   if (snapshot.chain) {
@@ -507,6 +544,7 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
         return std::find(added_keys.begin(), added_keys.end(), key) != added_keys.end();
       });
     }
+    if (obs_said_) warnings.emplace_back(kObsPlaysMicKey);
     chain_revision_ = snapshot.chain_revision;
     warned_ = std::move(warnings);
     mic_name_ = snapshot.chain->mic;
@@ -615,6 +653,7 @@ Notifier::Update Notifier::Tick(bool quiet, Clock::time_point now) {
   Due(cable_, Kind::kCableMissing, quiet, now, update);
   ShowWaiting(problem_waiting_, quiet, update);
   ShowWaiting(pause_waiting_, quiet, update);
+  ShowObsPlaysMic(quiet, update);
   ShowHeld(quiet, now, update);
   return update;
 }
@@ -685,6 +724,13 @@ void Notifier::ShowWaiting(std::optional<Notice>& waiting, bool quiet, Update& u
   if (quiet || !waiting || update.show) return;
   Show(std::move(*waiting), quiet, update);
   waiting.reset();
+}
+
+void Notifier::ShowObsPlaysMic(bool quiet, Update& update) {
+  if (!obs_waiting_ || quiet || update.show) return;
+  obs_said_ = true;
+  if (warned_ && !Has(*warned_, kObsPlaysMicKey)) warned_->emplace_back(kObsPlaysMicKey);
+  ShowWaiting(obs_waiting_, quiet, update);
 }
 
 void Notifier::ShowOrHold(Notice notice, bool quiet, Update& update) {

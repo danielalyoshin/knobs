@@ -183,7 +183,7 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(done.content.starts_with("In your other apps, choose <b>CABLE Output</b> as your mic."));
   CHECK(done.stage == Stage::kApps);
   CHECK(Contains(done.content, "click <b>^</b> (<b>Show hidden icons</b>)"));
-  CHECK(Contains(done.content, "It pauses while OBS is open"));
+  CHECK(Contains(done.content, "It keeps running while OBS is open"));
   CHECK(done.checks.size() == 2 && done.checks[0].id == kCheckStartWithWindows &&
         done.checks[0].text == "Start with &Windows" && done.checks[0].checked);
   CHECK(done.default_button == kButtonDone);
@@ -223,6 +223,17 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(Contains(first_run.View(paused).content, "OBS is open now, so "));
   paused.settings.pause_for_obs = false;
   CHECK(!Contains(first_run.View(paused).content, "It pauses while OBS is open"));
+  // What knobs does while OBS is open: by default, it keeps running, unless
+  // OBS plays the mic into the cable too.
+  core::Snapshot plays = Running();
+  CHECK(Contains(first_run.View(plays).content, "It keeps running while OBS is open, and reads your filters again"));
+  plays.obs_plays_mic = true;
+  CHECK(Contains(first_run.View(plays).content,
+                 std::format("<b>Audio Monitoring</b> also plays your mic into the cable, so {} pauses while OBS is "
+                             "open",
+                             kDisplayName)));
+  plays.settings.pause_for_obs = true;
+  CHECK(Contains(first_run.View(plays).content, "It pauses while OBS is open, and reads your filters again"));
   core::Snapshot missing = Running();
   missing.state = State::kMicMissing;
   missing.detail = "The recording device for “Mic/Aux” isn’t connected.";

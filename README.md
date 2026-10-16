@@ -59,7 +59,7 @@ knobs runs OBS’s own filter code, from your OBS install, with your OBS setting
 - **Your OBS does the processing.** knobs ships no libobs and no DSP of its own. It loads OBS’s `obs.dll` and the modules your mic needs, `win-wasapi` for the mic and `obs-filters` for the filters, plus `obs-vst` for VST plugins and `nv-filters` for NVIDIA’s noise removal when your mic has them, from a private copy of your OBS install in `%LocalAppData%\knobs`. The install itself stays unlocked, so a running knobs never blocks an OBS update.
 - **OBS’s loader rebuilds your mic.** knobs reads your active OBS profile and scene collection, and OBS’s own loader recreates the mic from them: its filters in order, with their settings, and its Mono, balance and volume. knobs never writes to OBS’s settings.
 - **Out to a virtual cable.** libobs’s audio monitoring, the same code OBS uses, sends the processed mic to the cable. There’s no video, no window and no OBS process. Your other apps choose the cable’s recording device, such as CABLE Output, as their mic.
-- **Out of OBS’s way.** knobs pauses while OBS is open, so the cable never gets your mic twice. When OBS closes, knobs reads its settings again and runs whatever you changed.
+- **Running while you stream.** knobs keeps your mic on the cable while OBS is open, so you can stream or record through OBS and talk in your other apps with the same filters. If OBS’s **Audio Monitoring** also plays your mic into knobs’s cable, knobs pauses while OBS is open instead, so the cable never gets your mic twice. When OBS closes, knobs reads its settings again and runs whatever you changed.
 - **Invisible while it works, loud when it breaks.** knobs lives in the tray and starts with Windows: in testing, the mic was on the cable 9.5 s after signing in, with nothing clicked. It rebuilds the chain when the mic or the cable comes back, and a notification says when something needs you.
 
 ## Requirements
@@ -141,7 +141,7 @@ In your other apps, choose the cable’s recording device as your mic. For VB-CA
 
 ## Using knobs
 
-**To change your sound,** open OBS, change the filters and close it. knobs pauses while OBS is open, runs the new chain when it closes, and says what changed in a notification.
+**To change your sound,** open OBS, change the filters and close it. While OBS is open, your other apps keep the chain knobs was running. When OBS closes, knobs runs the new chain and says what changed in a notification.
 
 **The tray menu** opens on a left or right click on the knob.
 
@@ -153,7 +153,7 @@ In your other apps, choose the cable’s recording device as your mic. For VB-CA
 | Mic ▸ | Which of OBS’s mics to run. **Same as OBS** follows OBS’s only mic, even when it’s renamed or replaced. |
 | Cable ▸ | Where to send the mic. Your choice stays, whatever OBS’s Monitoring Device is. Every other playback device is under **Other playback devices**. |
 | Re-import from OBS | Reads OBS’s settings now, rather than when OBS next closes. |
-| Pause while OBS is open | On by default. If you turn it off while OBS also plays your mic into the same cable (its Audio Monitoring), the cable gets your mic twice. |
+| Pause while OBS is open | Checked when knobs pauses while OBS is open: by default, only if OBS’s **Audio Monitoring** also plays your mic into knobs’s cable, so the cable doesn’t get your mic twice. Click it to choose the other way; click again to go back to the default. |
 | Start with Windows | Starts knobs when you sign in. |
 | Automatically check for new versions | Once a day, asks GitHub which version is the latest. Off until you turn it on ([Privacy](#privacy)). |
 | Automatically update | Installs a new version by itself, when knobs isn’t sending your mic anyway or as it starts, and says so if it can’t. If a day goes by without such a moment, a notification offers to update now. Only for a copy the installer installed, and only with the check on. |
@@ -170,6 +170,7 @@ If quitting gets stuck, knobs ends the process after ten seconds, or sooner for 
 - your chain changed in OBS, or has a filter knobs can’t run
 - something else stops knobs, such as OBS missing or a version it doesn’t support
 - knobs pauses while a plugin or NVIDIA’s SDK is updated, or an installer may need to try again
+- knobs pauses while OBS is open because OBS plays your mic into the cable too (once)
 - OBS was updated
 - Windows plays your PC’s sound into the cable
 - OBS runs in another Windows account, and may send audio to the same cable
@@ -196,7 +197,8 @@ A click on one opens the fix. knobs restarts by itself, and says why, when OBS c
 - **Some plugin updates need you to pause or quit.** If an installer says a file is in use, pause knobs for a VST update, or quit it for an update of NVIDIA’s SDK or if pausing isn’t enough, then retry the install. This can happen when an update takes long breaks between files, replaces files elsewhere, or another app uses them. Some drives don’t support updating while the plugin runs. If a plugin gets stuck while unloading, or knobs can’t restart promptly, it stops holding the installer and says it may need to retry. The file may still be in use: quit knobs, wait for its tray icon to disappear, then retry.
 - **No sidechain.** With a sidechain source, OBS’s compressor ducks the mic when that source plays. knobs runs no other sources, so it keeps only the compressor’s output gain, which is how the compressor sounds in OBS while the sidechain is silent. It warns you.
 - **Mute and push-to-talk don’t silence the cable.** OBS’s monitoring ignores them too. Setup says so.
-- **The cable is quiet while OBS is open**, unless OBS also plays your mic into it (its Audio Monitoring). Turn off **Pause while OBS is open** to keep knobs running then.
+- **While OBS is open, your chain runs twice,** once in OBS and once in knobs, so NVIDIA’s noise removal or a heavy VST plugin costs twice as much then. Check **Pause while OBS is open** to stop knobs while OBS runs: your other apps then get your mic only if OBS also plays it into the cable (its **Audio Monitoring**).
+- **Changes to OBS’s Audio Monitoring count when OBS closes.** knobs reads OBS’s settings when OBS closes, so turning the mic’s monitoring on or off while OBS is open changes what knobs does from then.
 - **A new sample rate or channel layout in OBS restarts knobs**, as it restarts OBS, with a moment of silence.
 - **Windows only, and OBS 32.2 to 33.x only,** for now.
 

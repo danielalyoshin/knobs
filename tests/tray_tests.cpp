@@ -188,8 +188,24 @@ TEST(MenuListsTheDesignedItems) {
                                   "&Setup…", "Open &log folder", "&About", "-", "&Quit"}));
   CHECK(!menu.items[0].enabled && menu.items[0].id == kIdStatus);
   CHECK(!Fix(menu));
-  CHECK(FindItem(menu.items, kIdPauseForObs)->checked && FindItem(menu.items, kIdStartWithWindows)->checked);
-  CHECK(!FindItem(BuildMenu(Running(), {.pause_for_obs = false}, false).items, kIdPauseForObs)->checked);
+  CHECK(FindItem(menu.items, kIdStartWithWindows)->checked);
+  // By default, knobs pauses while OBS is open only if OBS plays the mic
+  // into the cable too.
+  core::Snapshot plays = Running();
+  plays.obs_plays_mic = true;
+  CHECK(!FindItem(menu.items, kIdPauseForObs)->checked);
+  CHECK(FindItem(BuildMenu(plays, {}, false).items, kIdPauseForObs)->checked);
+  CHECK(!FindItem(BuildMenu(plays, {.pause_for_obs = false}, false).items, kIdPauseForObs)->checked);
+  CHECK(FindItem(BuildMenu(Running(), {.pause_for_obs = true}, false).items, kIdPauseForObs)->checked);
+
+  // A click goes the other way, kept as a choice only while it isn't the
+  // default.
+  CHECK(SettingsForPauseForObs(Running(), {}).pause_for_obs == true);
+  CHECK(!SettingsForPauseForObs(Running(), {.pause_for_obs = true}).pause_for_obs);
+  CHECK(SettingsForPauseForObs(plays, {}).pause_for_obs == false);
+  CHECK(!SettingsForPauseForObs(plays, {.pause_for_obs = false}).pause_for_obs);
+  CHECK(SettingsForPauseForObs(plays, {.pause_for_obs = true}).pause_for_obs == false);
+  CHECK(SettingsForPauseForObs(Running(), {.mic = "Mic/Aux"}).mic == "Mic/Aux");
   CHECK(!FindItem(BuildMenu(Running(), {}, false).items, kIdStartWithWindows)->checked);
 
   core::Snapshot paused = Running();
@@ -506,11 +522,17 @@ TEST(SettingsRoundTrip) {
   CHECK(ParseSettings(text) == saved);
 
   CHECK(ParseSettings("") == SavedSettings{});
-  CHECK(FormatSettings({}) == "[OBS]\nPauseWhileOpen=true\n\n[Audio]\n\n[Setup]\nDone=false\n\n[Updates]\n"
-                              "Check=false\nInstall=false\n");
+  CHECK(text.find("WhileOpen=run\n") != std::string::npos);
+  CHECK(FormatSettings({}) == "[OBS]\n\n[Audio]\n\n[Setup]\nDone=false\n\n[Updates]\nCheck=false\nInstall=false\n");
   CHECK(ParseSettings(FormatSettings({})) == SavedSettings{});
-  CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=0\n").core.pause_for_obs);
-  CHECK(ParseSettings("[OBS]\nPauseWhileOpen=maybe\n").core.pause_for_obs);
+  CHECK(ParseSettings("[OBS]\nWhileOpen=pause\n").core.pause_for_obs == true);
+  CHECK(ParseSettings("[OBS]\nWhileOpen=Run\n").core.pause_for_obs == false);
+  CHECK(!ParseSettings("[OBS]\nWhileOpen=maybe\n").core.pause_for_obs);
+  // Before 1.0.1, on was the default and always saved, and off a choice.
+  CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=true\n").core.pause_for_obs);
+  CHECK(ParseSettings("[OBS]\nPauseWhileOpen=0\n").core.pause_for_obs == false);
+  CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=maybe\n").core.pause_for_obs);
+  CHECK(ParseSettings("[OBS]\nWhileOpen=pause\nPauseWhileOpen=false\n").core.pause_for_obs == true);
   // A name without its cable means nothing.
   CHECK(ParseSettings("[Audio]\nCableName=CABLE Input\n").core.cable_name.empty());
 

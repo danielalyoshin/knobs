@@ -188,8 +188,9 @@ begin
 end;
 
 // Whether a playback device is a virtual cable, as the tray recognizes one
-// (IsVirtualCable in src/tray/menu.cpp): VB-Audio's cables, and Virtual Audio
-// Cable. Its device's name and its driver's, as Windows shows them together.
+// (IsVirtualCable in src/audio/audio_devices.cpp): VB-Audio's cables, and
+// Virtual Audio Cable. Its device's name and its driver's, as Windows shows
+// them together.
 function IsVirtualCable(const Name: String): Boolean;
 begin
   Result := (Pos('vb-audio', Lowercase(Name)) > 0) or (Pos('virtual audio cable', Lowercase(Name)) > 0);

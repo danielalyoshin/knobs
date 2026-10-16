@@ -341,7 +341,9 @@ std::string DescribeSettings(const core::Settings& settings) {
                      settings.obs_config ? ToUtf8(*settings.obs_config) : "(found)",
                      settings.mic.empty() ? "(same as OBS)" : "\"" + settings.mic + "\"",
                      settings.cable.empty() ? "(same as OBS)" : "\"" + settings.cable_name + "\"",
-                     settings.pause_for_obs ? "on" : "off");
+                     !settings.pause_for_obs ? "(when OBS plays the mic into the cable)"
+                     : *settings.pause_for_obs ? "on"
+                                               : "off");
 }
 
 std::string DescribeFirstRun(const tray::FirstRunProgress& progress) {

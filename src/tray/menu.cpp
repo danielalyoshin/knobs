@@ -219,24 +219,6 @@ std::string ObsUnsupportedLine(const runtime::ObsVersion& version) {
   return std::format("OBS {} is too old for {}", version.ToString(), kDisplayName);
 }
 
-std::string ShortDeviceName(std::string_view name) {
-  while (!name.empty() && name.back() == ' ') name.remove_suffix(1);
-  if (name.empty() || name.back() != ')') return std::string(name);
-  // The opening bracket that matches the last one: "Speakers (Realtek(R)
-  // Audio)" is "Speakers".
-  int depth = 0;
-  for (size_t i = name.size(); i-- > 0;) {
-    if (name[i] == ')') {
-      ++depth;
-    } else if (name[i] == '(' && --depth == 0) {
-      std::string_view rest = name.substr(0, i);
-      while (!rest.empty() && rest.back() == ' ') rest.remove_suffix(1);
-      return std::string(rest.empty() ? name : rest);
-    }
-  }
-  return std::string(name);
-}
-
 std::string ChainText(const core::ChainSummary& chain, bool short_form) {
   core::ChainSummary short_cable = chain;
   short_cable.cable = ShortDeviceName(chain.cable);
@@ -252,11 +234,6 @@ std::string MicCount(const core::Snapshot& snapshot) {
   return std::format("OBS has {} mic{}", count, count == 1 ? "" : "s");
 }
 
-bool IsVirtualCable(std::string_view name) {
-  const std::string lower = AsciiLower(name);
-  return lower.find("vb-audio") != std::string::npos || lower.find("virtual audio cable") != std::string::npos;
-}
-
 std::string DefaultOutputCable(const core::Snapshot& snapshot) {
   if (snapshot.default_output.empty()) return "";
   const audio::AudioDevice* output = FindById(snapshot.outputs, snapshot.default_output);
@@ -267,20 +244,8 @@ std::string DefaultOutputCable(const core::Snapshot& snapshot) {
   if (cable.id.empty()) cable = snapshot.obs_cable;
   if (cable.id.empty() || SameId(cable.id, kDefaultDevice)) return "";
   if (const audio::AudioDevice* connected = FindById(snapshot.outputs, cable.id)) cable.name = connected->name;
-  const std::string side = CableRecordingSide(output->name);
-  if (!SameId(output->id, cable.id) && (side.empty() || side != CableRecordingSide(cable.name))) return "";
+  if (!audio::SameCable(*output, cable)) return "";
   return ShortDeviceName(output->name);
-}
-
-std::string CableRecordingSide(std::string_view name) {
-  if (!IsVirtualCable(name)) return "";
-  const std::string short_name = ShortDeviceName(name);
-  for (const std::string_view input : {" In 16ch", " Input"}) {
-    if (short_name.size() > input.size() && short_name.ends_with(input)) {
-      return short_name.substr(0, short_name.size() - input.size()) + " Output";
-    }
-  }
-  return "";
 }
 
 Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, bool start_with_windows,
@@ -316,7 +281,10 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
   items.push_back(CableMenu(snapshot, settings, menu));
   items.push_back(Command(kIdReimport, "Re-&import from OBS"));
   items.push_back(Separator());
-  items.push_back(Toggle(kIdPauseForObs, "Pause while &OBS is open", settings.pause_for_obs));
+  // What knobs does: by default, it pauses only while OBS plays the mic into
+  // the cable too.
+  items.push_back(Toggle(kIdPauseForObs, "Pause while &OBS is open",
+                         core::PausesForObs(settings, snapshot.obs_plays_mic)));
   items.push_back(Toggle(kIdStartWithWindows, "Start with &Windows", start_with_windows));
   if (updates.offered) {
     items.push_back(Toggle(kIdCheckForUpdates, "Automatically check for &new versions", updates.check));
@@ -357,6 +325,14 @@ std::optional<core::Settings> SettingsForPick(const Menu& menu, unsigned id, con
     return std::nullopt;
   }
   return picked;
+}
+
+core::Settings SettingsForPauseForObs(const core::Snapshot& snapshot, const core::Settings& settings) {
+  core::Settings clicked = settings;
+  const bool pause = !core::PausesForObs(settings, snapshot.obs_plays_mic);
+  clicked.pause_for_obs.reset();
+  if (pause != snapshot.obs_plays_mic) clicked.pause_for_obs = pause;
+  return clicked;
 }
 
 }  // namespace knobs::tray

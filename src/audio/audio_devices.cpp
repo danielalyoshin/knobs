@@ -23,6 +23,47 @@ const AudioDevice* FindById(const std::vector<AudioDevice>& devices, std::string
   return found == devices.end() ? nullptr : &*found;
 }
 
+std::string ShortDeviceName(std::string_view name) {
+  while (!name.empty() && name.back() == ' ') name.remove_suffix(1);
+  if (name.empty() || name.back() != ')') return std::string(name);
+  // The opening bracket that matches the last one: "Speakers (Realtek(R)
+  // Audio)" is "Speakers".
+  int depth = 0;
+  for (size_t i = name.size(); i-- > 0;) {
+    if (name[i] == ')') {
+      ++depth;
+    } else if (name[i] == '(' && --depth == 0) {
+      std::string_view rest = name.substr(0, i);
+      while (!rest.empty() && rest.back() == ' ') rest.remove_suffix(1);
+      return std::string(rest.empty() ? name : rest);
+    }
+  }
+  return std::string(name);
+}
+
+bool IsVirtualCable(std::string_view name) {
+  const std::string lower = AsciiLower(name);
+  return lower.find("vb-audio") != std::string::npos || lower.find("virtual audio cable") != std::string::npos;
+}
+
+std::string CableRecordingSide(std::string_view name) {
+  if (!IsVirtualCable(name)) return "";
+  const std::string short_name = ShortDeviceName(name);
+  for (const std::string_view input : {" In 16ch", " Input"}) {
+    if (short_name.size() > input.size() && short_name.ends_with(input)) {
+      return short_name.substr(0, short_name.size() - input.size()) + " Output";
+    }
+  }
+  return "";
+}
+
+bool SameCable(const AudioDevice& a, const AudioDevice& b) {
+  if (a.id.empty() || b.id.empty()) return false;
+  if (SameId(a.id, b.id)) return true;
+  const std::string side = CableRecordingSide(a.name);
+  return !side.empty() && side == CableRecordingSide(b.name);
+}
+
 std::vector<AudioDevice> ListMicDevices(const runtime::ObsApi& api) {
   std::vector<AudioDevice> devices;
   obs_properties_t* properties = api.obs_get_source_properties(kMicSourceId);

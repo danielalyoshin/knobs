@@ -67,7 +67,13 @@ void Controller::SetObsRunning(bool running, Clock::time_point now) {
   if (stopped_ || running == obs_running_) return;
   obs_running_ = running;
   if (running) {
-    backend_.Log("OBS started.");
+    if (!PausesForObs()) {
+      backend_.Log("OBS started. The chain keeps running.");
+    } else if (settings_.pause_for_obs) {
+      backend_.Log("OBS started. Pausing until it exits.");
+    } else {
+      backend_.Log("OBS started, and its Audio Monitoring plays the mic into the cable too. Pausing until it exits.");
+    }
   } else {
     // OBS saves its settings as it exits, so they're complete by now.
     backend_.Log("OBS exited. Importing its settings again.");
@@ -509,6 +515,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   next.paused_by_user = paused_by_user_;
   next.chain_revision = chain_revision_;
   next.obs_cable = {profile_cable_name_, profile_cable_id_};
+  next.obs_plays_mic = ObsPlaysMic();
   next.outputs = devices_.outputs;
   next.default_output = devices_.default_output;
   next.disabled_outputs = devices_.disabled_outputs;
@@ -570,7 +577,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     set(State::kFailed, devices_.error);
   } else if (paused_by_user_) {
     set(State::kPausedByUser);
-  } else if (obs_running_ && settings_.pause_for_obs) {
+  } else if (obs_running_ && PausesForObs()) {
     set(State::kPausedForObs);
   } else if (!CablePresent()) {
     set(State::kCableMissing, std::format("“{}” isn’t connected.", CableName()));
@@ -648,6 +655,25 @@ bool Controller::MicPresent() const {
 }
 
 bool Controller::CablePresent() const { return plan_ && FindById(devices_.outputs, plan_->cable.id) != nullptr; }
+
+bool Controller::ObsPlaysMic() const {
+  if (!import_ || !import_->mic || !plan_ || profile_cable_id_.empty()) return false;
+  // OBS's Default is Windows' default playback device.
+  audio::AudioDevice obs{profile_cable_name_,
+                         SameId(profile_cable_id_, kDefaultDevice) ? devices_.default_output : profile_cable_id_};
+  if (const audio::AudioDevice* device = FindById(devices_.outputs, obs.id)) obs.name = device->name;
+  if (!audio::SameCable(obs, {CableName(), plan_->cable.id})) return false;
+  // Any mic of OBS's that records from the same device: the mic twice,
+  // whichever filters it runs. Default is the default communications device.
+  const auto device = [this](const std::string& id) { return SameId(id, kDefaultDevice) ? devices_.default_mic : id; };
+  const std::string& mic = import_->mic->mic.device_id;
+  return std::any_of(import_->mics.begin(), import_->mics.end(), [&](const import::MicCandidate& other) {
+    return other.monitored && (SameId(other.device_id, mic) ||
+                               (!device(mic).empty() && SameId(device(other.device_id), device(mic))));
+  });
+}
+
+bool Controller::PausesForObs() const { return core::PausesForObs(settings_, ObsPlaysMic()); }
 
 std::string Controller::CableName() const {
   if (!plan_) return "";

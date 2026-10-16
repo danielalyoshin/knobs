@@ -77,6 +77,10 @@ std::string FormatChain(const ChainSummary& chain, bool short_form) {
   return text;
 }
 
+bool PausesForObs(const Settings& settings, bool obs_plays_mic) {
+  return settings.pause_for_obs.value_or(obs_plays_mic);
+}
+
 std::string DescribeSnapshot(const Snapshot& snapshot) {
   std::string text(snapshot.state == State::kPausedForUpdate && snapshot.nvidia_update
                        ? "paused for NVIDIA’s SDK update"

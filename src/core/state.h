@@ -32,9 +32,12 @@ struct Settings {
   std::string cable;
   // Its name, for saying which device is missing while it isn't connected.
   std::string cable_name;
-  // Pause while OBS runs (State::kPausedForObs). Off, the chain keeps running
-  // while OBS is open; OBS exiting still re-imports.
-  bool pause_for_obs = true;
+  // Whether to pause while OBS runs (State::kPausedForObs). Unset, knobs
+  // pauses only while OBS also plays the mic into the cable
+  // (Snapshot::obs_plays_mic), so the cable never gets the mic twice, and
+  // otherwise keeps running while OBS is open. OBS exiting re-imports either
+  // way.
+  std::optional<bool> pause_for_obs;
 
   friend bool operator==(const Settings&, const Settings&) = default;
 };
@@ -46,8 +49,9 @@ enum class State {
   kRunning,
   // Paused from the tray. Stays paused, whatever OBS does, until resumed.
   kPausedByUser,
-  // Paused while OBS runs, so the cable never gets the mic twice. Resumes
-  // when OBS exits, after a re-import.
+  // Paused while OBS runs (Settings::pause_for_obs): by default, only while
+  // OBS also plays the mic into the cable, so it never gets the mic twice.
+  // Resumes when OBS exits, after a re-import.
   kPausedForObs,
   // An installer is replacing a plugin or NVIDIA's SDK. Resumes after its
   // folder has stopped changing, with a fresh import.
@@ -183,6 +187,11 @@ struct Snapshot {
   // The OBS profile's monitoring device, once a profile has been read. Its
   // ID may be "default".
   audio::AudioDevice obs_cable;
+  // OBS, as its settings were last read, plays the mic into the cable too
+  // while it's open: a mic in the scene collection that records from the
+  // same device is monitored, and OBS's Monitoring Device is the cable, or
+  // another input of it. Then, by default, knobs pauses while OBS is open.
+  bool obs_plays_mic = false;
   // The playback devices that are connected, to pick a cable from, and
   // Windows' default one, which plays the PC's sound (audio::Endpoints).
   std::vector<audio::AudioDevice> outputs;
@@ -209,6 +218,11 @@ struct Snapshot {
 
   friend bool operator==(const Snapshot&, const Snapshot&) = default;
 };
+
+// Whether knobs pauses while OBS is open, with `settings`: as the user
+// chose, or by default, while OBS plays the mic into the cable too
+// (Snapshot::obs_plays_mic).
+bool PausesForObs(const Settings& settings, bool obs_plays_mic);
 
 // One line for logs and the dev tools: "running: Mic/Aux › … › CABLE In 16ch".
 std::string DescribeSnapshot(const Snapshot& snapshot);

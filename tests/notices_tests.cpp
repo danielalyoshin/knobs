@@ -162,6 +162,56 @@ TEST(NoticesStayQuietOnAColdBoot) {
   CHECK(said.events == kNone);
 }
 
+TEST(NoticesSayOnceThatKnobsPausesWhileObsPlaysTheMicIntoTheCable) {
+  // What was said is known, as the settings keep it: the first time OBS
+  // opens, the pause is news.
+  Fixture f(tools::DefaultWorld(), {}, {.warned = std::vector<std::string>{}});
+  f.Start();
+  CHECK(f.events == kNone);
+  f.ObsOpens();
+  CHECK(f.state() == State::kPausedForObs && f.events == std::vector<std::string>{"Paused while OBS is open"});
+  CHECK(f.last.kind == Notice::Kind::kObsPlaysMic && !f.last.problem && !f.last.sound && !f.last.page);
+  CHECK(f.last.text == std::format("OBS’s Audio Monitoring also plays your mic into CABLE In 16ch, so {} pauses "
+                                   "until OBS closes, and your mic doesn’t reach it twice.",
+                                   kDisplayName));
+  // Taken down as OBS closes, and not said again.
+  f.ObsCloses();
+  CHECK(f.state() == State::kRunning && (f.events == std::vector<std::string>{"Paused while OBS is open", "-"}));
+  f.ObsOpens();
+  CHECK(f.state() == State::kPausedForObs && f.events.size() == 2);
+
+  // Nor by the next copy, which the settings tell.
+  Fixture next(tools::DefaultWorld(), {}, {.warned = f.notifier.warnings()});
+  next.Start();
+  next.ObsOpens();
+  CHECK(next.state() == State::kPausedForObs && next.events == kNone);
+  // OBS stops monitoring the mic, so knobs keeps running while it's open...
+  next.ObsCloses([](FakeWorld& world) { world.collection.front().mic.monitored = false; });
+  next.ObsOpens();
+  CHECK(next.state() == State::kRunning && next.events == kNone);
+  // ...and starts again: news again.
+  next.ObsCloses([](FakeWorld& world) { world.collection.front().mic.monitored = true; });
+  next.ObsOpens();
+  CHECK(next.state() == State::kPausedForObs && next.events == std::vector<std::string>{"Paused while OBS is open"});
+
+  // A pause the user chose isn't news.
+  Fixture chosen(tools::DefaultWorld(), {.pause_for_obs = true}, {.warned = std::vector<std::string>{}});
+  chosen.Start();
+  chosen.ObsOpens();
+  CHECK(chosen.state() == State::kPausedForObs && chosen.events == kNone);
+
+  // While the setup window is open, it waits, and shows once it closes if
+  // OBS is still open.
+  Fixture quiet(tools::DefaultWorld(), {}, {.warned = std::vector<std::string>{}});
+  quiet.Start();
+  quiet.quiet = true;
+  quiet.ObsOpens();
+  CHECK(quiet.events == kNone);
+  quiet.quiet = false;
+  quiet.Advance(1s);
+  CHECK(quiet.events == std::vector<std::string>{"Paused while OBS is open"});
+}
+
 TEST(NoticesStayQuietWhenObsOpensAndClosesUnchanged) {
   Fixture f;
   f.Start();

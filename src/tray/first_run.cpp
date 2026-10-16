@@ -363,6 +363,19 @@ std::string ObsOpenLine(const core::Snapshot& snapshot) {
   return std::format("OBS is open. {} reads its settings again when OBS closes.", kDisplayName);
 }
 
+// What knobs does while OBS is open, and when OBS closes, for the last page.
+std::string WhileObsIsOpen(const core::Snapshot& snapshot) {
+  if (!core::PausesForObs(snapshot.settings, snapshot.obs_plays_mic)) {
+    return "It keeps running while OBS is open, and reads your filters again each time OBS closes.";
+  }
+  if (snapshot.settings.pause_for_obs) {
+    return "It pauses while OBS is open, and reads your filters again each time OBS closes.";
+  }
+  return std::format("OBS’s <b>Audio Monitoring</b> also plays your mic into the cable, so {} pauses while OBS is "
+                     "open, and reads your filters again each time OBS closes.",
+                     kDisplayName);
+}
+
 PageButton Button(int id, std::string text, bool enabled = true) { return {id, std::move(text), enabled}; }
 
 // `words` with no-break spaces, so a name the reader looks for elsewhere,
@@ -776,10 +789,7 @@ PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool 
       "{2}",
       side.empty() ? std::format("the recording device that goes with {}", EscapeMarkup(chain.cable))
                    : std::format("<b>{}</b>", EscapeMarkup(side)),
-      kDisplayName,
-      snapshot.settings.pause_for_obs ? "It pauses while OBS is open, and reads your filters again each time OBS "
-                                        "closes."
-                                      : "It reads your filters again each time OBS closes.");
+      kDisplayName, WhileObsIsOpen(snapshot));
   switch (snapshot.state) {
     case State::kPausedForObs:
       view.content += std::format("\n\nOBS is open now, so {} starts when you close it.", kDisplayName);

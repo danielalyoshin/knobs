@@ -433,6 +433,71 @@ TEST(CorePausesWhileObsRunsAndReimportsWhenItExits) {
   CHECK(f.state() == State::kRunning && f.backend.imports == 3 && f.last().chain_revision == 1);
 }
 
+TEST(CoreKeepsRunningWhileObsRunsUnlessObsPlaysTheMicIntoTheCable) {
+  // The cable is a pick, as the tray keeps it, so OBS monitoring elsewhere
+  // doesn't move it.
+  Fixture f({.cable = kCableId, .cable_name = kCableName});
+  f.backend.collection[0].mic.monitored = false;
+  f.controller.Start(true, f.now);
+  CHECK(f.state() == State::kRunning && f.last().obs_running && !f.last().obs_plays_mic);
+  CHECK(f.backend.chain_starts == 1);
+
+  // OBS's settings, read as it exits, have it monitor the mic into the
+  // cable: knobs pauses the next time OBS opens.
+  f.backend.collection[0].mic.monitored = true;
+  f.controller.SetObsRunning(false, f.now);
+  CHECK(f.state() == State::kRunning && f.last().obs_plays_mic);
+  f.controller.SetObsRunning(true, f.now);
+  CHECK(f.state() == State::kPausedForObs && !f.backend.chain_running);
+
+  // Monitoring to another device doesn't reach the cable.
+  f.backend.config.audio.monitoring_device_id = "{0.0.0.00000000}.{speakers}";
+  f.backend.config.audio.monitoring_device_name = "Speakers (Realtek)";
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kRunning && !f.last().obs_plays_mic);
+  // Another input of the same cable does, connected or not.
+  f.backend.config.audio.monitoring_device_id = "{0.0.0.00000000}.{cable-input}";
+  f.backend.config.audio.monitoring_device_name = "CABLE Input (VB-Audio Virtual Cable)";
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kPausedForObs && f.last().obs_plays_mic);
+  // OBS's Default, while Windows plays the PC's sound into the cable.
+  f.backend.config.audio.monitoring_device_id = "default";
+  f.backend.config.audio.monitoring_device_name = "Default";
+  f.backend.devices.default_output = kCableId;
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kPausedForObs && f.last().obs_plays_mic);
+  f.backend.devices.default_output = "{0.0.0.00000000}.{speakers}";
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kRunning && !f.last().obs_plays_mic);
+
+  // Chosen, it pauses whatever OBS monitors.
+  f.controller.Apply({.cable = kCableId, .cable_name = kCableName, .pause_for_obs = true}, f.now);
+  CHECK(f.state() == State::kPausedForObs && !f.last().obs_plays_mic);
+}
+
+TEST(CoreSeesObsPlayTheMicIntoTheCableFromAnotherSourceOnItsDevice) {
+  // Mic/Aux isn't monitored, but another of OBS's mics on the same device is.
+  Fixture f({.mic = "Mic/Aux"});
+  f.backend.collection[0].mic.monitored = false;
+  f.backend.collection.push_back(MakeMic("Mic copy", kMicId, "chain-copy"));
+  f.controller.Start(true, f.now);
+  CHECK(f.state() == State::kPausedForObs && f.last().obs_plays_mic);
+
+  // On another device, it's another mic: both reach the cable, as set up.
+  f.backend.collection[1].mic.device_id = kHeadsetId;
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kRunning && !f.last().obs_plays_mic);
+
+  // On Default, it's the mic Windows' default communications device is.
+  f.backend.collection[1].mic.device_id = "default";
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kPausedForObs && f.last().obs_plays_mic);
+  f.backend.devices.mics.push_back({"Headset Microphone", kHeadsetId});
+  f.backend.devices.default_mic = kHeadsetId;
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kRunning && !f.last().obs_plays_mic);
+}
+
 TEST(CoreCanKeepRunningWhileObsRuns) {
   Fixture f({.pause_for_obs = false});
   f.controller.Start(true, f.now);

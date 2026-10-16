@@ -17,7 +17,7 @@
 //   [OBS]
 //   Install=D:\\Games\\obs-studio
 //   Settings=D:\\Games\\obs-studio\\config
-//   PauseWhileOpen=true
+//   WhileOpen=pause
 //   [Audio]
 //   Mic=Mic/Aux
 //   Cable={0.0.0.00000000}.{…}
@@ -40,10 +40,14 @@
 //   [Notices]
 //   Warned=vst {…}\nunknown {…}
 //
-// Checked, Seen and Failed are times in seconds since 1970 (UTC): when a
-// check last got an answer, when it first found Latest, and when getting
-// Latest last failed (UpdateSettings). Warned is the pre-flight warnings
-// already said, one a line (Notifier::Options::warned). Keys left out keep
+// WhileOpen is pause or run, once the user has chosen whether knobs pauses
+// while OBS is open (core::Settings::pause_for_obs). Before 1.0.1 that was
+// PauseWhileOpen, true or false, always saved: true was the default, and is
+// read as no choice. Checked, Seen and Failed are times in seconds since 1970
+// (UTC): when a check last got an answer, when it first found Latest, and
+// when getting Latest last failed (UpdateSettings). Warned is the pre-flight
+// warnings already said, and whether the pause for OBS playing the mic into
+// the cable was, one a line (Notifier::Options::warned). Keys left out keep
 // their defaults (core::Settings, FirstRunProgress). Values are escaped as
 // libobs's INI parser unescapes them (\\, \n, \r), and read with that parser
 // (import::ObsIni).

@@ -38,6 +38,7 @@ struct Notice {
     kOtherObs,        // OBS opened in another Windows session.
     kSoundIntoCable,  // Windows plays the PC's sound into a virtual cable.
     kPausedForUpdate,  // An installer is updating a plugin or NVIDIA's SDK.
+    kObsPlaysMic,      // Paused while OBS is open, since OBS plays the mic into the cable too.
     kUpdateAvailable,  // A new version is out (updates.h).
     kUpdated,          // This copy is the version an update installed.
     kUpdateFailed,     // An update didn't install by itself.
@@ -81,6 +82,10 @@ enum class RestartWait { kMenu, kSetup, kWindow };
 // - A pause while an installer updates a plugin or NVIDIA's SDK gets one as
 //   it begins, taken down as it ends. It isn't a problem: the mic comes back
 //   by itself.
+// - So does a pause while OBS is open that knobs makes by itself, because OBS
+//   plays the mic into the cable too (core::Snapshot::obs_plays_mic), but
+//   only once while that lasts, even across restarts (Options::warned).
+//   Otherwise, OBS opening and closing gets none.
 // - The mic or its chain changing in OBS gets one after the first import,
 //   and new pre-flight warnings do even at it, if Options::warned says which
 //   are known. A change knobs's own settings made gets none.
@@ -116,9 +121,10 @@ class Notifier {
     // What an update did, said as the restart is, by the first copy that
     // runs after it (UpdatedNotice).
     std::optional<Notice> updated;
-    // The pre-flight warnings already said, by what each is about, as
+    // The pre-flight warnings already said, by what each is about, and
+    // whether the pause for OBS playing the mic into the cable was, as
     // warnings() last had them, in this copy or one before: the first
-    // import says the others. Unknown, it says none.
+    // import says the others. Unknown, it says none: the first run does.
     std::optional<std::vector<std::string>> warned;
     // Notices held while quiet, or behind another, show one at a time, this
     // far apart.
@@ -189,6 +195,9 @@ class Notifier {
   void ShowWaiting(std::optional<Notice>& waiting, bool quiet, Update& update);
   // Shows `notice` now, or after what's quiet or shown now.
   void ShowOrHold(Notice notice, bool quiet, Update& update);
+  // Shows the pause for OBS playing the mic into the cable, if it waits and
+  // it isn't quiet, and keeps that it was said.
+  void ShowObsPlaysMic(bool quiet, Update& update);
   void Show(Notice notice, bool quiet, Update& update);
   // Takes down the notification showing if it's a `kind`.
   void Hide(Notice::Kind kind, Update& update);
@@ -217,6 +226,10 @@ class Notifier {
   // quiet to end.
   std::optional<bool> update_pause_;
   std::optional<Notice> pause_waiting_;
+  // The pause for OBS playing the mic into the cable was said while that
+  // lasts, and its notification while it waits for quiet to end.
+  bool obs_said_ = false;
+  std::optional<Notice> obs_waiting_;
   // What the last import that found the mic found.
   uint32_t chain_revision_ = 0;
   // Its warnings, by what each is about (WarningKey), once known.

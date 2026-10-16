@@ -87,10 +87,10 @@ std::string StatusLine(const core::Snapshot& snapshot);
 // setup page say it alike.
 std::string ObsUnsupportedLine(const runtime::ObsVersion& version);
 
-// "CABLE In 16ch (VB-Audio Virtual Cable)" -> "CABLE In 16ch": a playback
-// device's name without the trailing name of its driver, as Windows' Sound
-// settings shows it on its first line.
-std::string ShortDeviceName(std::string_view name);
+// Device names as the tray says them (audio_devices.h).
+using audio::CableRecordingSide;
+using audio::IsVirtualCable;
+using audio::ShortDeviceName;
 
 // The chain as the tray says it, with the cable's short name: in full, or in
 // the short form the menu and tooltip use.
@@ -98,10 +98,6 @@ std::string ChainText(const core::ChainSummary& chain, bool short_form);
 
 // The cable the mic goes to, by its short name, or "" until one is known.
 std::string ShortCableName(const core::Snapshot& snapshot);
-
-// Whether a playback device is a virtual cable (VB-Cable, VoiceMeeter, VB's
-// Hi-Fi Cable, Virtual Audio Cable), going by its name.
-bool IsVirtualCable(std::string_view name);
 
 // "OBS has 2 mics", or "1 mic".
 std::string MicCount(const core::Snapshot& snapshot);
@@ -111,12 +107,6 @@ std::string MicCount(const core::Snapshot& snapshot);
 // into the cable, as installing one can make it do. Then the user hears
 // nothing, and the cable's apps hear it with the mic.
 std::string DefaultOutputCable(const core::Snapshot& snapshot);
-
-// The recording side of a virtual cable's playback device, which other apps
-// choose as their mic, by its short name: CABLE Input and CABLE In 16ch go
-// to CABLE Output, CABLE-A Input to CABLE-A Output, VoiceMeeter Input to
-// VoiceMeeter Output. Empty when it isn't known.
-std::string CableRecordingSide(std::string_view name);
 
 // The update check's part of the menu (updates.h).
 struct UpdateMenu {
@@ -140,5 +130,10 @@ const MenuItem* FindItem(const std::vector<MenuItem>& items, unsigned id);
 
 // The settings a mic or cable pick asks for, or nullopt if `id` isn't one.
 std::optional<core::Settings> SettingsForPick(const Menu& menu, unsigned id, const core::Settings& settings);
+
+// The settings a click on Pause while OBS is open asks for: the other way
+// from what the menu shows, kept as a choice only while it isn't what knobs
+// does by default (core::Settings::pause_for_obs).
+core::Settings SettingsForPauseForObs(const core::Snapshot& snapshot, const core::Settings& settings);
 
 }  // namespace knobs::tray

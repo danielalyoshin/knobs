@@ -30,7 +30,7 @@ knobs gives OBS's mic sound without OBS. It loads the filter binaries from a pri
 - Lives in the Windows tray with no window by default, and starts with Windows.
 - Needs OBS Studio installed (32.2 to 33.x) and a virtual cable such as VB-CABLE. Other apps choose the cable as their mic.
 - Users tune filters in OBS. knobs reads the active OBS profile and scene collection and never changes them.
-- By default, pauses while OBS runs and resumes when it exits, so the cable never gets the mic twice.
+- Keeps running while OBS is open, so users who stream through OBS keep their filtered mic in their other apps. By default it pauses while OBS runs only when OBS's Audio Monitoring also plays the mic into its cable, so the cable never gets the mic twice, and reads OBS's settings again when OBS exits.
 - Found through GitHub and getknobs.app; to be announced on the OBS forums and r/obs.
 
 ## Capabilities and Constraints
@@ -70,4 +70,4 @@ The brand's rules (logo, colours, state marks, type, geometry, motion and voice)
 2. **Invisible while it works.** Tray only, starts with Windows, nothing to look at once it's set up.
 3. **Loud when it breaks.** When the mic, the cable or OBS goes missing, say so in a notification that says what to do. Never fail silently.
 4. **OBS is the editor.** Tuning happens in OBS. knobs imports the chain, and for people new to OBS it explains how to set one up there rather than building one itself.
-5. **Leave OBS alone.** Never change OBS's settings or install. Make way while OBS runs instead of competing with it.
+5. **Leave OBS alone.** Never change OBS's settings or install. Where OBS sends the mic to the cable itself, make way instead of competing with it.

@@ -30,7 +30,7 @@ using RestartHook = std::function<Status(const RestartFiles& files)>;
 // restart to load an SDK installed since nv-filters loaded without it;
 // problems with OBS, its settings or the import; a chain that failed to start,
 // or Windows' list of devices that couldn't be read; paused by the user;
-// paused while OBS runs, unless Settings::pause_for_obs is off; the cable
+// paused while OBS runs, as Settings::pause_for_obs says; the cable
 // missing; the mic missing. The chain runs only while the state
 // is kRunning. Every other state releases it, which frees the mic and the
 // cable, and the next kRunning loads it again with libobs's loader
@@ -174,6 +174,9 @@ class Controller {
   bool MicPresent() const;
   bool CablePresent() const;
   std::string CableName() const;
+  // Snapshot::obs_plays_mic.
+  bool ObsPlaysMic() const;
+  bool PausesForObs() const;
 
   Backend& backend_;
   Settings settings_;
