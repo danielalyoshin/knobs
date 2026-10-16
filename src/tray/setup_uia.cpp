@@ -57,10 +57,11 @@ long ControlType(Role role) {
 }
 
 bool Invokable(Role role) {
-  return role == Role::kLink || role == Role::kDoor || role == Role::kButton || role == Role::kDropdown;
+  return role == Role::kLink || role == Role::kDoor || role == Role::kButton || role == Role::kDropdown ||
+         role == Role::kToggle;
 }
 
-bool Toggles(Role role) { return role == Role::kCheckBox || role == Role::kToggle; }
+bool Toggles(Role role) { return role == Role::kCheckBox; }
 
 void SetString(VARIANT* value, const std::wstring& text) {
   if (text.empty()) return;
@@ -455,6 +456,18 @@ void SetupUia::Toggled(int element, bool was_on) {
   before.lVal = was_on ? ToggleState_On : ToggleState_Off;
   after.lVal = was_on ? ToggleState_Off : ToggleState_On;
   UiaRaiseAutomationPropertyChangedEvent(provider, UIA_ToggleToggleStatePropertyId, before, after);
+  provider->Release();
+}
+
+void SetupUia::NameChanged(int element, const std::wstring& before) {
+  if (!bridge_->host || element < 0 || !UiaClientsAreListening()) return;
+  IRawElementProviderSimple* provider = Provider::For(bridge_, element);
+  VARIANT old_name = {}, new_name = {};
+  SetString(&old_name, before);
+  SetString(&new_name, bridge_->host->UiaScene().elements[static_cast<size_t>(element)].name);
+  UiaRaiseAutomationPropertyChangedEvent(provider, UIA_NamePropertyId, old_name, new_name);
+  VariantClear(&old_name);
+  VariantClear(&new_name);
   provider->Release();
 }
 

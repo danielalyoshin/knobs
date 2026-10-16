@@ -617,7 +617,14 @@ void SetupWindow::ShowView(PageView view) {
 
 void SetupWindow::Layout() {
   scene_ = LayoutScene(view_, choice_, more_open_);
-  if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = walk_playing_;
+  ShowWalkPlaying();
+}
+
+void SetupWindow::ShowWalkPlaying() {
+  if (scene_.walk_toggle < 0) return;
+  Element& toggle = scene_.elements[static_cast<size_t>(scene_.walk_toggle)];
+  toggle.selected = walk_playing_;
+  toggle.name = WalkToggleName(walk_playing_);
 }
 
 void SetupWindow::Activate(int index) {
@@ -967,7 +974,7 @@ void SetupWindow::StartWalk() {
   // start needs no word of its own.
   walk_playing_ = animate_ && !walk_at_;
   SetWalkTime(walk_at_ ? *walk_at_ : walk_playing_ ? 0 : scene_.walkthrough->still);
-  if (scene_.walk_toggle >= 0) scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = walk_playing_;
+  ShowWalkPlaying();
   if (walk_playing_ && window_) {
     walk_tick_ = Clock::now();
     SetTimer(window_, kWalkTimer, kFrameMs, nullptr);
@@ -979,8 +986,9 @@ void SetupWindow::SetWalkPlaying(bool playing) {
   walk_playing_ = playing;
   walk_unseen_ = false;
   if (scene_.walk_toggle >= 0) {
-    scene_.elements[static_cast<size_t>(scene_.walk_toggle)].selected = playing;
-    uia_->Toggled(scene_.walk_toggle, !playing);
+    const std::wstring before = scene_.elements[static_cast<size_t>(scene_.walk_toggle)].name;
+    ShowWalkPlaying();
+    uia_->NameChanged(scene_.walk_toggle, before);
   }
   if (!window_) return;
   if (playing) {

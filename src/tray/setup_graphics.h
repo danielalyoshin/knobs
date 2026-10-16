@@ -47,9 +47,9 @@ ComPtr<IDWriteTextFormat> MakeTextFormat(const TextStyle& style);
 // The icons, from the site's sprite and signal path, as outlines to stroke
 // at 1.5 DIPs with SharpStroke, cut straight as the brand's icons are: the
 // stage icons in a 21-DIP box, the rest in a 16-DIP one, both at the origin.
-enum class Icon { kMic, kFilters, kCable, kApps, kChevron, kBoxCheck, kChevronDown, kChevronUp };
+enum class Icon { kMic, kFilters, kCable, kApps, kChevron, kBoxCheck, kChevronDown, kChevronUp, kPlay, kPause };
 // How many there are: one past the last.
-inline constexpr size_t kIconCount = static_cast<size_t>(Icon::kChevronUp) + 1;
+inline constexpr size_t kIconCount = static_cast<size_t>(Icon::kPause) + 1;
 ComPtr<ID2D1Geometry> IconGeometry(Icon icon);
 // The stage icons redrawn for 1-DIP strokes on whole pixels at 100%, where
 // a 1.5-DIP stroke can't be sharp; null for the others.

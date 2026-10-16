@@ -313,6 +313,10 @@ ComPtr<ID2D1Geometry> IconGeometry(Icon icon) {
     case Icon::kBoxCheck:
       // The state marks' check, its arms at 45 degrees.
       return PathGeometry("M4.4 7.6 7 10.2 11.6 5.6");
+    case Icon::kPlay:
+      return PathGeometry("M4.75 3v10L12.5 8z");
+    case Icon::kPause:
+      return PathGeometry("M5.25 3.25v9.5m5.5-9.5v9.5");
   }
   return nullptr;
 }

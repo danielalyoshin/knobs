@@ -533,14 +533,17 @@ float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
     image.in_panel = true;
     image.name = FromUtf8(view.walkthrough->alt);
     build.Add(std::move(image));
-    // The whole frame plays and pauses it, as its corner shows.
+    // Its play and pause: the brand's icon alone, as the site's icon-only
+    // video controls are, on a square in the picture's corner. A click on
+    // the picture plays and pauses it too.
     Element toggle;
     toggle.role = Role::kToggle;
     toggle.id = kWalkToggleId;
-    toggle.bounds = at;
+    toggle.bounds = Rect(at.right - 6 - kWalkToggle, at.bottom - 6 - kWalkToggle, kWalkToggle, kWalkToggle);
+    toggle.rects = {at};
     toggle.in_panel = true;
     toggle.focusable = true;
-    toggle.name = L"Play the walkthrough";
+    toggle.name = WalkToggleName(false);
     toggle.access_key = L'P';
     scene.walk_toggle = build.Add(std::move(toggle));
     y = std::max(y, at.bottom);
@@ -735,12 +738,6 @@ ID2D1Geometry* CachedIcon(Icon icon, bool crisp) {
 ID2D1Geometry* PointerArrow() {
   static const ComPtr<ID2D1PathGeometry> arrow = PathGeometry("M0 0V16L4 12.4 6.6 18.6 8.8 17.6 6.3 11.7H11.4z", true);
   return arrow.Get();
-}
-
-// Play, centred on the origin.
-ID2D1Geometry* PlayTriangle() {
-  static const ComPtr<ID2D1PathGeometry> triangle = PathGeometry("M-3.5 -5.5 6 0-3.5 5.5z", true);
-  return triangle.Get();
 }
 
 class Painter {
@@ -950,50 +947,27 @@ class Painter {
     target_->PopLayer();
   }
 
-  // The walkthrough's play or pause, on a disc in its frame's corner: the
-  // dark scheme's graphite in both, as it sits on screenshots of either, a
-  // step lighter under the pointer, with the state marks' pause bars. In high
-  // contrast, the disc is the user's window colour, ringed and marked with
-  // their text colour, and their highlight under the pointer.
-  void WalkToggle(const D2D1_RECT_F& frame, bool playing, bool hover) {
-    const D2D1_POINT_2F c = {frame.right - 19, frame.bottom - 19};
-    D2D1_COLOR_F glyph = TokenColor(tokens::kDark.text);
+  // The walkthrough's play and pause over its picture: the brand's play or
+  // pause icon on a square of the dark scheme's ground with its control
+  // edge, the same in both schemes, as it sits on screenshots of either.
+  // Under the pointer, over it or the picture, the edge and the icon turn
+  // the dark scheme's cap red, and pressed it goes sunken. In high contrast,
+  // the user's window and text colours, and their highlight under the
+  // pointer, with highlight text on it.
+  void WalkToggle(const D2D1_RECT_F& r, bool playing, bool hover, bool pressed) {
+    const tokens::Scheme& dark = tokens::kDark;
+    D2D1_COLOR_F fill = TokenColor(pressed ? dark.sunken : dark.ground);
+    D2D1_COLOR_F edge = TokenColor(hover ? dark.action : dark.line_strong);
+    D2D1_COLOR_F ink = TokenColor(hover ? dark.action : dark.text);
     if (palette_.mode == SetupMode::kHighContrast) {
-      target_->FillEllipse(D2D1::Ellipse(c, 13, 13), Brush(hover ? palette_.here : palette_.raised));
-      target_->DrawEllipse(D2D1::Ellipse(c, 12.5f, 12.5f), Brush(palette_.text), 1);
-      glyph = hover ? palette_.on_action_hover : palette_.text;
-    } else {
-      target_->FillEllipse(D2D1::Ellipse(c, 13, 13),
-                           Brush(TokenColor(hover ? tokens::kDark.raised_2 : tokens::kDark.ground)));
-      target_->DrawEllipse(D2D1::Ellipse(c, 12.5f, 12.5f), Brush(TokenColor(tokens::kDark.line_strong)), 1);
+      fill = hover ? palette_.hover : palette_.raised;
+      edge = hover ? palette_.hover : palette_.text;
+      ink = hover ? palette_.on_action_hover : palette_.text;
     }
-    if (playing) {
-      constexpr float kBox = 26;
-      const float s = kBox / 16;
-      const std::vector<D2D1_RECT_F>& bars = MarkRects(MarkShape::kPause);
-      for (const D2D1_RECT_F& bar : bars) {
-        target_->FillRectangle(PixelRect({c.x - kBox / 2 + bar.left * s, c.y - kBox / 2 + bar.top * s,
-                                          c.x - kBox / 2 + bar.right * s, c.y - kBox / 2 + bar.bottom * s}),
-                               Brush(glyph));
-      }
-      // A pause that isn't bars is drawn as it is.
-      if (bars.empty()) {
-        if (ID2D1Geometry* pause = MarkGeometry(MarkShape::kPause)) {
-          D2D1_MATRIX_3X2_F before;
-          target_->GetTransform(&before);
-          target_->SetTransform(D2D1::Matrix3x2F::Scale(s, s) *
-                                D2D1::Matrix3x2F::Translation(c.x - kBox / 2, c.y - kBox / 2) * before);
-          target_->FillGeometry(pause, Brush(glyph));
-          target_->SetTransform(before);
-        }
-      }
-    } else if (ID2D1Geometry* play = PlayTriangle()) {
-      D2D1_MATRIX_3X2_F before;
-      target_->GetTransform(&before);
-      target_->SetTransform(D2D1::Matrix3x2F::Translation(c.x, c.y) * before);
-      target_->FillGeometry(play, Brush(glyph));
-      target_->SetTransform(before);
-    }
+    Fill(r, fill, kRadius);
+    Border(r, edge, kRadius);
+    const float inset = (Width(r) - 16) / 2;
+    DrawIcon(playing ? Icon::kPause : Icon::kPlay, Rect(r.left + inset, r.top + inset, 16, 16), ink);
   }
 
   // The brand's focus ring: 2 DIPs wide, 2 outside the control.
@@ -1043,12 +1017,12 @@ int Scene::HitTest(D2D1_POINT_2F point, float scroll) const {
     if (!element.focusable) continue;
     if (element.in_panel && !Inside(inside_panel, point)) continue;
     const float dy = element.in_panel ? -scroll : 0;
-    if (element.role == Role::kLink) {
-      for (const D2D1_RECT_F& r : element.rects) {
-        if (Inside(Moved(r, 0, dy), point)) return i;
-      }
-    } else if (Inside(Moved(element.bounds, 0, dy), point)) {
-      return i;
+    // A link is its words' boxes. Another control is its bounds and any
+    // boxes it has besides, as the walkthrough's play and pause has its
+    // picture.
+    if (element.role != Role::kLink && Inside(Moved(element.bounds, 0, dy), point)) return i;
+    for (const D2D1_RECT_F& r : element.rects) {
+      if (Inside(Moved(r, 0, dy), point)) return i;
     }
   }
   return -1;
@@ -1094,6 +1068,10 @@ Scene LayoutScene(const PageView& view, int choice, bool more_open) {
                     false);
   }
   return scene;
+}
+
+std::wstring WalkToggleName(bool playing) {
+  return playing ? L"Pause the walkthrough" : L"Play the walkthrough";
 }
 
 float StageCentre(size_t stage) { return kStageX[stage] + kIcon / 2; }
@@ -1362,7 +1340,7 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         break;
       }
       case Role::kToggle:
-        p.WalkToggle(r, state.walk_playing, state.hover == index);
+        p.WalkToggle(r, state.walk_playing, hover, pressed);
         if (focused) p.FocusRing(r, kRadius);
         break;
       case Role::kLink: {

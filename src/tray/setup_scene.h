@@ -30,8 +30,14 @@ inline constexpr float kSetupHeight = 520;
 // boxes' ids (FirstRunId).
 inline constexpr int kWalkToggleId = 400;
 inline constexpr int kMoreChoicesId = 401;
-// The frame a guide's walkthrough plays in.
+// The frame a guide's walkthrough plays in, and the square its play and
+// pause sits on, in its corner.
 inline constexpr D2D1_SIZE_F kWalkFrame = {300, 188};
+inline constexpr float kWalkToggle = 28;
+
+// The walkthrough's play and pause, as screen readers name it: for what a
+// click does.
+std::wstring WalkToggleName(bool playing);
 
 // What a part of the page is, for the keyboard, the mouse and screen
 // readers.
@@ -52,7 +58,7 @@ enum class Role {
   kNote,
   kChain,
   kCheckBox,
-  kToggle,  // A toggle button: the walkthrough's play and pause.
+  kToggle,  // The walkthrough's play and pause: a button named for what it does.
   kStatus,  // What a waiting page waits for.
   kButton,
 };

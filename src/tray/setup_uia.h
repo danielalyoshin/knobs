@@ -51,6 +51,9 @@ class SetupUia {
   void SceneChanged(bool new_page, bool rebuilt, const std::wstring& heading);
   void FocusChanged(int element);
   void Toggled(int element, bool was_on);
+  // A control's name changed from `before`, as the walkthrough's play and
+  // pause's does with its word.
+  void NameChanged(int element, const std::wstring& before);
   void Selected(int element);
   // A dropdown opened, or closed.
   void Expanded(int element, bool open);

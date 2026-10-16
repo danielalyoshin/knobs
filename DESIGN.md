@@ -188,8 +188,16 @@ components:
   walkthrough-toggle:
     backgroundColor: "{colors.ground-dark}"
     textColor: "{colors.text-dark}"
-    rounded: "{rounded.round}"
-    size: "26px"
+    rounded: "{rounded.none}"
+    size: "28px"
+  walkthrough-toggle-hover:
+    textColor: "{colors.action-dark}"
+  tag:
+    textColor: "{colors.text-2}"
+    typography: "{typography.tag}"
+    rounded: "{rounded.none}"
+    padding: "0 7px"
+    height: "20px"
 ---
 
 # Design System: knobs
@@ -304,7 +312,7 @@ Square corners and true circles, from the brand's geometry (corner radius 0). Th
 
 Angles are 45°: the caret, the wire's arrowheads, the chevrons and the checks. The caret is the panel's top edge rising to a point under the current stage: two strokes in Text at 45°, each 6 DIPs across and 6 up, the panel's Raised filled behind them so the edge opens.
 
-Icons are drawn, not filled: 1.5 DIP strokes at any size, with butt caps and miter joins. The four stages (mic, sliders, plug, square app tiles) are drawn in a 20-unit square in a 21 DIP box, so the 1px wire runs through their centre; at 100% scale they are redrawn on pixel centres with a 1 DIP stroke to match the wire. Small icons (chevrons, the check box's check) use a 16-unit box. Round only where the thing is round: the mic's capsule, the sliders' knobs.
+Icons are drawn, not filled: 1.5 DIP strokes at any size, with butt caps and miter joins. The four stages (mic, sliders, plug, square app tiles) are drawn in a 20-unit square in a 21 DIP box, so the 1px wire runs through their centre; at 100% scale they are redrawn on pixel centres with a 1 DIP stroke to match the wire. Small icons (chevrons, the check box's check, the brand's play and pause) use a 16-unit box. Round only where the thing is round: the mic's capsule, the sliders' knobs.
 
 The state marks are the brand's, drawn from its `status_shape` paths, the glyph filled over the ground, never stroked; their shapes are in `brand/BRAND.md` (State marks). Their bars and dots land on whole device pixels.
 
@@ -322,7 +330,7 @@ The brand's buttons, right-aligned in the foot.
 - **Secondary:** a Cap Red outline with Action Text words on the Ground. Under the pointer it fills Cap Red with On Action words; pressed, a step deeper.
 - **Disabled:** the Ground with a Line Strong edge and Text 3 words.
 - **Focus:** the 2 DIP ring, 2 DIPs out, shown once the keyboard is used.
-- **Access keys:** every button, door and check box has one, and the walkthrough's toggle has P ("&Back" in the page's data). Its letter is underlined in the label's colour while Alt is held, until the mouse is used, or always when Windows is set to underline access keys; Alt and the letter, or the letter alone, clicks it.
+- **Access keys:** every button, door and check box has one, and the walkthrough's play and pause has P, with no word to underline ("&Back" in the page's data). Its letter is underlined in the label's colour while Alt is held, until the mouse is used, or always when Windows is set to underline access keys; Alt and the letter, or the letter alone, clicks it.
 
 ### Doors (command links)
 The first page's two ways in, full panel width.
@@ -349,7 +357,7 @@ The chain as it will run: Sunken fill, Line edge, square. The mic and the cable 
 Four stages on a wire. A stage's icon is in Text when it is the page's stage, Text 2 once known and Text 3 while unknown; its name is in Text on the page's stage and Text 2 elsewhere. The wire is Text from a set stage to the next one that is set or that the page is about, Text 3 elsewhere. As the signal reaches a stage the wire fills along and the caret slides under the new stage, over 320 ms on the brand's one curve, cubic-bezier(0.2, 0, 0, 1).
 
 ### Guide (signature)
-Numbered steps with the number in Text 3 at Numeral size, text in Body. Beside them, the walkthrough, in a square frame with a Line Strong edge. The step it shows has its number on a 20 DIP Text disc with Raised numerals, and so has the frame's top-left corner, ringed with 2 DIPs of Raised, and both move on as it does. A walkthrough is real screenshots of OBS, or of Windows and VB-CABLE's installer, at twice their size, with a camera that follows a drawn Windows arrow pointer (white, with a black edge, as big as Windows' own at the app's size) that clicks with a white ring growing from 4 to 20 DIPs across its radius and fading. Its play and pause sit on a 26 DIP opaque disc of the dark scheme's Ground (#191b1d, Raised 2 #25282c under the pointer) ringed with its Line Strong, in the frame's bottom-right corner, with a play triangle or the state marks' pause bars in its Text, the same in both schemes since it sits on screenshots of either. In high contrast it is a Window disc ringed and marked in WindowText, Highlight under the pointer, with the click's ring in Highlight and the pointer in Window and WindowText. The whole frame is the toggle, and its focus ring is the frame's. Without a picture the steps take the panel's full width.
+Numbered steps with the number in Text 3 at Numeral size, text in Body. Beside them, the walkthrough, in a square frame with a Line Strong edge. The step it shows has its number on a 20 DIP Text disc with Raised numerals, and so has the frame's top-left corner, ringed with 2 DIPs of Raised, and both move on as it does. A walkthrough is real screenshots of OBS, or of Windows and VB-CABLE's installer, at twice their size, with a camera that follows a drawn Windows arrow pointer (white, with a black edge, as big as Windows' own at the app's size) that clicks with a white ring growing from 4 to 20 DIPs across its radius and fading. Its play and pause sits over the picture, a 28 DIP square 6 DIPs in from the frame's bottom-right corner, with the brand's play or pause icon alone, as the site's icon-only video controls have it: the dark scheme's Ground (#191b1d) with its Line Strong edge and the icon in its Text, the same in both schemes since it sits on screenshots of either. Under the pointer, over it or anywhere on the picture, the edge and the icon turn the dark scheme's Cap Red (#df695e); pressed, its Sunken. Its focus ring is the brand's, round the square. In high contrast it is a Window square ringed and marked in WindowText, Highlight with HighlightText under the pointer, with the click's ring in Highlight and the pointer in Window and WindowText. A click on the picture plays and pauses it too. Without a picture the steps take the panel's full width.
 
 ### Notes and waiting
 Notes are body text 28 DIPs in, each led by a 14.5 DIP mark: the amber triangle for a warning, the "i" disc for information (graphite in light, turned over to white in dark). A page that waits shows a 7 DIP Text 3 dot in the foot, breathing between 35% and 100% opacity over 1.6 s, beside the status in Body Small, Text 2.

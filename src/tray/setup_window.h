@@ -124,6 +124,8 @@ class SetupWindow final : private SetupUiaHost {
   void StartWalk();
   void WalkStep();
   void SetWalkPlaying(bool playing);
+  // The play and pause's state and name, as walk_playing_ has it.
+  void ShowWalkPlaying();
   void SetWalkTime(float time);
   void PreloadWalk();
   bool WalkSeen() const;
