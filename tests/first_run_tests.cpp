@@ -685,8 +685,8 @@ TEST(StepsTheWalkthroughShowsJumpToIt) {
     if (!step.focusable) continue;
     CHECK(StepStart(*scene.walkthrough, step.id).has_value() && !step.help.empty());
     CHECK(scene.HitTest({step.bounds.left + 12, (step.bounds.top + step.bounds.bottom) / 2}, 0) == static_cast<int>(i));
-    // Its row and focus ring stay clear of the disc on the walkthrough's
-    // corner, 9 DIPs out with its ring.
+    // Its row stays clear of the disc on the walkthrough's corner, 9 DIPs
+    // out with its ring.
     CHECK(step.bounds.right + 4 < scene.walk.left - 9);
   }
   CHECK((ids == std::vector<int>{1, 2, 3, 0, 0}));

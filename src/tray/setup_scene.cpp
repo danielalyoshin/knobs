@@ -1398,8 +1398,10 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         if (focused) p.FocusRing(r, kRadius);
         break;
       case Role::kStep:
-        // Its row and number are items, under its words.
-        if (focused) p.FocusRing(r, kRadius);
+        // Its row and number are items, under its words. Rows touch, so its
+        // ring is drawn on the row's edge, clear of the next row's words and
+        // of its own disc.
+        if (focused) p.FocusRing(Grown(r, -3), kRadius);
         break;
       case Role::kLink: {
         for (const D2D1_RECT_F& line : e.underlines) p.HLine(line.left, line.right, line.top, palette.link_underline);
