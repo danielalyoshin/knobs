@@ -268,7 +268,8 @@ begin
 end;
 
 // VB-CABLE's task, which an update or any other silent install never runs:
-// its setup is a window of VB-Audio's. Not with a cable, nor with VB-CABLE
+// its setup asks for admin rights, and VB-Audio's licensing wants users to see
+// VB-CABLE named on the tasks page. Not with a cable, nor with VB-CABLE
 // installed but waiting for a restart, which knobs's first run says.
 function OfferVbCable(): Boolean;
 begin
@@ -350,6 +351,8 @@ begin
       VbCableNotInstalled('its installer couldn’t start (' + SysErrorMessage(Code) + ').');
     Exit;
   end;
+  // Hidden, its setup says nothing of how it went: its exit code is logged.
+  Log(Format('VB-CABLE''s setup ended with exit code %d.', [Code]));
   // Its devices take a moment to appear.
   Waited := 0;
   while not CableInstalled() and VbCablePending() and (Waited < CableWaitMs) do
@@ -360,8 +363,12 @@ begin
   if CableInstalled() then
     Exit;
   // knobs opens after the restart once its files are in (ssPostInstall).
-  if VbCablePending() then
+  // A restart helps only a driver that installed, which its setup says with
+  // 0, or with Windows' codes for a restart needed or started.
+  if VbCablePending() and ((Code = 0) or (Code = 3010) or (Code = 1641)) then
     VbCableNeedsRestart := True
+  else if Code <> 0 then
+    VbCableNotInstalled(Format('its installer ended with error %d.', [Code]))
   else
     VbCableNotInstalled('its installer ended without installing its driver.');
 end;
