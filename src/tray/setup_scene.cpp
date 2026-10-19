@@ -492,7 +492,8 @@ float LayoutChoices(const PageView& view, int choice, bool more_open, Builder& b
 }
 
 // The steps, with the page's walkthrough of them beside them. The step it
-// shows has its number on a disc, and so has the walkthrough's corner.
+// shows sits on a sunken row with its number on a disc, and so has the
+// walkthrough's corner. A step it shows is a control: a click jumps there.
 float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
   const float x = kContent.left;
   const float width = Width(kContent);
@@ -512,11 +513,21 @@ float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
     scene.digits[i + 1] = MakeText(std::to_string(number), Style(12, 20, DWRITE_FONT_WEIGHT_SEMI_BOLD), 20).layout;
     Text digits = MakeText(std::to_string(number), Style(14, 21, DWRITE_FONT_WEIGHT_SEMI_BOLD), 20);
     if (digits.layout) digits.layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    const Text text = MakeText(view.steps[i], Style(14, 21), steps_width - 30);
+    // Rows touch, as steps are 5 apart, and stop short of the corner's disc.
+    const D2D1_RECT_F row = Rect(x - 10, y - 2.5f, steps_width + 20, text.height + 5);
+    if (walk) build.AddItem({.kind = Item::Kind::kStepRow, .rect = row, .step = number, .in_panel = true});
     build.AddItem({.kind = Item::Kind::kNumeral, .rect = Rect(x, y, 20, 21), .tone = Tone::kText3, .text = digits.layout,
                    .step = number, .in_panel = true});
-    const Text text = MakeText(view.steps[i], Style(14, 21), steps_width - 30);
     const int step = build.Paragraph(text, x + 30, y, steps_width - 30, Tone::kText, true, Role::kStep, list_index);
     build.At(step).name = std::format(L"{}. {}", number, build.At(step).name);
+    if (walk && StepStart(*walk, number)) {
+      Element& control = build.At(step);
+      control.id = number;
+      control.bounds = row;
+      control.focusable = true;
+      control.help = L"Shows this step in the walkthrough";
+    }
     y += text.height + 5;
   }
   y -= 5;
@@ -890,10 +901,14 @@ class Painter {
   // A disc in the text colour with a number on it, the number's glyphs
   // centred on it.
   void Disc(const D2D1_RECT_F& box, IDWriteTextLayout* numeral, bool ring) {
+    Disc(box, numeral, ring, palette_.text, palette_.raised);
+  }
+  void Disc(const D2D1_RECT_F& box, IDWriteTextLayout* numeral, bool ring, const D2D1_COLOR_F& fill,
+            const D2D1_COLOR_F& ink) {
     const D2D1_POINT_2F c = {(box.left + box.right) / 2, (box.top + box.bottom) / 2};
     const float r = Width(box) / 2;
     if (ring) target_->FillEllipse(D2D1::Ellipse(c, r + 2, r + 2), Brush(palette_.raised));
-    target_->FillEllipse(D2D1::Ellipse(c, r, r), Brush(palette_.text));
+    target_->FillEllipse(D2D1::Ellipse(c, r, r), Brush(fill));
     if (!numeral) return;
     DWRITE_OVERHANG_METRICS over = {};
     numeral->GetOverhangMetrics(&over);
@@ -902,7 +917,7 @@ class Painter {
     const float glyph_top = -over.top;
     const float glyph_bottom = numeral->GetMaxHeight() + over.bottom;
     target_->DrawTextLayout({c.x - (glyph_left + glyph_right) / 2, c.y - (glyph_top + glyph_bottom) / 2}, numeral,
-                            Brush(palette_.raised));
+                            Brush(ink));
   }
 
   // A walkthrough at a moment, in `box`, clipped to `clip` in `layer`: its
@@ -1136,11 +1151,18 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
     return step > 0 && static_cast<size_t>(step) < scene.digits.size() ? scene.digits[static_cast<size_t>(step)].Get()
                                                                        : nullptr;
   };
-  // The link under the pointer, whose words take the link colour.
+  // The link under the pointer, whose words take the link colour, and the
+  // step, whose row and number light up.
   const Element* hover_link = nullptr;
-  if (state.hover >= 0 && static_cast<size_t>(state.hover) < scene.elements.size() &&
-      scene.elements[static_cast<size_t>(state.hover)].role == Role::kLink) {
-    hover_link = &scene.elements[static_cast<size_t>(state.hover)];
+  int hover_step = 0;
+  bool step_pressed = false;
+  if (state.hover >= 0 && static_cast<size_t>(state.hover) < scene.elements.size()) {
+    const Element& hovered = scene.elements[static_cast<size_t>(state.hover)];
+    if (hovered.role == Role::kLink) hover_link = &hovered;
+    if (hovered.role == Role::kStep && hovered.focusable) {
+      hover_step = hovered.id;
+      step_pressed = state.pressed == state.hover;
+    }
   }
 
   // The band.
@@ -1231,13 +1253,25 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         p.DrawMark(item.mark, {(item.rect.left + item.rect.right) / 2, (item.rect.top + item.rect.bottom) / 2},
                    Width(item.rect) * 14.5f / 16, nullptr);
         break;
-      case Item::Kind::kNumeral:
-        if (item.step == shown_step) {
-          p.Disc(Rect(item.rect.left, item.rect.top + 0.5f, 20, 20), digits(item.step), false);
-        } else if (item.text) {
-          target->DrawTextLayout({item.rect.left, item.rect.top}, item.text.Get(), p.Brush(Color(palette, item.tone)));
+      case Item::Kind::kStepRow:
+        if (item.step == shown_step || (item.step == hover_step && step_pressed)) {
+          p.Fill(item.rect, palette.sunken);
+        } else if (item.step == hover_step) {
+          p.Fill(item.rect, palette.raised_2);
         }
         break;
+      case Item::Kind::kNumeral: {
+        // Under the pointer, cap red, as a control's edge is.
+        const bool hover = item.step == hover_step;
+        if (item.step == shown_step) {
+          p.Disc(Rect(item.rect.left, item.rect.top + 0.5f, 20, 20), digits(item.step), false,
+                 hover ? palette.hover : palette.text, hover ? palette.on_action_hover : palette.raised);
+        } else if (item.text) {
+          target->DrawTextLayout({item.rect.left, item.rect.top}, item.text.Get(),
+                                 p.Brush(hover ? palette.hover : Color(palette, item.tone)));
+        }
+        break;
+      }
       case Item::Kind::kShownDisc:
         if (shown_step > 0) p.Disc(item.rect, digits(shown_step), item.ring);
         break;
@@ -1361,6 +1395,10 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
       }
       case Role::kToggle:
         p.WalkToggle(r, state.walk_playing, hover, pressed);
+        if (focused) p.FocusRing(r, kRadius);
+        break;
+      case Role::kStep:
+        // Its row and number are items, under its words.
         if (focused) p.FocusRing(r, kRadius);
         break;
       case Role::kLink: {

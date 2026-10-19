@@ -231,4 +231,11 @@ D2D1_RECT_F WalkView(const WalkFrame& frame, D2D1_SIZE_F size) {
   return {frame.centre.x - hw, frame.centre.y - hh, frame.centre.x + hw, frame.centre.y + hh};
 }
 
+std::optional<float> StepStart(const Walkthrough& walk, int step) {
+  for (const Walkthrough::Step& key : walk.steps) {
+    if (key.step == step) return key.at;
+  }
+  return std::nullopt;
+}
+
 }  // namespace knobs::tray

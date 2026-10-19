@@ -52,7 +52,7 @@ enum class Role {
   kRadio,
   kDropdown,  // Opens and closes a group's more choices, and says which is chosen.
   kStepList,
-  kStep,
+  kStep,  // Clicked, if the walkthrough shows it: the walkthrough jumps there.
   kPicture,
   kNoteList,
   kNote,
@@ -68,7 +68,9 @@ enum class Tone { kText, kText2, kText3 };
 
 struct Element {
   Role role = Role::kText;
-  int id = 0;       // A button's, door's, choice's or check box's (FirstRunId).
+  // A button's, door's, choice's or check box's (FirstRunId), or a step's
+  // number, if the walkthrough shows it.
+  int id = 0;
   int parent = -1;  // Its list or group, by index; -1 for the window.
   // In client DIPs, as laid out: the panel's parts move up as it scrolls.
   D2D1_RECT_F bounds{};
@@ -108,6 +110,7 @@ struct Item {
     kRule,     // A hairline along the rect's top.
     kIcon,     // `icon`, scaled to the rect, in `tone`.
     kMark,     // A badge, the rect's width across.
+    kStepRow,  // Behind step `step`: sunken while the walkthrough shows it.
     kNumeral,  // Step `step`'s number: on a disc while the walkthrough shows it.
     kShownDisc,  // The number of the step the walkthrough shows, on a disc.
     kWalkthrough,  // The scene's walkthrough, framed.

@@ -56,9 +56,11 @@ long ControlType(Role role) {
   return UIA_CustomControlTypeId;
 }
 
-bool Invokable(Role role) {
+// A step is, if the walkthrough shows it.
+bool Invokable(const Element& element) {
+  const Role role = element.role;
   return role == Role::kLink || role == Role::kDoor || role == Role::kButton || role == Role::kDropdown ||
-         role == Role::kToggle;
+         role == Role::kToggle || (role == Role::kStep && element.focusable);
 }
 
 bool Toggles(Role role) { return role == Role::kCheckBox; }
@@ -109,7 +111,7 @@ class Provider final : public IRawElementProviderSimple,
       *out = static_cast<IRawElementProviderFragment*>(this);
     } else if (iid == __uuidof(IRawElementProviderFragmentRoot) && index_ == kRoot) {
       *out = static_cast<IRawElementProviderFragmentRoot*>(this);
-    } else if (iid == __uuidof(IInvokeProvider) && element && Invokable(element->role)) {
+    } else if (iid == __uuidof(IInvokeProvider) && element && Invokable(*element)) {
       *out = static_cast<IInvokeProvider*>(this);
     } else if (iid == __uuidof(IToggleProvider) && element && Toggles(element->role)) {
       *out = static_cast<IToggleProvider*>(this);
@@ -141,7 +143,7 @@ class Provider final : public IRawElementProviderSimple,
     const Element* element = Live();
     if (index_ == kRoot) return S_OK;
     if (!element) return UIA_E_ELEMENTNOTAVAILABLE;
-    if ((pattern == UIA_InvokePatternId && Invokable(element->role)) ||
+    if ((pattern == UIA_InvokePatternId && Invokable(*element)) ||
         (pattern == UIA_TogglePatternId && Toggles(element->role)) ||
         (pattern == UIA_SelectionItemPatternId && element->role == Role::kRadio) ||
         (pattern == UIA_ExpandCollapsePatternId && element->role == Role::kDropdown)) {

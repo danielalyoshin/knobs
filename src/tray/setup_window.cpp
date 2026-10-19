@@ -380,8 +380,8 @@ LRESULT SetupWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       return 0;
     case WM_SETCURSOR:
       if (LOWORD(lparam) == HTCLIENT) {
-        const bool link = hover_ >= 0 && scene_.elements[static_cast<size_t>(hover_)].role == Role::kLink;
-        SetCursor(LoadCursorW(nullptr, link ? IDC_HAND : IDC_ARROW));
+        const Role role = hover_ >= 0 ? scene_.elements[static_cast<size_t>(hover_)].role : Role::kText;
+        SetCursor(LoadCursorW(nullptr, role == Role::kLink || role == Role::kStep ? IDC_HAND : IDC_ARROW));
         return TRUE;
       }
       break;
@@ -661,6 +661,14 @@ void SetupWindow::Activate(int index) {
     case Role::kToggle:
       SetWalkPlaying(!walk_playing_);
       break;
+    case Role::kStep:
+      // Jumps there, and plays on unless Windows' animations are off and it
+      // was paused.
+      if (const auto at = scene_.walkthrough ? StepStart(*scene_.walkthrough, element.id) : std::nullopt) {
+        SetWalkTime(*at);
+        SetWalkPlaying(walk_playing_ || animate_);
+      }
+      break;
     case Role::kDropdown: {
       more_open_ = !more_open_;
       // The same page, laid out again with it open or closed: the focus
@@ -837,7 +845,7 @@ void SetupWindow::OnKey(WPARAM key, bool repeat) {
       show_focus_ = true;
       // The control with the focus, or else the page's default button.
       if (focused && (focused->role == Role::kButton || focused->role == Role::kDoor || focused->role == Role::kLink ||
-                      focused->role == Role::kToggle || focused->role == Role::kDropdown)) {
+                      focused->role == Role::kToggle || focused->role == Role::kDropdown || focused->role == Role::kStep)) {
         Activate(focus_);
       } else if (scene_.default_element >= 0) {
         Activate(scene_.default_element);

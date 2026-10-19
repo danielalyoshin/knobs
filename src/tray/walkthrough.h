@@ -82,4 +82,8 @@ WalkFrame WalkAt(const Walkthrough& walk, float time, D2D1_SIZE_F frame);
 // What the camera sees at that moment, in the screenshots' pixels.
 D2D1_RECT_F WalkView(const WalkFrame& frame, D2D1_SIZE_F size);
 
+// When step `step` first lights up, which a click on it jumps to, or none if
+// the walkthrough doesn't show it.
+std::optional<float> StepStart(const Walkthrough& walk, int step);
+
 }  // namespace knobs::tray

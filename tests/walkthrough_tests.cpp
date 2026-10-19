@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -109,6 +110,19 @@ TEST(WalkthroughStepsLightUpInOrder) {
   CHECK(cable.step == 3);
   CHECK(vb.shots[static_cast<size_t>(cable.shot)].picture == "vb-run-as-admin");
   CHECK(Near(cable.pointer, {673, 620}));
+}
+
+TEST(WalkthroughJumpsToAStep) {
+  // A click on a step it shows jumps to where that step lights up; a step it
+  // doesn't show has nowhere to jump to.
+  for (const Expected& expected : All()) {
+    const Walkthrough& walk = *WalkthroughNamed(expected.name);
+    for (int step = 1; step <= 5; ++step) {
+      const std::optional<float> at = StepStart(walk, step);
+      CHECK(at.has_value() == (std::find(expected.steps.begin(), expected.steps.end(), step) != expected.steps.end()));
+      if (at) CHECK(WalkAt(walk, *at, kFrame).step == step);
+    }
+  }
 }
 
 TEST(WalkthroughStartsAgainWhereItBegan) {

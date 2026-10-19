@@ -655,6 +655,44 @@ TEST(TheWalkthroughPlaysAndPausesFromItsCornerOrItsPicture) {
   CHECK(scene.content_height <= scene.walk.bottom - scene.content.top + 1);
 }
 
+TEST(StepsTheWalkthroughShowsJumpToIt) {
+  core::Snapshot snapshot = Running();
+  snapshot.chain->filters.clear();
+  snapshot.mics[0].filters.clear();
+  FirstRun first_run({});
+  first_run.Click(kButtonNewToObs, 0, {}, snapshot);
+  const PageView view = first_run.View(snapshot);
+  const Scene scene = LayoutScene(view, view.default_choice, false);
+  CHECK(scene.walkthrough != nullptr);
+  // OBS's walkthrough shows the first three steps: each is a control, named
+  // by its number, that a click on its row, number and all, clicks. The last
+  // two aren't in it.
+  std::vector<int> ids;
+  for (size_t i = 0; i < scene.elements.size(); ++i) {
+    const Element& step = scene.elements[i];
+    if (step.role != Role::kStep) continue;
+    ids.push_back(step.focusable ? step.id : 0);
+    if (!step.focusable) continue;
+    CHECK(StepStart(*scene.walkthrough, step.id).has_value() && !step.help.empty());
+    CHECK(scene.HitTest({step.bounds.left + 12, (step.bounds.top + step.bounds.bottom) / 2}, 0) == static_cast<int>(i));
+    // Its row and focus ring stay clear of the disc on the walkthrough's
+    // corner, 9 DIPs out with its ring.
+    CHECK(step.bounds.right + 4 < scene.walk.left - 9);
+  }
+  CHECK((ids == std::vector<int>{1, 2, 3, 0, 0}));
+  // Every step has a row, for when the walkthrough shows it.
+  CHECK(std::count_if(scene.items.begin(), scene.items.end(),
+                      [](const Item& item) { return item.kind == Item::Kind::kStepRow; }) == 5);
+  // Without a walkthrough, steps are only words.
+  PageView plain = view;
+  plain.walkthrough.reset();
+  const Scene words = LayoutScene(plain, plain.default_choice, false);
+  CHECK(std::none_of(words.elements.begin(), words.elements.end(),
+                     [](const Element& element) { return element.role == Role::kStep && element.focusable; }));
+  CHECK(std::none_of(words.items.begin(), words.items.end(),
+                     [](const Item& item) { return item.kind == Item::Kind::kStepRow; }));
+}
+
 TEST(SoundIntoACableIsNoted) {
   // Installing a cable can make it Windows' Output: the user hears nothing,
   // and the cable's apps hear the PC with the mic.
