@@ -778,13 +778,18 @@ PageView Warnings(const core::Snapshot& snapshot) {
 
 PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool can_install_updates) {
   PageView view;
-  view.instruction = "Your mic is set up";
   core::ChainSummary chain = snapshot.chain.value_or(core::ChainSummary{});
   const std::string side = CableRecordingSide(chain.cable);
   chain.cable = ShortDeviceName(chain.cable);
   if (snapshot.chain) view.chain = chain;
+  // The one thing left to do, as the heading, which people read even when
+  // they skim the rest. Headings are plain text.
+  view.instruction =
+      std::format("In your other apps, choose {} as your mic", side.empty() ? "the matching recording device" : side);
+  // Most apps call it one or the other: Zoom's Microphone, Discord's Input Device.
   view.content = std::format(
-      "In your other apps, choose {0} as your mic.\n\n"
+      "Your mic is set up. In each app’s voice or audio settings, set <b>Microphone</b> or <b>Input device</b> to "
+      "{0}.\n\n"
       "{1} runs in the tray, next to the clock. If you don’t see its icon, click <b>^</b> (<b>Show hidden icons</b>). "
       "{2}",
       side.empty() ? std::format("the recording device that goes with {}", EscapeMarkup(chain.cable))

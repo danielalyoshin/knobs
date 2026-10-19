@@ -178,9 +178,11 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(picked.kind == Kind::kApply && picked.settings.cable == kCable16Id && picked.settings.cable_name == kCable16);
   CHECK(first_run.Page(Running()) == Page::kDone);
   const PageView done = first_run.View(Running());
-  CHECK(done.instruction == "Your mic is set up");
+  // What's left to do is the heading, so people who skim still see it.
+  CHECK(done.instruction == "In your other apps, choose CABLE Output as your mic");
   CHECK((done.chain == core::ChainSummary{"Mic/Aux", kFourFilters, "CABLE In 16ch"}));
-  CHECK(done.content.starts_with("In your other apps, choose <b>CABLE Output</b> as your mic."));
+  CHECK(done.content.starts_with("Your mic is set up. In each app’s voice or audio settings, set <b>Microphone</b> "
+                                 "or <b>Input device</b> to <b>CABLE Output</b>."));
   CHECK(done.stage == Stage::kApps);
   CHECK(Contains(done.content, "click <b>^</b> (<b>Show hidden icons</b>)"));
   CHECK(Contains(done.content, "It keeps running while OBS is open"));
@@ -562,8 +564,9 @@ TEST(CableThatIsntACable) {
   CHECK(kept.kind == Kind::kApply && kept.settings.cable == kHeadphonesId);
   snapshot.settings = kept.settings;
   CHECK(first_run.Page(snapshot) == Page::kDone);
-  CHECK(first_run.View(snapshot).content.starts_with(
-      "In your other apps, choose the recording device that goes with Headphones as your mic."));
+  CHECK(first_run.View(snapshot).instruction == "In your other apps, choose the matching recording device as your mic");
+  CHECK(Contains(first_run.View(snapshot).content,
+                 "set <b>Microphone</b> or <b>Input device</b> to the recording device that goes with Headphones."));
 
   // A cable picked before is asked about as any other, chosen.
   snapshot.settings = {.cable = kCable16Id, .cable_name = kCable16};
