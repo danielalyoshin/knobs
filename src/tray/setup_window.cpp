@@ -661,14 +661,18 @@ void SetupWindow::Activate(int index) {
     case Role::kToggle:
       SetWalkPlaying(!walk_playing_);
       break;
-    case Role::kStep:
-      // Jumps there, and plays on unless Windows' animations are off and it
-      // was paused.
-      if (const auto at = scene_.walkthrough ? StepStart(*scene_.walkthrough, element.id) : std::nullopt) {
-        SetWalkTime(*at);
-        SetWalkPlaying(walk_playing_ || animate_);
-      }
+    case Role::kStep: {
+      // Playing, it plays on from where the step starts. Paused, for any
+      // reason, it holds the step's still, and Play starts that step from its
+      // beginning. A pause without a click is a plain pause.
+      if (!scene_.walkthrough) break;
+      const Walkthrough& walk = *scene_.walkthrough;
+      const auto at = walk_playing_ ? StepStart(walk, element.id) : StepStill(walk, element.id);
+      if (!at) break;
+      SetWalkTime(*at);
+      walk_held_step_ = walk_playing_ ? 0 : element.id;
       break;
+    }
     case Role::kDropdown: {
       more_open_ = !more_open_;
       // The same page, laid out again with it open or closed: the focus
@@ -974,6 +978,7 @@ void SetupWindow::StartWalk() {
   if (window_) KillTimer(window_, kWalkTimer);
   walk_playing_ = false;
   walk_unseen_ = false;
+  walk_held_step_ = 0;
   walk_frame_.reset();
   if (!scene_.walkthrough) return;
   PreloadWalk();
@@ -993,6 +998,10 @@ void SetupWindow::SetWalkPlaying(bool playing) {
   if (!scene_.walkthrough || playing == walk_playing_) return;
   walk_playing_ = playing;
   walk_unseen_ = false;
+  if (playing && walk_held_step_ > 0) {
+    if (const auto start = StepStart(*scene_.walkthrough, walk_held_step_)) SetWalkTime(*start);
+  }
+  walk_held_step_ = 0;
   if (scene_.walk_toggle >= 0) {
     const std::wstring before = scene_.elements[static_cast<size_t>(scene_.walk_toggle)].name;
     ShowWalkPlaying();

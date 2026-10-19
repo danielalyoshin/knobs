@@ -39,6 +39,9 @@ struct Walkthrough {
   struct Step {
     float at = 0;
     int step = 1;  // From 1.
+    // The moment that shows the step best, held when a click on it finds the
+    // walkthrough paused. None: where it starts.
+    std::optional<float> still;
   };
   // From `from` until `until`, the camera turns from the pointer to look at
   // (x, y): what a click opened.
@@ -83,7 +86,11 @@ WalkFrame WalkAt(const Walkthrough& walk, float time, D2D1_SIZE_F frame);
 D2D1_RECT_F WalkView(const WalkFrame& frame, D2D1_SIZE_F size);
 
 // When step `step` first shows, once a screenshot coming in with it is in:
-// what a click on it jumps to. None if the walkthrough doesn't show it.
+// what a click on it jumps to while it plays. None if the walkthrough doesn't
+// show it.
 std::optional<float> StepStart(const Walkthrough& walk, int step);
+// The moment that shows step `step` best: what a click on it holds while it's
+// paused. None if the walkthrough doesn't show it.
+std::optional<float> StepStill(const Walkthrough& walk, int step);
 
 }  // namespace knobs::tray

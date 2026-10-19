@@ -126,6 +126,25 @@ TEST(WalkthroughJumpsToAStep) {
   }
 }
 
+TEST(WalkthroughHoldsAStepAtItsStill) {
+  // Paused, a click on a step holds the moment that shows it best: within
+  // the step, its screenshot in, the pointer at rest, and no click's ring.
+  for (const Expected& expected : All()) {
+    const Walkthrough& walk = *WalkthroughNamed(expected.name);
+    for (const int step : expected.steps) {
+      const std::optional<float> still = StepStill(walk, step);
+      CHECK(still.has_value() && *still >= *StepStart(walk, step));
+      if (!still) continue;
+      const WalkFrame frame = WalkAt(walk, *still, kFrame);
+      CHECK(frame.step == step && frame.under < 0 && !frame.ring);
+      CHECK(Near(WalkAt(walk, *still - 0.05f, kFrame).pointer, frame.pointer));
+    }
+    CHECK(!StepStill(walk, 5));
+  }
+  // The steps' own stills, past where they start.
+  CHECK(*StepStill(Obs(), 2) == 5.5f && *StepStill(Obs(), 3) == 11.0f && *StepStill(Obs(), 1) == 0);
+}
+
 TEST(WalkthroughStartsAgainWhereItBegan) {
   for (const Expected& expected : All()) {
     const Walkthrough& walk = *WalkthroughNamed(expected.name);

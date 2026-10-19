@@ -214,6 +214,9 @@ class SetupWindow final : private SetupUiaHost {
   std::optional<WalkFrame> walk_frame_;  // What it shows then.
   bool walk_playing_ = false;
   bool walk_unseen_ = false;  // Playing, but waiting for the user to see it.
+  // The step whose still a click holds while paused, which Play starts from
+  // its beginning; 0 for none.
+  int walk_held_step_ = 0;
   Clock::time_point walk_tick_;
 
   std::unique_ptr<SetupUia> uia_;

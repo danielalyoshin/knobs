@@ -57,7 +57,9 @@ Walkthrough ObsFilters() {
   // show the whole + menu, as it turns to it.
   walk.zoom = {{0, 0}, {1.6f, 0}, {3.0f, 0.42f}, {8.9f, 0.42f}, {9.7f, 0.27f}, {12.8f, 0.27f}, {13.4f, 0}};
   walk.clicks = {3.25f, 5.75f, 8.75f};
-  walk.steps = {{0, 1}, {1.6f, 2}, {5.9f, 3}, {12.5f, 1}};
+  // Held, step 2 shows Filters highlighted in Mic/Aux's menu, and step 3 the
+  // + menu open, with the pointer on +.
+  walk.steps = {{0, 1}, {1.6f, 2, 5.5f}, {5.9f, 3, 11.0f}, {12.5f, 1}};
   // The Filters window's list and the buttons under it, then straight on to
   // the + menu and + under it.
   walk.looks = {{5.95f, 8.9f, 760, 1010}, {8.9f, 13.6f, 790, 815}};
@@ -119,7 +121,9 @@ Walkthrough VbCableSetup() {
   // In once, and it stays in, following the pointer.
   walk.zoom = {{0, 0}, {1.4f, 0}, {2.6f, 0.42f}, {18.3f, 0.42f}, {18.9f, 0}};
   walk.clicks = {2.85f, 5.3f, 8.15f, 10.85f, 13.3f, 16.05f};
-  walk.steps = {{0, 2}, {8.3f, 3}, {13.45f, 4}, {18.0f, 2}};
+  // Held, each shows what to click, highlighted or under the pointer, just
+  // before the click: Extract All, Run as administrator, Install Driver.
+  walk.steps = {{0, 2, 5.1f}, {8.3f, 3, 13.1f}, {13.45f, 4, 15.9f}, {18.0f, 2}};
   walk.length = 19.1f;
   // Run as administrator, which is the one people miss.
   walk.still = 12.95f;
@@ -242,6 +246,13 @@ std::optional<float> StepStart(const Walkthrough& walk, int step) {
     return key.at;
   }
   return std::nullopt;
+}
+
+std::optional<float> StepStill(const Walkthrough& walk, int step) {
+  for (const Walkthrough::Step& key : walk.steps) {
+    if (key.step == step && key.still) return key.still;
+  }
+  return StepStart(walk, step);
 }
 
 }  // namespace knobs::tray
