@@ -498,8 +498,7 @@ TEST(CableThatsOffOrWaitsForARestart) {
   // Its devices came without the restart its setup, run by hand, asks for:
   // no need.
   CHECK((first_run.View(started).notes ==
-         std::vector<PageNote>{{false, "VB-CABLE is ready, so you don’t need to restart Windows, even if its setup "
-                                       "said to."}}));
+         std::vector<PageNote>{{false, "VB-CABLE is ready, so you don’t need to restart Windows."}}));
   CHECK(first_run.View(on).notes.empty());
 
   // The device knobs sends to is chosen in the dropdown, to go on with.
@@ -572,9 +571,10 @@ TEST(CableThatIsntACable) {
   CHECK(kept.kind == Kind::kApply && kept.settings.cable == kHeadphonesId);
   snapshot.settings = kept.settings;
   CHECK(first_run.Page(snapshot) == Page::kDone);
-  CHECK(first_run.View(snapshot).instruction == "In your other apps, choose the matching recording device as your mic");
-  CHECK(Contains(first_run.View(snapshot).content,
-                 "set <b>Microphone</b> or <b>Input device</b> to the recording device that goes with Headphones."));
+  // With no known recording side, there's no device to name in the heading.
+  CHECK(first_run.View(snapshot).instruction == "Your mic is set up");
+  CHECK(first_run.View(snapshot).content.starts_with(
+      "In your other apps, choose the recording device that goes with Headphones as your mic."));
 
   // A cable picked before is asked about as any other, chosen.
   snapshot.settings = {.cable = kCable16Id, .cable_name = kCable16};
@@ -687,13 +687,28 @@ TEST(StepsTheWalkthroughShowsJumpToIt) {
     CHECK(StepStart(*scene.walkthrough, step.id).has_value() && !step.help.empty());
     CHECK(scene.HitTest({step.bounds.left + 12, (step.bounds.top + step.bounds.bottom) / 2}, 0) == static_cast<int>(i));
     // Its row stays clear of the disc on the walkthrough's corner, 9 DIPs
-    // out with its ring.
+    // out with its ring, and inside the list's bounds, for screen readers.
     CHECK(step.bounds.right + 4 < scene.walk.left - 9);
+    const D2D1_RECT_F list = scene.elements[static_cast<size_t>(step.parent)].bounds;
+    CHECK(step.bounds.left >= list.left && step.bounds.top >= list.top && step.bounds.right <= list.right &&
+          step.bounds.bottom <= list.bottom);
   }
   CHECK((ids == std::vector<int>{1, 2, 3, 0, 0}));
-  // Every step has a row, for when the walkthrough shows it.
+  // Each step it shows has a row, for when it shows it.
   CHECK(std::count_if(scene.items.begin(), scene.items.end(),
-                      [](const Item& item) { return item.kind == Item::Kind::kStepRow; }) == 5);
+                      [](const Item& item) { return item.kind == Item::Kind::kStepRow; }) == 3);
+  // A step with a link stays words, so the link isn't a control inside one,
+  // though its row still lights up.
+  PageView linked = view;
+  linked.steps[0] = "Install OBS from <a href=\"https://obsproject.com/download\">obsproject.com</a>, and open it.";
+  const Scene with_link = LayoutScene(linked, linked.default_choice, false);
+  ids.clear();
+  for (const Element& element : with_link.elements) {
+    if (element.role == Role::kStep) ids.push_back(element.focusable ? element.id : 0);
+  }
+  CHECK((ids == std::vector<int>{0, 2, 3, 0, 0}));
+  CHECK(std::count_if(with_link.items.begin(), with_link.items.end(),
+                      [](const Item& item) { return item.kind == Item::Kind::kStepRow; }) == 3);
   // Without a walkthrough, steps are only words.
   PageView plain = view;
   plain.walkthrough.reset();

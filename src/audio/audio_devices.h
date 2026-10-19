@@ -37,6 +37,9 @@ std::string ShortDeviceName(std::string_view name);
 // Whether a playback device is a virtual cable (VB-Cable, VoiceMeeter, VB's
 // Hi-Fi Cable, Virtual Audio Cable), going by its name.
 bool IsVirtualCable(std::string_view name);
+// Whether it's VB-Audio's VB-CABLE itself, whose devices' names end in its
+// driver's: "CABLE Input (VB-Audio Virtual Cable)".
+bool IsVbCable(std::string_view name);
 
 // The recording side of a virtual cable's playback device, which other apps
 // choose as their mic, by its short name: CABLE Input and CABLE In 16ch go

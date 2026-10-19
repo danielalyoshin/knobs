@@ -516,12 +516,16 @@ float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
     const Text text = MakeText(view.steps[i], Style(14, 21), steps_width - 30);
     // Rows touch, as steps are 5 apart, and stop short of the corner's disc.
     const D2D1_RECT_F row = Rect(x - 10, y - 2.5f, steps_width + 20, text.height + 5);
-    if (walk) build.AddItem({.kind = Item::Kind::kStepRow, .rect = row, .step = number, .in_panel = true});
+    const bool shown = walk && StepStart(*walk, number);
+    if (shown) build.AddItem({.kind = Item::Kind::kStepRow, .rect = row, .step = number, .in_panel = true});
     build.AddItem({.kind = Item::Kind::kNumeral, .rect = Rect(x, y, 20, 21), .tone = Tone::kText3, .text = digits.layout,
                    .step = number, .in_panel = true});
     const int step = build.Paragraph(text, x + 30, y, steps_width - 30, Tone::kText, true, Role::kStep, list_index);
     build.At(step).name = std::format(L"{}. {}", number, build.At(step).name);
-    if (walk && StepStart(*walk, number)) {
+    // A step with a link stays words, so the link isn't a control inside one.
+    const bool links = std::any_of(text.spans.begin(), text.spans.end(),
+                                   [](const TextSpan& span) { return span.kind == TextSpan::Kind::kLink; });
+    if (shown && !links) {
       Element& control = build.At(step);
       control.id = number;
       control.bounds = row;
@@ -531,7 +535,9 @@ float LayoutGuide(const PageView& view, Builder& build, Scene& scene, float y) {
     y += text.height + 5;
   }
   y -= 5;
-  build.At(list_index).bounds = Rect(x, top, steps_width, y - top);
+  // Round the steps' rows too, which reach past their words.
+  build.At(list_index).bounds =
+      walk ? Rect(x - 10, top - 2.5f, steps_width + 20, y - top + 5) : Rect(x, top, steps_width, y - top);
   if (walk) {
     const D2D1_RECT_F at = Rect(x + width - kWalkFrame.width, top, kWalkFrame.width, kWalkFrame.height);
     scene.walk = at;
@@ -1253,13 +1259,24 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         p.DrawMark(item.mark, {(item.rect.left + item.rect.right) / 2, (item.rect.top + item.rect.bottom) / 2},
                    Width(item.rect) * 14.5f / 16, nullptr);
         break;
-      case Item::Kind::kStepRow:
-        if (item.step == shown_step || (item.step == hover_step && step_pressed)) {
-          p.Fill(item.rect, palette.sunken);
+      case Item::Kind::kStepRow: {
+        const D2D1_RECT_F row = {p.Snap(item.rect.left), p.Snap(item.rect.top), p.Snap(item.rect.right),
+                                 p.Snap(item.rect.bottom)};
+        if (palette.mode == SetupMode::kHighContrast) {
+          // Every ground is the window's: an edge, Highlight under the
+          // pointer, as a door's.
+          if (item.step == hover_step) {
+            p.Border(row, palette.hover, 0);
+          } else if (item.step == shown_step) {
+            p.Border(row, palette.text, 0);
+          }
+        } else if (item.step == shown_step || (item.step == hover_step && step_pressed)) {
+          p.Fill(row, palette.sunken);
         } else if (item.step == hover_step) {
-          p.Fill(item.rect, palette.raised_2);
+          p.Fill(row, palette.raised_2);
         }
         break;
+      }
       case Item::Kind::kNumeral: {
         // Under the pointer, cap red, as a control's edge is.
         const bool hover = item.step == hover_step;
@@ -1401,7 +1418,7 @@ void ScenePainter::Paint(ID2D1RenderTarget* target, const Scene& scene, const Se
         // Its row and number are items, under its words. Rows touch, so its
         // ring is drawn on the row's edge, clear of the next row's words and
         // of its own disc.
-        if (focused) p.FocusRing(Grown(r, -3), kRadius);
+        if (focused) p.FocusRing(Grown(r, -(tokens::geometry::kFocusOffset + tokens::geometry::kFocusWidth / 2)), kRadius);
         break;
       case Role::kLink: {
         for (const D2D1_RECT_F& line : e.underlines) p.HLine(line.left, line.right, line.top, palette.link_underline);

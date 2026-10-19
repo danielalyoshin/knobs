@@ -46,6 +46,8 @@ bool IsVirtualCable(std::string_view name) {
   return lower.find("vb-audio") != std::string::npos || lower.find("virtual audio cable") != std::string::npos;
 }
 
+bool IsVbCable(std::string_view name) { return AsciiLower(name).find("(vb-audio virtual cable)") != std::string::npos; }
+
 std::string CableRecordingSide(std::string_view name) {
   if (!IsVirtualCable(name)) return "";
   const std::string short_name = ShortDeviceName(name);

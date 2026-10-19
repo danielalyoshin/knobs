@@ -233,7 +233,13 @@ D2D1_RECT_F WalkView(const WalkFrame& frame, D2D1_SIZE_F size) {
 
 std::optional<float> StepStart(const Walkthrough& walk, int step) {
   for (const Walkthrough::Step& key : walk.steps) {
-    if (key.step == step) return key.at;
+    if (key.step != step) continue;
+    // A step often starts as a screenshot comes in: from there, paused, it
+    // would show the last step's.
+    for (size_t i = 1; i < walk.shots.size(); ++i) {
+      if (walk.shots[i].at == key.at) return key.at + walk.shots[i].fade;
+    }
+    return key.at;
   }
   return std::nullopt;
 }

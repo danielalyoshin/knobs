@@ -84,10 +84,8 @@ NoCable WhyNoCable(const core::Snapshot& snapshot) {
 // VB-CABLE was installed since Windows started, and its devices are already
 // here, although its setup, run by hand, says to restart.
 bool VbCableWithoutRestart(const core::Snapshot& snapshot) {
-  const std::vector<audio::AudioDevice> cables = VirtualCables(snapshot);
-  return snapshot.vb_cable_pending && std::any_of(cables.begin(), cables.end(), [](const audio::AudioDevice& cable) {
-           return AsciiLower(cable.name).find("vb-audio virtual cable") != std::string::npos;
-         });
+  return snapshot.vb_cable_pending && std::any_of(snapshot.outputs.begin(), snapshot.outputs.end(),
+                                                  [](const audio::AudioDevice& device) { return IsVbCable(device.name); });
 }
 
 // The core can't run without a cable being chosen or connected.
@@ -773,7 +771,7 @@ PageView Cable(const core::Snapshot& snapshot, int choice, bool windows11,
   view.default_button = kButtonNext;
   NoteSoundIntoCable(snapshot, view);
   if (VbCableWithoutRestart(snapshot)) {
-    view.notes.push_back({false, "VB-CABLE is ready, so you don’t need to restart Windows, even if its setup said to."});
+    view.notes.push_back({false, "VB-CABLE is ready, so you don’t need to restart Windows."});
   }
   return view;
 }
@@ -796,18 +794,25 @@ PageView Done(const core::Snapshot& snapshot, const FinishChoices& finish, bool 
   chain.cable = ShortDeviceName(chain.cable);
   if (snapshot.chain) view.chain = chain;
   // The one thing left to do, as the heading, which people read even when
-  // they skim the rest. Headings are plain text.
-  view.instruction =
-      std::format("In your other apps, choose {} as your mic", side.empty() ? "the matching recording device" : side);
-  // Most apps call it one or the other: Zoom's Microphone, Discord's Input Device.
+  // they skim the rest: the device, when it's known. Headings are plain text.
+  // Most apps call the setting one or the other: Zoom's Microphone, Discord's
+  // Input Device.
+  std::string pick;
+  if (side.empty()) {
+    view.instruction = "Your mic is set up";
+    pick = std::format("In your other apps, choose the recording device that goes with {} as your mic.",
+                       EscapeMarkup(chain.cable));
+  } else {
+    view.instruction = std::format("In your other apps, choose {} as your mic", side);
+    pick = std::format("Your mic is set up. In each app’s voice or audio settings, set <b>Microphone</b> or <b>Input "
+                       "device</b> to <b>{}</b>.",
+                       EscapeMarkup(side));
+  }
   view.content = std::format(
-      "Your mic is set up. In each app’s voice or audio settings, set <b>Microphone</b> or <b>Input device</b> to "
-      "{0}.\n\n"
+      "{0}\n\n"
       "{1} runs in the tray, next to the clock. If you don’t see its icon, click <b>^</b> (<b>Show hidden icons</b>). "
       "{2}",
-      side.empty() ? std::format("the recording device that goes with {}", EscapeMarkup(chain.cable))
-                   : std::format("<b>{}</b>", EscapeMarkup(side)),
-      kDisplayName, WhileObsIsOpen(snapshot));
+      pick, kDisplayName, WhileObsIsOpen(snapshot));
   switch (snapshot.state) {
     case State::kPausedForObs:
       view.content += std::format("\n\nOBS is open now, so {} starts when you close it.", kDisplayName);

@@ -89,6 +89,7 @@ std::string ObsUnsupportedLine(const runtime::ObsVersion& version);
 
 // Device names as the tray says them (audio_devices.h).
 using audio::CableRecordingSide;
+using audio::IsVbCable;
 using audio::IsVirtualCable;
 using audio::ShortDeviceName;
 

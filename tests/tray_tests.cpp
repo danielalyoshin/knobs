@@ -163,6 +163,10 @@ TEST(VirtualCablesAreToldApart) {
   CHECK(IsVirtualCable("Voicemeeter Input (VB-Audio Voicemeeter VAIO)"));
   CHECK(IsVirtualCable("Line 1 (Virtual Audio Cable)"));
   CHECK(!IsVirtualCable(kSpeakers));
+  // VB-CABLE itself, not VB-Audio's other cables.
+  CHECK(IsVbCable(kCable16) && IsVbCable("CABLE Input (VB-Audio Virtual Cable)"));
+  CHECK(!IsVbCable("CABLE-A Input (VB-Audio Cable A)") && !IsVbCable("Voicemeeter Input (VB-Audio Voicemeeter VAIO)"));
+  CHECK(!IsVbCable(kSpeakers));
   CHECK(!IsVirtualCable("Headphones (Audient iD4)"));
 }
 
