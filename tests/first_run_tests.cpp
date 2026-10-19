@@ -393,7 +393,9 @@ TEST(CableAppearsAndTheUserChoosesIt) {
   // Windows' name for the command stays on one line: no-break spaces.
   CHECK(Contains(view.steps[2], "right-click <code>VBCABLE_Setup_x64.exe</code>, choose <b>Run\xC2\xA0" "as\xC2\xA0"
                                 "administrator</b>, then <b>Yes</b>"));
-  CHECK(view.steps[3] == "Click <b>Install Driver</b>.");
+  // Its setup says to restart, which this page answers.
+  CHECK(view.steps[3] ==
+        "Click <b>Install Driver</b>. If it then says to restart Windows, wait: this page says if you need to.");
   CHECK(view.walkthrough && view.walkthrough->name == "vb-cable-setup");
   CHECK(view.status ==
         std::format("Waiting for a virtual cable. {} shows it here as soon as one appears.", kDisplayName));
@@ -493,6 +495,11 @@ TEST(CableThatsOffOrWaitsForARestart) {
   core::Snapshot started = restart;
   started.outputs.push_back({kCableInput, kCableInputId});
   CHECK(first_run.Changed(restart, started).kind == Kind::kNone && first_run.Page(started) == Page::kCable);
+  // Its devices came without the restart its setup asks for: no need.
+  CHECK((first_run.View(started).notes ==
+         std::vector<PageNote>{{false, "VB-CABLE’s setup says to restart Windows, but you don’t need to: its devices "
+                                       "are already here."}}));
+  CHECK(first_run.View(on).notes.empty());
 
   // The device knobs sends to is chosen in the dropdown, to go on with.
   core::Snapshot keep = restart;

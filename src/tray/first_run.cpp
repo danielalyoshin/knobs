@@ -81,6 +81,15 @@ NoCable WhyNoCable(const core::Snapshot& snapshot) {
   return NoCable::kNone;
 }
 
+// VB-CABLE was installed since Windows started, and its devices are already
+// here, although its setup says to restart.
+bool VbCableWithoutRestart(const core::Snapshot& snapshot) {
+  const std::vector<audio::AudioDevice> cables = VirtualCables(snapshot);
+  return snapshot.vb_cable_pending && std::any_of(cables.begin(), cables.end(), [](const audio::AudioDevice& cable) {
+           return AsciiLower(cable.name).find("vb-audio virtual cable") != std::string::npos;
+         });
+}
+
 // The core can't run without a cable being chosen or connected.
 bool NeedsCable(const core::Snapshot& snapshot) {
   return (snapshot.state == State::kNeedsSetup && snapshot.setup == SetupNeed::kCable) ||
@@ -726,7 +735,8 @@ PageView Cable(const core::Snapshot& snapshot, int choice, bool windows11,
     view.instruction = "Install a virtual cable";
     view.content = "There’s no virtual cable on this PC yet. VB-CABLE, from VB-Audio, is one. To install it:";
     // VB-Audio's driver pack (VBCABLE_Driver_Pack45.zip) and its setup. Its
-    // devices don't wait for a restart; when they do, this page says so.
+    // setup says to restart, but its devices may not wait for one: this page
+    // says which.
     view.steps = {
         // The address first, so it isn't split across lines.
         std::format("From <a href=\"{}\"><code>vb-audio.com/Cable</code></a>, download its driver pack.", kVbCableUrl),
@@ -734,7 +744,7 @@ PageView Cable(const core::Snapshot& snapshot, int choice, bool windows11,
         std::format("In the extracted folder, right-click <code>VBCABLE_Setup_x64.exe</code>, choose <b>{}</b>, then "
                     "<b>Yes</b>.",
                     NoBreak("Run as administrator")),
-        "Click <b>Install Driver</b>."};
+        "Click <b>Install Driver</b>. If it then says to restart Windows, wait: this page says if you need to."};
     view.walkthrough = PageWalkthrough{"vb-cable-setup",
                                        "A walkthrough in Windows: the driver pack extracted with Extract All, VBCABLE_Setup_x64 "
                                        "run as administrator, then Install Driver clicked in VB-CABLE’s setup"};
@@ -762,6 +772,10 @@ PageView Cable(const core::Snapshot& snapshot, int choice, bool windows11,
   }
   view.default_button = kButtonNext;
   NoteSoundIntoCable(snapshot, view);
+  if (VbCableWithoutRestart(snapshot)) {
+    view.notes.push_back({false, "VB-CABLE’s setup says to restart Windows, but you don’t need to: its devices are "
+                                 "already here."});
+  }
   return view;
 }
 

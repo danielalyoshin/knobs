@@ -160,6 +160,8 @@ var
   // VB-CABLE's driver was installed, but its devices wait for Windows to
   // restart.
   VbCableNeedsRestart: Boolean;
+  // A cable appeared after VB-CABLE's setup, which says to restart anyway.
+  VbCableInstalled: Boolean;
   // The RunOnce entry that opens knobs after that restart couldn't be written.
   NoResume: Boolean;
 
@@ -354,7 +356,10 @@ begin
     Waited := Waited + 500;
   end;
   if CableInstalled() then
+  begin
+    VbCableInstalled := True;
     Exit;
+  end;
   // knobs opens after the restart once its files are in (ssPostInstall).
   if VbCablePending() then
     VbCableNeedsRestart := True
@@ -386,12 +391,26 @@ begin
 end;
 
 // The finish page says knobs opens again after the restart (FinishedRestartLabel),
-// unless its RunOnce entry couldn't be written.
+// unless its RunOnce entry couldn't be written. With a cable and no restart,
+// it answers VB-CABLE's setup, which says to restart: the cable here is the
+// registry's, which Windows' device list can lag, so knobs's first run, which
+// reads that list, is what says whether to.
 procedure CurPageChanged(CurPageID: Integer);
+var
+  Grew: Integer;
 begin
   if (CurPageID = wpFinished) and NoResume then
     WizardForm.FinishedLabel.Caption := 'To finish installing VB-CABLE, Windows has to restart. Open {#AppName} ' +
                                        'after the restart, to carry on setting up. Would you like to restart now?';
+  if (CurPageID = wpFinished) and VbCableInstalled then
+  begin
+    WizardForm.FinishedLabel.Caption := 'If VB-CABLE’s setup said to restart Windows, there’s no need yet: ' +
+                                       '{#AppName} tells you if Windows has to.' + #13#10#13#10 +
+                                       WizardForm.FinishedLabel.Caption;
+    // The page was laid out for the shorter text.
+    Grew := WizardForm.AdjustLabelHeight(WizardForm.FinishedLabel);
+    WizardForm.RunList.Top := WizardForm.RunList.Top + Grew;
+  end;
 end;
 
 // After an update, knobs starts again: the new copy, or this one if the
