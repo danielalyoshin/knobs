@@ -11,8 +11,8 @@
 ;
 ; With no virtual cable on the PC, it offers to install VB-CABLE: VB-Audio's
 ; driver pack, which it carries as VB-Audio ships it (VbCablePack), and whose
-; own setup it runs, which asks for admin rights. Uninstalling knobs leaves
-; VB-CABLE, which other apps may use.
+; own setup it runs unattended, which asks for admin rights. Uninstalling knobs
+; leaves VB-CABLE, which other apps may use.
 ;
 ; knobs runs it to update itself (src/main.cpp, StartInstaller), very silent
 ; with /update=1: then it starts knobs again as it ends, with --updated,
@@ -90,7 +90,7 @@ SignedUninstaller=yes
 ; The tasks page, which only VB-CABLE's task shows. The last two sentences
 ; are VB-Audio's own words, which its licence asks bundlers to show.
 SelectTasksDesc=There’s no virtual cable on this PC yet.
-SelectTasksLabel2={#AppName} sends your mic to a virtual cable, a sound device that exists only in software, which your other apps choose as their mic. Setup can install VB-CABLE, VB-Audio’s virtual cable, by running VB-Audio’s own installer. Windows asks you to let it install its driver.%n%nThe origin of VB-CABLE: www.vb-cable.com. VB-CABLE is a donationware, all participations are welcome.
+SelectTasksLabel2={#AppName} sends your mic to a virtual cable, a sound device that exists only in software, which your other apps choose as their mic. Setup can install VB-CABLE, VB-Audio’s virtual cable, by running VB-Audio’s own installer in the background. Windows asks you to let it install its driver.%n%nThe origin of VB-CABLE: www.vb-cable.com. VB-CABLE is a donationware, all participations are welcome.
 ; Only VB-CABLE asks for a restart (NeedRestart), not knobs.
 FinishedRestartLabel=To finish installing VB-CABLE, Windows has to restart. [name] opens again after the restart, to carry on setting up. Would you like to restart now?
 FinishedRestartMessage=To finish installing VB-CABLE, Windows has to restart. [name] opens again after the restart, to carry on setting up.%n%nWould you like to restart now?
@@ -160,8 +160,6 @@ var
   // VB-CABLE's driver was installed, but its devices wait for Windows to
   // restart.
   VbCableNeedsRestart: Boolean;
-  // A cable appeared after VB-CABLE's setup, which says to restart anyway.
-  VbCableInstalled: Boolean;
   // The RunOnce entry that opens knobs after that restart couldn't be written.
   NoResume: Boolean;
 
@@ -310,8 +308,12 @@ begin
                      'to install it, step by step.', mbInformation, MB_OK, IDOK);
 end;
 
-// Unzips VB-Audio's driver pack and runs its setup, as knobs's guide does by
-// hand: its window, which asks for admin rights. Then waits for the cable.
+// Unzips VB-Audio's driver pack and runs its setup, which asks for admin
+// rights, unattended: -i installs and -h hides its window, so there's no
+// Install Driver to click, no restart message and no website (VB-Audio's
+// forum gives the switches; its licensing allows a silent install that the
+// user can tell is VB-CABLE, which the tasks page says). Then waits for the
+// cable.
 // If VB-CABLE's driver was installed but its devices don't appear, Windows
 // has to restart, which Setup then asks for. If it wasn't, as when Windows'
 // prompt was declined, knobs's first run shows how to install it by hand.
@@ -324,8 +326,8 @@ begin
   ForceDirectories(Folder);
   ExtractTemporaryFile('{#VbCablePackName}');
   Pack := ExpandConstant('{tmp}\{#VbCablePackName}');
-  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE. In its window, click Install Driver, then close that window.';
-  WizardForm.FilenameLabel.Caption := 'VB-Audio’s website may then open in your browser.';
+  WizardForm.StatusLabel.Caption := 'Installing VB-CABLE, VB-Audio’s virtual cable.';
+  WizardForm.FilenameLabel.Caption := 'Windows asks you to let it install its driver.';
   VbCableRan := True;
   // tar, which ships with Windows, unzips it.
   if not Exec(ExpandConstant('{sys}\tar.exe'), '-xf "' + Pack + '" -C "' + Folder + '"', Folder, SW_HIDE,
@@ -339,7 +341,7 @@ begin
     VbCableNotInstalled(Format('its driver pack couldn’t be unpacked (error %d).', [Code]));
     Exit;
   end;
-  if not ShellExec('runas', Folder + '\VBCABLE_Setup_x64.exe', '', Folder, SW_SHOWNORMAL, ewWaitUntilTerminated,
+  if not ShellExec('runas', Folder + '\VBCABLE_Setup_x64.exe', '-i -h', Folder, SW_SHOWNORMAL, ewWaitUntilTerminated,
                    Code) then
   begin
     if Code = ErrorCancelled then
@@ -356,15 +358,12 @@ begin
     Waited := Waited + 500;
   end;
   if CableInstalled() then
-  begin
-    VbCableInstalled := True;
     Exit;
-  end;
   // knobs opens after the restart once its files are in (ssPostInstall).
   if VbCablePending() then
     VbCableNeedsRestart := True
   else
-    VbCableNotInstalled('its installer closed without installing its driver.');
+    VbCableNotInstalled('its installer ended without installing its driver.');
 end;
 
 function NeedRestart(): Boolean;
@@ -391,26 +390,12 @@ begin
 end;
 
 // The finish page says knobs opens again after the restart (FinishedRestartLabel),
-// unless its RunOnce entry couldn't be written. With a cable and no restart,
-// it answers VB-CABLE's setup, which says to restart: the cable here is the
-// registry's, which Windows' device list can lag, so knobs's first run, which
-// reads that list, is what says whether to.
+// unless its RunOnce entry couldn't be written.
 procedure CurPageChanged(CurPageID: Integer);
-var
-  Grew: Integer;
 begin
   if (CurPageID = wpFinished) and NoResume then
     WizardForm.FinishedLabel.Caption := 'To finish installing VB-CABLE, Windows has to restart. Open {#AppName} ' +
                                        'after the restart, to carry on setting up. Would you like to restart now?';
-  if (CurPageID = wpFinished) and VbCableInstalled then
-  begin
-    WizardForm.FinishedLabel.Caption := 'If VB-CABLE’s setup said to restart Windows, there’s no need yet: ' +
-                                       '{#AppName} tells you if Windows has to.' + #13#10#13#10 +
-                                       WizardForm.FinishedLabel.Caption;
-    // The page was laid out for the shorter text.
-    Grew := WizardForm.AdjustLabelHeight(WizardForm.FinishedLabel);
-    WizardForm.RunList.Top := WizardForm.RunList.Top + Grew;
-  end;
 end;
 
 // After an update, knobs starts again: the new copy, or this one if the

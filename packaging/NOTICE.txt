@@ -18,10 +18,11 @@ notices: the GNU General Public License, version 2 or later, or the ISC license.
 
 The installer can also install VB-CABLE, a virtual cable by VB-Audio
 Software, when the PC has no virtual cable. It carries VB-CABLE’s driver pack
-as VB-Audio ships it, and runs VB-Audio’s own installer, as VB-Audio allows
-(https://vb-audio.com/Services/licensing.htm). VB-CABLE comes from
-www.vb-cable.com, and isn’t covered by the GPL. VB-CABLE is a donationware,
-all participations are welcome. Uninstalling @NAME@ leaves it installed.
+as VB-Audio ships it, and runs VB-Audio’s own installer unattended, as
+VB-Audio allows (https://vb-audio.com/Services/licensing.htm). VB-CABLE
+comes from www.vb-cable.com, and isn’t covered by the GPL. VB-CABLE is a
+donationware, all participations are welcome. Uninstalling @NAME@ leaves it
+installed.
 
 The @NAME@ name and logo are trademarks of Daniel Alyoshin. The logo, which is
 also the app’s icon, isn’t covered by the GPL: TRADEMARKS.md in the source

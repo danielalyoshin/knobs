@@ -82,7 +82,7 @@ NoCable WhyNoCable(const core::Snapshot& snapshot) {
 }
 
 // VB-CABLE was installed since Windows started, and its devices are already
-// here, although its setup says to restart.
+// here, although its setup, run by hand, says to restart.
 bool VbCableWithoutRestart(const core::Snapshot& snapshot) {
   const std::vector<audio::AudioDevice> cables = VirtualCables(snapshot);
   return snapshot.vb_cable_pending && std::any_of(cables.begin(), cables.end(), [](const audio::AudioDevice& cable) {
@@ -773,8 +773,7 @@ PageView Cable(const core::Snapshot& snapshot, int choice, bool windows11,
   view.default_button = kButtonNext;
   NoteSoundIntoCable(snapshot, view);
   if (VbCableWithoutRestart(snapshot)) {
-    view.notes.push_back({false, "VB-CABLE’s setup says to restart Windows, but you don’t need to: its devices are "
-                                 "already here."});
+    view.notes.push_back({false, "VB-CABLE is ready, so you don’t need to restart Windows, even if its setup said to."});
   }
   return view;
 }

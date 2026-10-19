@@ -117,7 +117,7 @@ OBS’s [Filters Guide](https://obsproject.com/kb/filters-guide) has more on eac
 
 Download knobs from the [latest release](https://github.com/danielalyoshin/knobs/releases/latest). There are two ways to run it:
 
-- **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end. With no virtual cable on your PC, it offers to install VB-CABLE, VB-Audio’s virtual cable: VB-Audio’s own installer opens, Windows asks to let it install its driver, and you click **Install Driver**. VB-Audio’s website may then open in your browser. If Windows has to restart before the cable appears, the installer asks, and knobs opens again after the restart.
+- **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end. With no virtual cable on your PC, it offers to install VB-CABLE, VB-Audio’s virtual cable: it runs VB-Audio’s own installer in the background, and Windows asks to let it install its driver. If Windows has to restart before the cable appears, the installer asks, and knobs opens again after the restart.
 - **The portable zip**, `knobs-<version>-portable.zip`. Unzip it anywhere and run `knobs.exe`. It keeps its settings and its data in a `data` folder beside the exe, and nothing in your user folders.
 
 knobs is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows SmartScreen may still warn about a new release until enough people have run it. Choose **More info**, then **Run anyway**.
@@ -288,7 +288,7 @@ If knobs sounds different from OBS, include the output of `knobs-import` and the
 
 knobs’s code is licensed under **GPL-2.0-or-later**, the same as libobs. See [LICENSE](LICENSE). `third_party/libobs` holds headers from obs-studio under their own notices, GPL-2.0-or-later or ISC. knobs ships no OBS binaries: it runs the OBS you installed.
 
-The installer can install VB-CABLE, VB-Audio’s virtual cable, from [www.vb-cable.com](https://vb-cable.com). It carries VB-Audio’s driver pack unchanged and runs VB-Audio’s own installer, as [VB-Audio’s licensing](https://vb-audio.com/Services/licensing.htm) allows. VB-CABLE isn’t covered by the GPL. In VB-Audio’s words, “VB-CABLE is a donationware, all participations are welcome.”
+The installer can install VB-CABLE, VB-Audio’s virtual cable, from [www.vb-cable.com](https://vb-cable.com). It carries VB-Audio’s driver pack unchanged and runs VB-Audio’s own installer, unattended, as [VB-Audio’s licensing](https://vb-audio.com/Services/licensing.htm) allows. VB-CABLE isn’t covered by the GPL. In VB-Audio’s words, “VB-CABLE is a donationware, all participations are welcome.”
 
 The knobs name and logo are trademarks of Daniel Alyoshin. The logo files, the masters in [knobs-brand](https://github.com/danielalyoshin/knobs-brand) and the icons rendered from them in [`assets/`](assets/), aren’t under the GPL: you can share them unmodified and use them to refer to knobs, and a fork that you distribute needs its own name and icon. [TRADEMARKS.md](TRADEMARKS.md) has the details.
 

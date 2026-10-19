@@ -495,10 +495,11 @@ TEST(CableThatsOffOrWaitsForARestart) {
   core::Snapshot started = restart;
   started.outputs.push_back({kCableInput, kCableInputId});
   CHECK(first_run.Changed(restart, started).kind == Kind::kNone && first_run.Page(started) == Page::kCable);
-  // Its devices came without the restart its setup asks for: no need.
+  // Its devices came without the restart its setup, run by hand, asks for:
+  // no need.
   CHECK((first_run.View(started).notes ==
-         std::vector<PageNote>{{false, "VB-CABLE’s setup says to restart Windows, but you don’t need to: its devices "
-                                       "are already here."}}));
+         std::vector<PageNote>{{false, "VB-CABLE is ready, so you don’t need to restart Windows, even if its setup "
+                                       "said to."}}));
   CHECK(first_run.View(on).notes.empty());
 
   // The device knobs sends to is chosen in the dropdown, to go on with.
